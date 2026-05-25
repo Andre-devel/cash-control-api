@@ -537,25 +537,25 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `JwtAuthenticationFilter.java`:
+- [x] Create `JwtAuthenticationFilter.java`:
   - Reads `Authorization: Bearer <token>` from each request
   - Validates the JWT signature using the shared secret / public key
   - Extracts `userId` (subject) and populates `SecurityContextHolder`
   - Returns 401 on invalid or missing tokens
-- [ ] Create `SecurityConfig.java` — `@Configuration @EnableMethodSecurity`:
+- [x] Create `SecurityConfig.java` — `@Configuration @EnableMethodSecurity`:
   - Disable CSRF (stateless API)
   - Permit unauthenticated access to `/actuator/health`, `/actuator/info`, `/v3/api-docs/**`, `/swagger-ui/**`
   - Require authentication for all other endpoints
   - Register `JwtAuthenticationFilter` before `UsernamePasswordAuthenticationFilter`
-- [ ] Create `CurrentUser.java` annotation — `@AuthenticationPrincipal` shorthand for controller parameters
+- [x] Create `CurrentUser.java` annotation — `@AuthenticationPrincipal` shorthand for controller parameters
 
 **Acceptance Criteria:**
-- [ ] Requests with a valid JWT proceed; requests without one are rejected with 401
-- [ ] `userId` is extractable from the security context in any service method
+- [x] Requests with a valid JWT proceed; requests without one are rejected with 401
+- [x] `userId` is extractable from the security context in any service method
 
 **Automated Tests:**
-- [ ] `JwtAuthenticationFilterTest` — unit tests for valid, expired, malformed, and missing tokens
-- [ ] `SecurityConfigIntegrationTest` — asserts public endpoints are accessible without auth; protected endpoints return 401
+- [x] `JwtAuthenticationFilterTest` — unit tests for valid, expired, malformed, and missing tokens
+- [x] `SecurityConfigIntegrationTest` — asserts public endpoints are accessible without auth; protected endpoints return 401
 
 ---
 
@@ -563,18 +563,18 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `SecurityUtils.java`:
+- [x] Create `SecurityUtils.java`:
   - `getCurrentUserId()` — extracts UUID from `SecurityContextHolder`
   - Throws `ForbiddenAccessException` if context is empty
-- [ ] Create `UserScopedRepository.java` marker interface — documents that all implementations must include `user_id` predicates
-- [ ] Create `CorrelationIdFilter.java` — sets a `X-Correlation-ID` on each request/response for log tracing
+- [x] Create `UserScopedRepository.java` marker interface — documents that all implementations must include `user_id` predicates
+- [x] Create `CorrelationIdFilter.java` — sets a `X-Correlation-ID` on each request/response for log tracing
 
 **Acceptance Criteria:**
-- [ ] `SecurityUtils.getCurrentUserId()` works in any service method during an authenticated request
-- [ ] Correlation ID is present in all log lines and response headers
+- [x] `SecurityUtils.getCurrentUserId()` works in any service method during an authenticated request
+- [x] Correlation ID is present in all log lines and response headers
 
 **Automated Tests:**
-- [ ] `SecurityUtilsTest` — asserts correct UUID is returned from the security context
+- [x] `SecurityUtilsTest` — asserts correct UUID is returned from the security context
 
 ---
 
