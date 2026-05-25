@@ -1,0 +1,22 @@
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.mail.autoconfigure.MailSenderAutoConfiguration
+      - org.springframework.boot.mail.autoconfigure.MailSenderValidatorAutoConfiguration
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+management:
+  health:
+    mail:
+      enabled: false
+
+logging:
+  level:
+    com.cashcontrol.api: DEBUG
+    org.springframework.security: DEBUG
+    org.flywaydb: DEBUG
+    org.springframework.web: DEBUG

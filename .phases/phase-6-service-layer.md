@@ -1,0 +1,266 @@
+## Phase 6 — Service Layer
+
+**Objective:** Implement all business logic services. Each service encapsulates a domain. Services depend on repository interfaces, not concrete classes. All audit events are recorded through `AuditService`.
+
+**Dependencies:** Phases 3, 4, 5 complete.
+
+**Complexity:** High
+
+### Phase 6.1 — Audit Service
+
+**Implementation Tasks:**
+
+- [ ] Create `AuditService.java` (interface) + `AuditServiceImpl.java`:
+  - `record(AuditEventSlug eventSlug, AuditOutcomeSlug outcome, UUID actorId, UUID targetId, Map<String, Object> metadata)`
+  - Resolves `AuditEventType` and `AuditOutcome` entities by slug (cached lookup)
+  - Runs `AuditMetadataSanitizer.sanitize()` on metadata before persistence
+  - Populates `ipAddressMasked`, `userAgentTruncated`, `correlationId` from request context
+  - Saves `AuditLog` via `AuditLogRepository`
+  - Method is `@Async` — audit persistence does not block the main request thread
+  - Errors in audit persistence are caught and logged (never propagate to caller)
+- [ ] Create `AuditEventSlug.java` enum — constants matching seeded `audit_event_types.slug` values
+- [ ] Create `AuditOutcomeSlug.java` enum — `SUCCESS`, `FAILURE`
+- [ ] Create `RequestContext.java` — `ThreadLocal` holder for IP and User-Agent, populated by `CorrelationIdFilter`
+
+**Acceptance Criteria:**
+- [ ] Every auditable event produces exactly one `AuditLog` row
+- [ ] Audit records never contain passwords, raw tokens, or unmasked emails
+- [ ] Audit persistence failure does not cause the main request to fail
+- [ ] `@Async` requires `@EnableAsync` in configuration
+
+**Automated Tests:**
+- [ ] `AuditServiceTest` — asserts `AuditLog` saved with correct fields; metadata sanitized; IP masked
+- [ ] `AuditServiceAsyncTest` — asserts audit failure does not propagate exception
+
+---
+
+### Phase 6.2 — Authentication Service
+
+**Implementation Tasks:**
+
+- [ ] Create `AuthService.java` (interface) + `AuthServiceImpl.java`:
+  - `AuthResponse register(RegisterRequest request)`:
+    1. Validate email format and password strength (via DTO `@Valid`)
+    2. Check email uniqueness: if exists, dispatch `sendAccountAlreadyExistsEmail()` and return same success response (anti-enumeration)
+    3. Hash password with `PasswordEncoder`
+    4. Resolve `PENDING_VERIFICATION` account status and `LOCAL` auth origin from lookup repos
+    5. Create and save `User` entity with `credentialsUpdatedAt = now()`
+    6. Record `CONSENT_ACCEPTED` audit event; save `UserConsent` record
+    7. Generate email verification token (UUID), hash it, save `EmailVerificationToken`
+    8. Dispatch verification email with raw token
+    9. Record `USER_REGISTERED` audit event
+    10. Return `{ "message": "Registration successful. Please verify your email." }`
+  - `AuthResponse login(LoginRequest request)`:
+    1. Find user by email: if not found, increment counter for unknown email (IP-based) and throw `InvalidCredentialsException`
+    2. Check `deletedAt IS NULL` — throw `InvalidCredentialsException` (anti-enumeration)
+    3. Check account status via `AccountStatusChecker`
+    4. Check `lockoutExpiresAt` — if still locked, record `AUTH_FAILURE`, throw `InvalidCredentialsException`
+    5. Verify password with `PasswordEncoder.matches()`
+    6. On failure: `incrementFailedAttempts(user)` → if threshold exceeded: `lockAccount(user)` → record `ACCOUNT_LOCKED`
+    7. On success: reset failed attempts, update `lastLoginAt`, save `LoginAttempt(wasSuccessful=true)`
+    8. Resolve effective permissions via `PermissionResolver`
+    9. Issue JWT via `JwtService.generateToken(userId, authorities, credentialsUpdatedAt)`
+    10. Record `AUTH_SUCCESS` audit event
+    11. Return JWT in response body with `Cache-Control: no-store`
+  - `void logout(UUID userId)` — record `AUTH_LOGOUT` audit event only
+  - `void changePassword(UUID userId, ChangePasswordRequest request)`:
+    1. Verify current password
+    2. Validate new password strength; ensure differs from current
+    3. Hash and save new password
+    4. Update `credentialsUpdatedAt` to `now()`
+    5. Record `PASSWORD_CHANGED` and `CREDENTIALS_INVALIDATED` audit events
+- [ ] Create `AccountStatusChecker.java` — extracts account status validation logic:
+  - `checkAuthenticationEligibility(User user)` — checks status, deleted_at, verified email, lockout
+
+**Acceptance Criteria:**
+- [ ] Login with non-existent email, wrong password, locked account, or unverified account all return identical `401` via `InvalidCredentialsException`
+- [ ] Successful login returns JWT with `Cache-Control: no-store` header
+- [ ] Password never logged at any log level
+- [ ] `credentialsUpdatedAt` updated on password change (all previous JWTs invalidated)
+
+**Automated Tests:**
+- [ ] `AuthServiceTest` (unit, mocked repos):
+  - Registration creates user in `PENDING_VERIFICATION`
+  - Login with wrong password throws `InvalidCredentialsException`
+  - Login increments failed attempts
+  - Lockout triggered at threshold
+  - Successful login resets failed attempts
+  - Logout records audit event; does not modify server state
+  - Password change updates `credentialsUpdatedAt`
+- [ ] `AuthIntegrationTest` (`@SpringBootTest`, Testcontainers):
+  - Full register → verify → login → logout flow
+  - Failed login 5x → account locked → 6th attempt returns same 401
+
+---
+
+### Phase 6.3 — Password Reset Service
+
+**Implementation Tasks:**
+
+- [ ] Create `PasswordResetService.java` (interface) + `PasswordResetServiceImpl.java`:
+  - `void initiateReset(PasswordResetRequest request)`:
+    1. Find user by email
+    2. If user exists and is active (not deleted, not disabled): invalidate all active reset tokens for user, generate secure token (UUID v4 or `SecureRandom` 256-bit hex), hash it, save `PasswordResetToken` with `expiresAt = now() + TTL`
+    3. Dispatch `sendPasswordResetEmail()` with raw token
+    4. **Always** return HTTP 200 (anti-enumeration — no distinction on existence)
+    5. Record `PASSWORD_RESET_REQUESTED` audit event with masked email
+  - `void completeReset(PasswordResetCompleteRequest request)`:
+    1. Hash incoming token; look up active, non-expired token by hash
+    2. If not found or expired: throw `TokenExpiredException` with generic message
+    3. Validate new password strength
+    4. Hash new password
+    5. Mark token as consumed (`consumedAt = now()`)
+    6. Update user: `passwordHash`, `credentialsUpdatedAt = now()`
+    7. Record `PASSWORD_RESET_COMPLETED` and `CREDENTIALS_INVALIDATED` audit events
+    8. Return success
+
+**Acceptance Criteria:**
+- [ ] `initiateReset()` returns 200 regardless of whether email exists
+- [ ] `completeReset()` with expired token returns 400 with generic message
+- [ ] Token stored as hash — never plaintext
+- [ ] `credentialsUpdatedAt` updated on completion — all prior JWTs invalidated
+
+**Automated Tests:**
+- [ ] `PasswordResetServiceTest` (unit):
+  - Valid flow: token consumed, password updated, credentialsUpdatedAt bumped
+  - Expired token throws `TokenExpiredException`
+  - Consumed token throws `TokenAlreadyConsumedException`
+  - Non-existent email produces no error, returns void
+- [ ] `PasswordResetIntegrationTest`:
+  - Full flow: register → verify → reset request → use token → login with new password → old token rejected
+
+---
+
+### Phase 6.4 — Email Verification Service
+
+**Implementation Tasks:**
+
+- [ ] Create `EmailVerificationService.java`:
+  - `void verifyEmail(String rawToken)`:
+    1. Hash incoming token; look up active, non-expired, non-consumed token by hash
+    2. If token is for email change (`newEmail IS NOT NULL`): update `user.email = newEmail`, optionally update `credentialsUpdatedAt`
+    3. If initial verification: update `user.accountStatus` to `ACTIVE`, set `user.emailVerifiedAt = now()`
+    4. Mark token consumed
+    5. Record `EMAIL_VERIFIED` audit event
+  - `void resendVerification(ResendVerificationRequest request)`:
+    1. Find user by email
+    2. If not found or already verified: return success (anti-enumeration)
+    3. Invalidate existing active tokens
+    4. Generate new token, save, dispatch email
+    5. Record audit event
+  - `void initiateEmailChange(UUID userId, EmailChangeRequest request)`:
+    1. Validate new email format
+    2. If new email already exists: return uniform success (anti-enumeration)
+    3. Generate token with `newEmail` set
+    4. Dispatch verification to new email address
+
+**Acceptance Criteria:**
+- [ ] Idempotent: verifying an already-verified token returns success (no error)
+- [ ] Expired verification token returns generic error
+- [ ] Email not activated until token consumed
+- [ ] Anti-enumeration on resend and email change flows
+
+**Automated Tests:**
+- [ ] `EmailVerificationServiceTest`:
+  - Valid flow activates account
+  - Expired token rejected
+  - Resend invalidates previous token
+  - Already-verified account: resend returns success with no new token
+- [ ] `EmailVerificationIntegrationTest` — full flow with DB state assertions
+
+---
+
+### Phase 6.5 — User Management Service
+
+**Implementation Tasks:**
+
+- [ ] Create `UserService.java`:
+  - `UserProfileResponse getOwnProfile(UUID userId)` — returns masked DTO; never returns passwordHash
+  - `UserAdminResponse getUserById(UUID userId)` — admin view; includes lockout status, failed attempts
+  - `Page<UserSummaryResponse> listUsers(UserFilterRequest filter, Pageable pageable)` — soft-deleted excluded by default
+  - `UserProfileResponse updateOwnProfile(UUID userId, UpdateProfileRequest request)` — non-credential fields only
+  - `void disableUser(UUID actorId, UUID targetUserId, String reason)` — sets INACTIVE status, updates `credentialsUpdatedAt`, records audit
+  - `void activateUser(UUID actorId, UUID targetUserId)` — sets ACTIVE status, records audit
+  - `void softDeleteUser(UUID actorId, UUID targetUserId)` — sets `deletedAt`, updates `credentialsUpdatedAt`, records audit
+  - `void adminCreateUser(UUID actorId, AdminCreateUserRequest request)` — creates user directly, dispatches set-password email
+
+**Acceptance Criteria:**
+- [ ] `getOwnProfile` never returns `passwordHash`, token values, or full IP
+- [ ] `disableUser` updates `credentialsUpdatedAt` — all JWTs invalidated immediately
+- [ ] Soft-deleted users excluded from `listUsers` by default
+- [ ] `updateOwnProfile` does not allow password or email changes (those go through dedicated flows)
+
+**Automated Tests:**
+- [ ] `UserServiceTest` (unit, mocked):
+  - `disableUser` updates `credentialsUpdatedAt` and records both `USER_DISABLED` and `CREDENTIALS_INVALIDATED`
+  - `softDeleteUser` sets `deletedAt` and updates `credentialsUpdatedAt`
+  - `getOwnProfile` DTO contains no `passwordHash`
+- [ ] `UserManagementIntegrationTest`:
+  - Disable user → their JWT is rejected on next request
+  - Soft-delete → user excluded from list, cannot authenticate
+
+---
+
+### Phase 6.6 — RBAC Service
+
+**Implementation Tasks:**
+
+- [ ] Create `RoleService.java`:
+  - `RoleResponse createRole(UUID actorId, CreateRoleRequest request)` — unique name check, save, record `ROLE_CREATED` audit
+  - `RoleResponse updateRole(UUID actorId, UUID roleId, UpdateRoleRequest request)` — description only (name immutable)
+  - `void deleteRole(UUID actorId, UUID roleId)` — blocked if any `user_roles` row references this role (HTTP 409)
+  - `Page<RoleResponse> listRoles(Pageable pageable)`
+  - `RoleResponse getRoleById(UUID roleId)`
+- [ ] Create `PermissionService.java`:
+  - `PermissionResponse createPermission(UUID actorId, CreatePermissionRequest request)` — unique name check
+  - `void deletePermission(UUID actorId, UUID permissionId)` — blocked if assigned to any role or user (HTTP 409)
+  - `Page<PermissionResponse> listPermissions(Pageable pageable)`
+- [ ] Create `RbacAssignmentService.java`:
+  - `void assignPermissionToRole(UUID actorId, UUID roleId, UUID permissionId)` — idempotent, record `PERMISSION_GRANTED`
+  - `void revokePermissionFromRole(UUID actorId, UUID roleId, UUID permissionId)` — record `PERMISSION_REVOKED`
+  - `void assignRoleToUser(UUID actorId, UUID userId, UUID roleId)` — idempotent, record `ROLE_ASSIGNED`
+  - `void revokeRoleFromUser(UUID actorId, UUID userId, UUID roleId)` — record `ROLE_REMOVED`
+  - `void assignPermissionToUser(UUID actorId, UUID userId, UUID permissionId)` — idempotent, record `PERMISSION_GRANTED`
+  - `void revokePermissionFromUser(UUID actorId, UUID userId, UUID permissionId)` — record `PERMISSION_REVOKED`
+
+**Acceptance Criteria:**
+- [ ] Role name immutable after creation — no setter on `name`; service rejects name update attempts
+- [ ] System roles (`is_system_role = true`) cannot be deleted via API
+- [ ] System permissions (`is_system_perm = true`) cannot be deleted via API
+- [ ] `assignPermissionToRole` is idempotent — second call with same args produces no error and no duplicate record
+
+**Automated Tests:**
+- [ ] `RoleServiceTest`:
+  - Duplicate name throws `ConflictException`
+  - Delete role with active users throws `ConflictException`
+  - System role delete throws `ConflictException`
+- [ ] `RbacAssignmentServiceTest`:
+  - Idempotent assign (second call is no-op)
+  - Revoke non-existent assignment is a no-op
+  - Audit event recorded on each assign/revoke
+
+---
+
+### Phase 6.7 — Admin Security Operations Service
+
+**Implementation Tasks:**
+
+- [ ] Create `AdminSecurityService.java`:
+  - `void forceReAuthentication(UUID actorId, UUID targetUserId)` — updates `credentials_updated_at`, records `CREDENTIALS_INVALIDATED` with reason `ADMIN_FORCED_REAUTH`
+  - `void manualLockAccount(UUID actorId, UUID targetUserId, String reason)` — sets `LOCKED` status, permanent lockout (`lockoutType = MANUAL`, no `expiresAt`), updates `credentialsUpdatedAt`, records `ACCOUNT_LOCKED` and `CREDENTIALS_INVALIDATED`
+  - `void unlockAccount(UUID actorId, UUID targetUserId)` — transitions to `ACTIVE`, clears `lockoutExpiresAt`, resets failed attempts, records `ACCOUNT_UNLOCKED`
+  - `SecuritySummaryResponse getSecuritySummary()` — aggregate counts: locked accounts, failures in last N hours, forced re-auths in last N hours
+
+**Acceptance Criteria:**
+- [ ] `forceReAuthentication` immediately invalidates all existing JWTs for target user
+- [ ] `manualLockAccount` permanent lock is not cleared by time-based logic — only by explicit `unlockAccount`
+- [ ] `getSecuritySummary` returns aggregate counts only — no individual PII
+
+**Automated Tests:**
+- [ ] `AdminSecurityServiceTest`:
+  - Force re-auth → JWT with old `iat` rejected on next request
+  - Manual lock → user cannot authenticate even after auto-lockout window expires
+  - Unlock → user can authenticate immediately
+
+---
+

@@ -1,0 +1,16 @@
+phase-0-project-bootstrap-build-infrastructure.md|Phase 0 — Project Bootstrap & Build Infrastructure
+phase-1-database-migrations-flyway.md|Phase 1 — Database Migrations (Flyway)
+phase-2-domain-layer-jpa-entities.md|Phase 2 — Domain Layer (JPA Entities)
+phase-3-repository-layer.md|Phase 3 — Repository Layer
+phase-4-security-infrastructure.md|Phase 4 — Security Infrastructure
+phase-5-cross-cutting-utilities.md|Phase 5 — Cross-Cutting Utilities
+phase-6-service-layer.md|Phase 6 — Service Layer
+phase-7-dto-layer-input-validation.md|Phase 7 — DTO Layer & Input Validation
+phase-8-controller-layer.md|Phase 8 — Controller Layer
+phase-9-oauth2-google-integration.md|Phase 9 — OAuth2 Google Integration
+phase-10-brute-force-protection-rate-limiting.md|Phase 10 — Brute Force Protection & Rate Limiting
+phase-11-lgpd-privacy-data-retention.md|Phase 11 — LGPD, Privacy & Data Retention
+phase-12-observability-structured-logging.md|Phase 12 — Observability & Structured Logging
+phase-13-openapi-documentation.md|Phase 13 — OpenAPI Documentation
+phase-14-comprehensive-test-suite.md|Phase 14 — Comprehensive Test Suite
+phase-15-docker-ci-cd-readiness.md|Phase 15 — Docker & CI/CD Readiness

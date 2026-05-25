@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <springProperty scope="context" name="appName"       source="spring.application.name" defaultValue="cash-control-api"/>
+    <springProperty scope="context" name="activeProfile" source="spring.profiles.active"   defaultValue="default"/>
+
+    <!-- ================================================================== -->
+    <!-- JSON structured logging — all profiles except dev                  -->
+    <!-- Emits one JSON object per log line; consumed by ELK / Loki / CW.  -->
+    <!-- MDC fields (correlationId, userId) are auto-included by encoder.   -->
+    <!-- ================================================================== -->
+    <springProfile name="!dev">
+
+        <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <customFields>{"appName":"${appName}","environment":"${activeProfile}"}</customFields>
+                <throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter">
+                    <maxDepthPerCause>20</maxDepthPerCause>
+                    <shortenedClassNameLength>30</shortenedClassNameLength>
+                    <rootCauseFirst>true</rootCauseFirst>
+                </throwableConverter>
+            </encoder>
+        </appender>
+
+        <root level="${LOG_LEVEL_ROOT:-INFO}">
+            <appender-ref ref="JSON_CONSOLE"/>
+        </root>
+
+        <logger name="com.cashcontrol.api" level="${LOG_LEVEL_APP:-INFO}" additivity="false">
+            <appender-ref ref="JSON_CONSOLE"/>
+        </logger>
+
+    </springProfile>
+
+    <!-- ================================================================== -->
+    <!-- Human-readable console logging — dev profile only                  -->
+    <!-- Includes correlationId and userId from MDC for local debugging.    -->
+    <!-- ================================================================== -->
+    <springProfile name="dev">
+
+        <appender name="DEV_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>%d{HH:mm:ss.SSS} [%thread] %highlight(%-5level) %cyan(%logger{36}) [cid=%X{correlationId}] [uid=%X{userId}] - %msg%n</pattern>
+            </encoder>
+        </appender>
+
+        <root level="${LOG_LEVEL_ROOT:-INFO}">
+            <appender-ref ref="DEV_CONSOLE"/>
+        </root>
+
+        <logger name="com.cashcontrol.api" level="${LOG_LEVEL_APP:-DEBUG}" additivity="false">
+            <appender-ref ref="DEV_CONSOLE"/>
+        </logger>
+
+    </springProfile>
+
+</configuration>

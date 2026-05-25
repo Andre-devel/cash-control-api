@@ -1,0 +1,643 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-05-22T00:00:00.000Z",
+  "__export_source": "insomnia.desktop.app",
+  "resources": [
+    {
+      "_id": "wrk_java_auth",
+      "_type": "workspace",
+      "name": "java-auth-template",
+      "description": "API de autenticação e autorização com JWT"
+    },
+    {
+      "_id": "env_base",
+      "_type": "environment",
+      "parentId": "wrk_java_auth",
+      "name": "Base Environment",
+      "data": {
+        "base_url": "http://localhost:8080",
+        "access_token": "",
+        "user_id": "",
+        "role_id": "",
+        "permission_id": ""
+      }
+    },
+
+    {
+      "_id": "fld_auth",
+      "_type": "request_group",
+      "parentId": "wrk_java_auth",
+      "name": "Auth",
+      "description": "Registro, login, logout e gerenciamento de conta"
+    },
+    {
+      "_id": "fld_users",
+      "_type": "request_group",
+      "parentId": "wrk_java_auth",
+      "name": "Users",
+      "description": "Perfil próprio e administração de usuários"
+    },
+    {
+      "_id": "fld_roles",
+      "_type": "request_group",
+      "parentId": "wrk_java_auth",
+      "name": "Roles",
+      "description": "CRUD de papéis e atribuição de permissões"
+    },
+    {
+      "_id": "fld_permissions",
+      "_type": "request_group",
+      "parentId": "wrk_java_auth",
+      "name": "Permissions",
+      "description": "CRUD de permissões"
+    },
+    {
+      "_id": "fld_user_roles",
+      "_type": "request_group",
+      "parentId": "wrk_java_auth",
+      "name": "User → Roles",
+      "description": "Atribuição de papéis a usuários"
+    },
+    {
+      "_id": "fld_user_permissions",
+      "_type": "request_group",
+      "parentId": "wrk_java_auth",
+      "name": "User → Permissions",
+      "description": "Atribuição direta de permissões a usuários"
+    },
+    {
+      "_id": "fld_audit",
+      "_type": "request_group",
+      "parentId": "wrk_java_auth",
+      "name": "Audit",
+      "description": "Log de auditoria e resumo de segurança"
+    },
+    {
+      "_id": "fld_admin_security",
+      "_type": "request_group",
+      "parentId": "wrk_java_auth",
+      "name": "Admin Security",
+      "description": "Forçar reauth, bloquear e desbloquear contas"
+    },
+
+    {
+      "_id": "req_register",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Register",
+      "method": "POST",
+      "url": "{{ base_url }}/api/v1/auth/register",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"usuario@exemplo.com\",\n  \"password\": \"Senha@123!\",\n  \"consentAccepted\": true\n}"
+      },
+      "description": "Registra novo usuário. Envia e-mail de verificação."
+    },
+    {
+      "_id": "req_login",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Login",
+      "method": "POST",
+      "url": "{{ base_url }}/api/v1/auth/login",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"usuario@exemplo.com\",\n  \"password\": \"Senha@123!\"\n}"
+      },
+      "description": "Autentica e retorna accessToken JWT. Copie o token para a variável access_token."
+    },
+    {
+      "_id": "req_logout",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Logout",
+      "method": "POST",
+      "url": "{{ base_url }}/api/v1/auth/logout",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "body": { "mimeType": "application/json", "text": "" },
+      "description": "Registra evento de logout. Retorna 204."
+    },
+    {
+      "_id": "req_me_auth",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Get My Profile (auth)",
+      "method": "GET",
+      "url": "{{ base_url }}/api/v1/auth/me",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Retorna perfil do usuário autenticado (via /auth/me)."
+    },
+    {
+      "_id": "req_change_password",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Change Password",
+      "method": "POST",
+      "url": "{{ base_url }}/api/v1/auth/password/change",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{ access_token }}" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"currentPassword\": \"Senha@123!\",\n  \"newPassword\": \"NovaSenha@456!\"\n}"
+      },
+      "description": "Troca a senha do usuário logado. Retorna 204."
+    },
+    {
+      "_id": "req_password_reset_request",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Request Password Reset",
+      "method": "POST",
+      "url": "{{ base_url }}/api/v1/auth/password-reset/request",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"usuario@exemplo.com\"\n}"
+      },
+      "description": "Envia link de redefinição de senha por e-mail."
+    },
+    {
+      "_id": "req_password_reset_confirm",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Confirm Password Reset",
+      "method": "POST",
+      "url": "{{ base_url }}/api/v1/auth/password-reset/confirm",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"token\": \"TOKEN_RECEBIDO_POR_EMAIL\",\n  \"newPassword\": \"NovaSenha@456!\"\n}"
+      },
+      "description": "Conclui redefinição de senha com o token do e-mail."
+    },
+    {
+      "_id": "req_email_verify",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Verify Email",
+      "method": "GET",
+      "url": "{{ base_url }}/api/v1/auth/email/verify",
+      "parameters": [{ "name": "token", "value": "TOKEN_RECEBIDO_POR_EMAIL" }],
+      "description": "Verifica o e-mail com o token enviado no link de ativação."
+    },
+    {
+      "_id": "req_email_verify_resend",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Resend Verification Email",
+      "method": "POST",
+      "url": "{{ base_url }}/api/v1/auth/email/verify/resend",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"usuario@exemplo.com\"\n}"
+      },
+      "description": "Reenvio do e-mail de verificação."
+    },
+    {
+      "_id": "req_email_change",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Change Email",
+      "method": "POST",
+      "url": "{{ base_url }}/api/v1/auth/email/change",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{ access_token }}" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"newEmail\": \"novoemail@exemplo.com\"\n}"
+      },
+      "description": "Inicia troca de e-mail. Envia verificação para o novo endereço."
+    },
+    {
+      "_id": "req_unlink_provider",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Unlink OAuth Provider",
+      "method": "DELETE",
+      "url": "{{ base_url }}/api/v1/auth/provider/google",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Desvincula provedor OAuth2. Substitua 'google' pelo slug do provedor. Retorna 204."
+    },
+
+    {
+      "_id": "req_me_users",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "Get My Profile",
+      "method": "GET",
+      "url": "{{ base_url }}/api/v1/users/me",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Retorna perfil do usuário autenticado."
+    },
+    {
+      "_id": "req_my_consents",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "Get My Consents",
+      "method": "GET",
+      "url": "{{ base_url }}/api/v1/users/me/consents",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Retorna histórico de consentimentos do usuário autenticado."
+    },
+    {
+      "_id": "req_update_profile",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "Update My Profile",
+      "method": "PUT",
+      "url": "{{ base_url }}/api/v1/users/me",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{ access_token }}" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"displayName\": \"João da Silva\"\n}"
+      },
+      "description": "Atualiza nome de exibição do perfil próprio."
+    },
+    {
+      "_id": "req_get_user",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "Get User by ID (admin)",
+      "method": "GET",
+      "url": "{{ base_url }}/api/v1/users/{{ user_id }}",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Requer permissão user:read. Defina user_id no environment."
+    },
+    {
+      "_id": "req_list_users",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "List Users (admin)",
+      "method": "GET",
+      "url": "{{ base_url }}/api/v1/users",
+      "parameters": [
+        { "name": "page", "value": "0" },
+        { "name": "size", "value": "20" }
+      ],
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Requer permissão user:read. Suporta filtro statusId."
+    },
+    {
+      "_id": "req_admin_create_user",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "Admin Create User",
+      "method": "POST",
+      "url": "{{ base_url }}/api/v1/users",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{ access_token }}" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"novousuario@exemplo.com\",\n  \"roleIds\": []\n}"
+      },
+      "description": "Requer permissão user:create. roleIds é opcional."
+    },
+    {
+      "_id": "req_disable_user",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "Disable User (admin)",
+      "method": "PUT",
+      "url": "{{ base_url }}/api/v1/users/{{ user_id }}/disable",
+      "parameters": [{ "name": "reason", "value": "Atividade suspeita" }],
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Requer permissão user:update. Retorna 204."
+    },
+    {
+      "_id": "req_activate_user",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "Activate User (admin)",
+      "method": "PUT",
+      "url": "{{ base_url }}/api/v1/users/{{ user_id }}/activate",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Requer permissão user:update. Retorna 204."
+    },
+    {
+      "_id": "req_delete_user",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "Delete User (soft, admin)",
+      "method": "DELETE",
+      "url": "{{ base_url }}/api/v1/users/{{ user_id }}",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Requer permissão user:delete. Soft-delete. Retorna 204."
+    },
+
+    {
+      "_id": "req_create_role",
+      "_type": "request",
+      "parentId": "fld_roles",
+      "name": "Create Role",
+      "method": "POST",
+      "url": "{{ base_url }}/api/v1/roles",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{ access_token }}" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"MODERATOR\",\n  \"description\": \"Papel de moderação de conteúdo\"\n}"
+      },
+      "description": "Requer permissão role:create."
+    },
+    {
+      "_id": "req_list_roles",
+      "_type": "request",
+      "parentId": "fld_roles",
+      "name": "List Roles",
+      "method": "GET",
+      "url": "{{ base_url }}/api/v1/roles",
+      "parameters": [
+        { "name": "page", "value": "0" },
+        { "name": "size", "value": "20" }
+      ],
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Requer permissão role:create ou role:update."
+    },
+    {
+      "_id": "req_get_role",
+      "_type": "request",
+      "parentId": "fld_roles",
+      "name": "Get Role by ID",
+      "method": "GET",
+      "url": "{{ base_url }}/api/v1/roles/{{ role_id }}",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Requer permissão role:create ou role:update. Defina role_id no environment."
+    },
+    {
+      "_id": "req_update_role",
+      "_type": "request",
+      "parentId": "fld_roles",
+      "name": "Update Role",
+      "method": "PUT",
+      "url": "{{ base_url }}/api/v1/roles/{{ role_id }}",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{ access_token }}" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"description\": \"Descrição atualizada do papel\"\n}"
+      },
+      "description": "Requer permissão role:update."
+    },
+    {
+      "_id": "req_delete_role",
+      "_type": "request",
+      "parentId": "fld_roles",
+      "name": "Delete Role",
+      "method": "DELETE",
+      "url": "{{ base_url }}/api/v1/roles/{{ role_id }}",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Requer permissão role:delete. Falha se papel estiver em uso ou for sistema."
+    },
+    {
+      "_id": "req_assign_perm_to_role",
+      "_type": "request",
+      "parentId": "fld_roles",
+      "name": "Assign Permission to Role",
+      "method": "POST",
+      "url": "{{ base_url }}/api/v1/roles/{{ role_id }}/permissions",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{ access_token }}" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"permissionId\": \"{{ permission_id }}\"\n}"
+      },
+      "description": "Requer permissão permission:grant. Retorna 204."
+    },
+    {
+      "_id": "req_revoke_perm_from_role",
+      "_type": "request",
+      "parentId": "fld_roles",
+      "name": "Revoke Permission from Role",
+      "method": "DELETE",
+      "url": "{{ base_url }}/api/v1/roles/{{ role_id }}/permissions/{{ permission_id }}",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Requer permissão permission:revoke. Retorna 204."
+    },
+
+    {
+      "_id": "req_create_permission",
+      "_type": "request",
+      "parentId": "fld_permissions",
+      "name": "Create Permission",
+      "method": "POST",
+      "url": "{{ base_url }}/api/v1/permissions",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{ access_token }}" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"report:view\",\n  \"description\": \"Visualizar relatórios do sistema\"\n}"
+      },
+      "description": "Requer permissão permission:grant. Nome deve seguir padrão recurso:acao."
+    },
+    {
+      "_id": "req_list_permissions",
+      "_type": "request",
+      "parentId": "fld_permissions",
+      "name": "List Permissions",
+      "method": "GET",
+      "url": "{{ base_url }}/api/v1/permissions",
+      "parameters": [
+        { "name": "page", "value": "0" },
+        { "name": "size", "value": "20" }
+      ],
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Requer permissão permission:grant ou audit:view."
+    },
+    {
+      "_id": "req_delete_permission",
+      "_type": "request",
+      "parentId": "fld_permissions",
+      "name": "Delete Permission",
+      "method": "DELETE",
+      "url": "{{ base_url }}/api/v1/permissions/{{ permission_id }}",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Requer permissão permission:revoke. Falha se permissão ainda estiver em uso."
+    },
+
+    {
+      "_id": "req_assign_role_to_user",
+      "_type": "request",
+      "parentId": "fld_user_roles",
+      "name": "Assign Role to User",
+      "method": "POST",
+      "url": "{{ base_url }}/api/v1/users/{{ user_id }}/roles",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{ access_token }}" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"roleId\": \"{{ role_id }}\"\n}"
+      },
+      "description": "Requer permissão role:update. Retorna 204."
+    },
+    {
+      "_id": "req_revoke_role_from_user",
+      "_type": "request",
+      "parentId": "fld_user_roles",
+      "name": "Revoke Role from User",
+      "method": "DELETE",
+      "url": "{{ base_url }}/api/v1/users/{{ user_id }}/roles/{{ role_id }}",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Requer permissão role:update. Retorna 204."
+    },
+
+    {
+      "_id": "req_assign_perm_to_user",
+      "_type": "request",
+      "parentId": "fld_user_permissions",
+      "name": "Assign Permission to User",
+      "method": "POST",
+      "url": "{{ base_url }}/api/v1/users/{{ user_id }}/permissions",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{ access_token }}" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"permissionId\": \"{{ permission_id }}\"\n}"
+      },
+      "description": "Requer permissão permission:grant. Atribuição direta (sem papel). Retorna 204."
+    },
+    {
+      "_id": "req_revoke_perm_from_user",
+      "_type": "request",
+      "parentId": "fld_user_permissions",
+      "name": "Revoke Permission from User",
+      "method": "DELETE",
+      "url": "{{ base_url }}/api/v1/users/{{ user_id }}/permissions/{{ permission_id }}",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Requer permissão permission:revoke. Retorna 204."
+    },
+
+    {
+      "_id": "req_audit_log",
+      "_type": "request",
+      "parentId": "fld_audit",
+      "name": "Query Audit Log",
+      "method": "GET",
+      "url": "{{ base_url }}/api/v1/audit",
+      "parameters": [
+        { "name": "page", "value": "0" },
+        { "name": "size", "value": "20" }
+      ],
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Requer permissão audit:view. Filtros opcionais: eventTypeSlug, actorId, targetId, from, to, outcomeSlug."
+    },
+    {
+      "_id": "req_audit_log_filtered",
+      "_type": "request",
+      "parentId": "fld_audit",
+      "name": "Query Audit Log (com filtros)",
+      "method": "GET",
+      "url": "{{ base_url }}/api/v1/audit",
+      "parameters": [
+        { "name": "eventTypeSlug", "value": "AUTH_LOGIN" },
+        { "name": "outcomeSlug", "value": "SUCCESS" },
+        { "name": "from", "value": "2026-05-01T00:00:00Z" },
+        { "name": "to", "value": "2026-05-31T23:59:59Z" },
+        { "name": "page", "value": "0" },
+        { "name": "size", "value": "20" }
+      ],
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Exemplo com filtros de evento, resultado e intervalo de datas."
+    },
+    {
+      "_id": "req_audit_user_timeline",
+      "_type": "request",
+      "parentId": "fld_audit",
+      "name": "User Audit Timeline",
+      "method": "GET",
+      "url": "{{ base_url }}/api/v1/audit/users/{{ user_id }}",
+      "parameters": [
+        { "name": "page", "value": "0" },
+        { "name": "size", "value": "20" }
+      ],
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Requer permissão audit:view. Timeline de eventos de um usuário específico."
+    },
+    {
+      "_id": "req_security_summary",
+      "_type": "request",
+      "parentId": "fld_audit",
+      "name": "Security Summary",
+      "method": "GET",
+      "url": "{{ base_url }}/api/v1/audit/summary",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ access_token }}" }],
+      "description": "Requer permissão audit:view. Retorna contas bloqueadas, falhas nas últimas 24h e reauths forçados."
+    },
+
+    {
+      "_id": "req_force_reauth",
+      "_type": "request",
+      "parentId": "fld_admin_security",
+      "name": "Force Re-Auth",
+      "method": "POST",
+      "url": "{{ base_url }}/api/v1/admin/security/force-reauth",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{ access_token }}" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"targetUserId\": \"{{ user_id }}\"\n}"
+      },
+      "description": "Requer permissão auth:manage. Invalida sessão do usuário alvo. Retorna 204."
+    },
+    {
+      "_id": "req_lock_account",
+      "_type": "request",
+      "parentId": "fld_admin_security",
+      "name": "Lock Account",
+      "method": "POST",
+      "url": "{{ base_url }}/api/v1/admin/security/lock",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{ access_token }}" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"targetUserId\": \"{{ user_id }}\",\n  \"reason\": \"Atividade suspeita detectada pelo time de segurança\"\n}"
+      },
+      "description": "Requer permissão auth:manage. Bloqueia conta manualmente. Retorna 204."
+    },
+    {
+      "_id": "req_unlock_account",
+      "_type": "request",
+      "parentId": "fld_admin_security",
+      "name": "Unlock Account",
+      "method": "POST",
+      "url": "{{ base_url }}/api/v1/admin/security/unlock",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{ access_token }}" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"targetUserId\": \"{{ user_id }}\"\n}"
+      },
+      "description": "Requer permissão auth:manage. Desbloqueia conta. Retorna 204."
+    }
+  ]
+}

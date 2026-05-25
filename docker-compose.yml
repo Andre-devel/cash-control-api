@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: java-auth-postgres
+    environment:
+      POSTGRES_DB: auth
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    networks:
+      - auth-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d auth"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: java-auth-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/auth
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION_MINUTES: ${JWT_EXPIRATION_MINUTES:-15}
+      MAX_FAILED_ATTEMPTS: ${MAX_FAILED_ATTEMPTS:-5}
+      LOCKOUT_DURATION_MINUTES: ${LOCKOUT_DURATION_MINUTES:-15}
+      PASSWORD_RESET_EXPIRY_MINUTES: ${PASSWORD_RESET_EXPIRY_MINUTES:-60}
+      EMAIL_VERIFICATION_EXPIRY_HOURS: ${EMAIL_VERIFICATION_EXPIRY_HOURS:-24}
+      MAIL_HOST: ${MAIL_HOST:-localhost}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-noreply@example.com}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-placeholder}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-placeholder}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
+      OAUTH2_SUCCESS_REDIRECT_URL: ${OAUTH2_SUCCESS_REDIRECT_URL:-http://localhost:3000/auth/oauth2/callback}
+      OAUTH2_FAILURE_REDIRECT_URL: ${OAUTH2_FAILURE_REDIRECT_URL:-http://localhost:3000/auth/oauth2/error}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080}
+      RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE:-20}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    networks:
+      - auth-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  postgres_data:
+
+networks:
+  auth-network:
+    driver: bridge

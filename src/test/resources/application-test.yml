@@ -1,0 +1,64 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/testdb
+    username: test
+    password: test
+
+  jpa:
+    show-sql: false
+
+  flyway:
+    enabled: true
+
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: test-google-client-id
+            client-secret: test-google-client-secret
+
+  mail:
+    host: localhost
+    port: 3025
+    username: test
+    password: test
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+
+management:
+  health:
+    mail:
+      enabled: false
+
+logging:
+  level:
+    com.cashcontrol.api: DEBUG
+
+app:
+  base-url: http://localhost:8080
+  oauth2-success-redirect-url: http://localhost:3000/auth/oauth2/callback
+  oauth2-failure-redirect-url: http://localhost:3000/auth/oauth2/error
+  jwt:
+    secret: test-jwt-secret-key-for-testing-purposes-only-must-be-long-enough-for-hs512
+    expiration-minutes: 15
+  cors:
+    allowed-origins: http://localhost:3000,http://localhost:8080
+  security:
+    max-failed-attempts: 5
+    lockout-duration-minutes: 15
+    password-reset-expiry-minutes: 60
+    email-verification-expiry-hours: 24
+    rate-limit-requests-per-minute: 1000
+    rate-limit-window-seconds: 60
+  attachments:
+    max-file-size-mb: 10
+    max-per-transaction: 5
+    allowed-types: pdf,png,jpg,jpeg
+  dashboard:
+    upcoming-bills-days: 7
+    upcoming-bills-max-results: 20

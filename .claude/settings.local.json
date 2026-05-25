@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(jar tf *)",
+      "Bash(grep \"\\\\.class$\")",
+      "Bash(grep -v '\\\\$')",
+      "Bash(./gradlew dependencies *)",
+      "Bash(grep -v \"^\\\\s*[|\\\\\\\\\\\\\\\\+]\")",
+      "Bash(grep -v \"^\\\\s*$\")",
+      "Bash(jar xf *)",
+      "Read(//tmp/sbjdbc/META-INF/**)",
+      "Bash(cd /tmp)",
+      "Bash(mkdir -p sbjdbc2)",
+      "Bash(./gradlew test *)",
+      "WebSearch",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}
