@@ -10,7 +10,7 @@
 
 **Implementation Tasks:**
 
-- [ ] Create `TransactionRepository.java` — `JpaRepository<Transaction, UUID>`:
+- [x] Create `TransactionRepository.java` — `JpaRepository<Transaction, UUID>`:
   - `findByIdAndUserId(UUID id, UUID userId)`
   - `findAllByUserId(UUID userId, Pageable pageable)`
   - `findAllByAccountIdAndUserId(UUID accountId, UUID userId, Pageable pageable)`
@@ -24,7 +24,7 @@
 
 **Implementation Tasks:**
 
-- [ ] Create `TransactionService.java` and `TransactionServiceImpl.java`:
+- [x] Create `TransactionService.java` and `TransactionServiceImpl.java`:
   - `createTransaction(CreateTransactionRequest, UUID userId)` → 201
   - `editTransaction(UUID id, EditTransactionRequest, UUID userId)` — detaches from installment series if part of one
   - `deleteTransaction(UUID id, UUID userId)` — rejects individual deletion of a transfer leg with 422
@@ -33,20 +33,20 @@
   - `listTransactions(TransactionFilterRequest, UUID userId, Pageable pageable)` — filtered + paginated
   - `getTransaction(UUID id, UUID userId)` — full detail
   - `detectOverdue(UUID userId)` — transitions eligible `PENDING` → `OVERDUE` (for scheduled/on-demand use)
-- [ ] Enforce status transition rules; throw `BusinessRuleException` on invalid transitions
-- [ ] Ensure `BigDecimal` arithmetic throughout; never `double` or `float`
-- [ ] Apply category rules at creation time
+- [x] Enforce status transition rules; throw `BusinessRuleException` on invalid transitions
+- [x] Ensure `BigDecimal` arithmetic throughout; never `double` or `float`
+- [x] Apply category rules at creation time
 
 **Acceptance Criteria:**
-- [ ] Invalid status transitions rejected with 422
-- [ ] `CANCELLED` transactions never affect balance
-- [ ] All monetary arithmetic uses `BigDecimal` with `HALF_UP` rounding
-- [ ] Category auto-assignment applied at creation when a matching rule exists
+- [x] Invalid status transitions rejected with 422
+- [x] `CANCELLED` transactions never affect balance
+- [x] All monetary arithmetic uses `BigDecimal` with `HALF_UP` rounding
+- [x] Category auto-assignment applied at creation when a matching rule exists
 
 **Automated Tests:**
-- [ ] `TransactionServiceTest` — unit tests for all methods
-- [ ] `TransactionStatusTransitionTest` — asserts valid and invalid transitions
-- [ ] `BalanceConsistencyTest` — known transaction sequences verified against expected balance
+- [x] `TransactionServiceTest` — unit tests for all methods
+- [x] `TransactionStatusTransitionTest` — asserts valid and invalid transitions
+- [x] `BalanceConsistencyTest` — known transaction sequences verified against expected balance
 
 ---
 
@@ -54,7 +54,7 @@
 
 **Implementation Tasks:**
 
-- [ ] Create `TransactionController.java` — `@RestController @RequestMapping("/api/v1/transactions")`:
+- [x] Create `TransactionController.java` — `@RestController @RequestMapping("/api/v1/transactions")`:
   - `POST /` → 201
   - `GET /` → paginated list with filter query params → 200
   - `GET /{id}` → full detail → 200
@@ -62,16 +62,16 @@
   - `DELETE /{id}` → 204
   - `POST /{id}/pay` → mark as paid → 200
   - `POST /{id}/cancel` → cancel → 200
-- [ ] Create request DTOs with Jakarta Validation: `CreateTransactionRequest`, `EditTransactionRequest`, `MarkAsPaidRequest`, `TransactionFilterRequest`
-- [ ] Create response DTOs: `TransactionSummaryResponse`, `TransactionDetailResponse`
+- [x] Create request DTOs with Jakarta Validation: `CreateTransactionRequest`, `EditTransactionRequest`, `MarkAsPaidRequest`, `TransactionFilterRequest`
+- [x] Create response DTOs: `TransactionSummaryResponse`, `TransactionDetailResponse`
 
 **Acceptance Criteria:**
-- [ ] Validation failures return 400 with field-level error body
-- [ ] Entities never leak outside the service boundary
-- [ ] `CANCELLED` transactions excluded from list by default; `includeCancelled=true` param to include
+- [x] Validation failures return 400 with field-level error body
+- [x] Entities never leak outside the service boundary
+- [x] `CANCELLED` transactions excluded from list by default; `includeCancelled=true` param to include
 
 **Automated Tests:**
-- [ ] `TransactionControllerTest` — `@WebMvcTest` for all endpoints
+- [x] `TransactionControllerTest` — `@WebMvcTest` for all endpoints
 
 ---
 
@@ -79,27 +79,27 @@
 
 **Implementation Tasks:**
 
-- [ ] Create `AttachmentRepository.java`
-- [ ] Create `AttachmentService.java`:
+- [x] Create `AttachmentRepository.java`
+- [x] Create `AttachmentService.java`:
   - `attach(UUID transactionId, MultipartFile[] files, UUID userId)` — validates file type, size, and per-transaction limit
   - `deleteAttachment(UUID attachmentId, UUID userId)`
   - `getAttachments(UUID transactionId, UUID userId)`
   - Storage: persist file to configurable storage (local filesystem for dev, S3-compatible for prod) using a `StoragePort` interface
   - Never expose raw file paths in API responses — return signed access references only
-- [ ] Create `StoragePort.java` interface + `LocalFileStorageAdapter.java` implementation (dev/test)
-- [ ] Add attachment endpoints to `TransactionController`:
+- [x] Create `StoragePort.java` interface + `LocalFileStorageAdapter.java` implementation (dev/test)
+- [x] Add attachment endpoints to `TransactionController`:
   - `POST /{id}/attachments` → 201
   - `GET /{id}/attachments` → 200
   - `DELETE /{id}/attachments/{attachmentId}` → 204
 
 **Acceptance Criteria:**
-- [ ] Only PDF, PNG, JPG, JPEG accepted; others → 400
-- [ ] File size above configured max → 422
-- [ ] Per-transaction limit enforced → 422
-- [ ] Storage keys never exposed in API responses
+- [x] Only PDF, PNG, JPG, JPEG accepted; others → 400
+- [x] File size above configured max → 422
+- [x] Per-transaction limit enforced → 422
+- [x] Storage keys never exposed in API responses
 
 **Automated Tests:**
-- [ ] `AttachmentServiceTest` — file validation, limit enforcement
+- [x] `AttachmentServiceTest` — file validation, limit enforcement
 
 ---
 

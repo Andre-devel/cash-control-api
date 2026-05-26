@@ -301,27 +301,21 @@ show_status() {
 
 build_prompt_file() {
   local phase_file="$1"
+  local phase_title="$2"
   local prompt_file="$PROMPT_DIR/${phase_file%.md}.txt"
 
   {
-    echo "=== docs/v1/project-description.md ==="
-    cat "docs/v1/project-description.md"
-    echo ""
-    echo "=== docs/v1/user-stories.md ==="
-    cat "docs/v1/user-stories.md"
-    echo ""
-    echo "=== docs/v1/database-schema.md ==="
-    cat "docs/v1/database-schema.md"
-    echo ""
-    echo "=== docs/v1/project-phases.md ==="
-    cat "docs/v1/project-phases.md"
-    echo ""
     cat <<'PROMPT'
+Read and analyze:
+
+- `@docs/v1/project-description.md`
+- `@docs/v1/user-stories.md`
+- `@docs/v1/database-schema.md`
+- `@docs/v1/project-phases.md`
+
 Inspect the current codebase and identify what is already implemented.
 
-Find the FIRST pending phase in docs/v1/project-phases.md that still contains unchecked tasks ([ ]).
-
-Implement the ENTIRE phase completely, including:
+Find and implement the phase titled "**{PHASE_NAME}**" completely, including:
 - all sub-phases
 - all tasks
 - all required dependencies inside that phase
@@ -330,8 +324,8 @@ Do not partially implement the phase.
 
 Do not skip ahead to future phases.
 
-Update docs/v1/project-phases.md as tasks are completed by changing:
-- [ ] to [x]
+Update `@docs/v1/project-phases.md` as tasks are completed by changing:
+- `[ ]` → `[x]`
 
 Requirements:
 
@@ -355,7 +349,7 @@ Before finishing:
 - ensure project phase tracking was updated
 - ensure the entire phase is fully completed
 PROMPT
-  } > "$prompt_file"
+  } | sed "s/{PHASE_NAME}/${phase_title}/g" > "$prompt_file"
 
   echo "$prompt_file"
 }
@@ -424,7 +418,7 @@ run_phase() {
 
     local prompt_file
     if [ $attempt -eq 1 ]; then
-      prompt_file=$(build_prompt_file "$phase_file")
+      prompt_file=$(build_prompt_file "$phase_file" "$phase_title")
     fi
 
     if run_engine "$prompt_file" "$log_file"; then
