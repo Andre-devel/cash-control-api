@@ -110,4 +110,24 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "WHERE t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PENDING " +
            "AND t.paymentDate IS NOT NULL AND t.paymentDate < :today")
     int markOverdueAll(@Param("today") LocalDate today);
+
+    @Query("SELECT t.category.id, t.subcategory.id, COUNT(t) FROM Transaction t " +
+           "WHERE t.userId = :userId AND t.category IS NOT NULL " +
+           "AND t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED " +
+           "AND LOWER(t.description) LIKE LOWER(CONCAT('%', :text, '%')) " +
+           "GROUP BY t.category.id, t.subcategory.id " +
+           "ORDER BY COUNT(t) DESC")
+    List<Object[]> findTopCategoriesByDescriptionText(
+            @Param("userId") UUID userId,
+            @Param("text") String text,
+            org.springframework.data.domain.Pageable pageable);
+
+    @Query("SELECT t.category.id, t.subcategory.id, COUNT(t) FROM Transaction t " +
+           "WHERE t.userId = :userId AND t.category IS NOT NULL " +
+           "AND t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED " +
+           "GROUP BY t.category.id, t.subcategory.id " +
+           "ORDER BY COUNT(t) DESC")
+    List<Object[]> findTopCategoriesByFrequency(
+            @Param("userId") UUID userId,
+            org.springframework.data.domain.Pageable pageable);
 }

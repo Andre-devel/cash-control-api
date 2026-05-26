@@ -894,11 +894,11 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `CategoryRepository.java`:
+- [x] Create `CategoryRepository.java`:
   - `findAllSystemCategories()` — `user_id IS NULL`
   - `findAllByUserId(UUID userId)` — user-defined categories
   - `existsByUserIdAndParentIdAndName(UUID userId, UUID parentId, String name)`
-- [ ] Create `CategoryService.java` and `CategoryServiceImpl.java`:
+- [x] Create `CategoryService.java` and `CategoryServiceImpl.java`:
   - `listCategories(UUID userId, boolean includeHidden, boolean includeArchived)` — returns system + user categories; nested subcategories
   - `createCategory(CreateCategoryRequest, UUID userId)` — validates max depth (root or subcategory only); validates name uniqueness within parent scope
   - `editCategory(UUID id, EditCategoryRequest, UUID userId)` — only user-defined categories; validates name uniqueness
@@ -911,14 +911,14 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
   - `deleteRule(UUID id, UUID userId)`
 
 **Acceptance Criteria:**
-- [ ] System categories cannot be archived; `BusinessRuleException` on attempt
-- [ ] Subcategory nesting limited to two levels; third-level creation → 422
-- [ ] `archiveCategory` propagates to all subcategories atomically
-- [ ] `suggestCategory` returns at least one suggestion when the user has transaction history
+- [x] System categories cannot be archived; `BusinessRuleException` on attempt
+- [x] Subcategory nesting limited to two levels; third-level creation → 422
+- [x] `archiveCategory` propagates to all subcategories atomically
+- [x] `suggestCategory` returns at least one suggestion when the user has transaction history
 
 **Automated Tests:**
-- [ ] `CategoryServiceTest` — unit tests for all methods
-- [ ] `CategorySuggestionTest` — asserts suggestion accuracy from seeded history
+- [x] `CategoryServiceTest` — unit tests for all methods
+- [x] `CategorySuggestionTest` — asserts suggestion accuracy from seeded history
 
 ---
 
@@ -926,7 +926,7 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `CategoryController.java` — `@RestController @RequestMapping("/api/v1/categories")`:
+- [x] Create `CategoryController.java` — `@RestController @RequestMapping("/api/v1/categories")`:
   - `GET /` → list (with `includeHidden`, `includeArchived` params) → 200
   - `POST /` → create → 201
   - `PUT /{id}` → edit → 200
@@ -938,7 +938,7 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
   - `DELETE /rules/{id}` → 204
 
 **Automated Tests:**
-- [ ] `CategoryControllerTest` — HTTP validation for all endpoints
+- [x] `CategoryControllerTest` — HTTP validation for all endpoints
 
 ---
 
