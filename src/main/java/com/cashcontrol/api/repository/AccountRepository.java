@@ -15,7 +15,13 @@ public interface AccountRepository extends JpaRepository<Account, UUID> {
 
     List<Account> findAllByUserIdAndDeletedAtIsNullAndArchivedAtIsNull(UUID userId);
 
+    List<Account> findAllByUserIdAndDeletedAtIsNullOrderBySortOrderAscCreatedAtAsc(UUID userId);
+
+    List<Account> findAllByUserIdAndDeletedAtIsNullAndArchivedAtIsNullOrderBySortOrderAscCreatedAtAsc(UUID userId);
+
     Optional<Account> findByIdAndUserIdAndDeletedAtIsNull(UUID id, UUID userId);
 
     boolean existsByUserIdAndNameAndDeletedAtIsNull(UUID userId, String name);
+
+    boolean existsByUserIdAndNameAndDeletedAtIsNullAndIdNot(UUID userId, String name, UUID id);
 }

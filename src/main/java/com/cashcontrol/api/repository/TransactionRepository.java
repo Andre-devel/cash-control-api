@@ -25,11 +25,12 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     boolean existsByAccount_IdAndUserIdAndStatusNotIn(UUID accountId, UUID userId, List<TransactionStatus> statuses);
 
+    // TRANSFER amounts are stored signed: source leg = negative, destination leg = positive.
+    // MANUAL_ADJUSTMENT amounts are also signed (positive = increase, negative = decrease).
     @Query("SELECT COALESCE(SUM(CASE " +
            "WHEN t.type = com.cashcontrol.api.domain.entity.TransactionType.INCOME " +
            "  OR t.type = com.cashcontrol.api.domain.entity.TransactionType.REFUND THEN t.amount " +
-           "WHEN t.type = com.cashcontrol.api.domain.entity.TransactionType.EXPENSE " +
-           "  OR t.type = com.cashcontrol.api.domain.entity.TransactionType.TRANSFER THEN -t.amount " +
+           "WHEN t.type = com.cashcontrol.api.domain.entity.TransactionType.EXPENSE THEN -t.amount " +
            "ELSE t.amount END), 0) " +
            "FROM Transaction t " +
            "WHERE t.account.id = :accountId AND t.userId = :userId " +
@@ -37,6 +38,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
     BigDecimal sumPaidAmountByAccountIdAndUserId(
             @Param("accountId") UUID accountId,
             @Param("userId") UUID userId);
+
+    long countByAccount_IdAndUserIdAndStatusNot(UUID accountId, UUID userId, TransactionStatus status);
 
     List<Transaction> findAllByTransferGroupId(UUID transferGroupId);
 
