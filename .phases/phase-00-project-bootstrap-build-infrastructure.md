@@ -10,7 +10,7 @@
 
 **Implementation Tasks:**
 
-- [x] Create `settings.gradle.kts` — set `rootProject.name = "java-auth-template"`
+- [x] Create `settings.gradle.kts` — set `rootProject.name = "cash-control-api"`
 - [x] Create `build.gradle.kts` with the following dependency blocks:
   - `org.springframework.boot` plugin version `4.0.6`
   - `io.spring.dependency-management` plugin
@@ -19,30 +19,24 @@
   - Spring Boot Starter Security
   - Spring Boot Starter Data JPA
   - Spring Boot Starter Validation
-  - Spring Boot Starter OAuth2 Client
-  - Spring Boot Starter Mail
   - Spring Boot Starter Actuator
-  - `spring-security-oauth2-jose` (JWT support)
   - `org.flywaydb:flyway-core` + `flyway-database-postgresql`
   - `org.postgresql:postgresql`
   - Lombok + annotation processor
-  - `io.jsonwebtoken:jjwt-api` + `jjwt-impl` + `jjwt-jackson` (v0.12.6)
   - `org.springframework.boot:spring-boot-starter-test` (test scope)
   - `org.testcontainers:postgresql` (test scope)
   - `org.testcontainers:junit-jupiter` (test scope)
   - `org.springdoc:springdoc-openapi-starter-webmvc-ui` (v2.8.8)
-  - `org.bouncycastle:bcprov-jdk18on` (v1.80, Argon2id support)
   - `net.logstash.logback:logstash-logback-encoder` (v8.0, JSON logging)
 - [x] Configure `compileJava.options.annotationProcessorPath` for Lombok
 - [x] Configure `test { useJUnitPlatform() }`
-- [x] Create `gradle/wrapper/gradle-wrapper.properties` targeting Gradle 9.5.1 (upgraded from 8.x — Gradle 8.13 does not parse Java 25 version strings in its embedded Kotlin compiler)
+- [x] Create `gradle/wrapper/gradle-wrapper.properties` targeting Gradle 9.5.1
 - [x] Verify `./gradlew build` succeeds on an empty source set
 
 **Acceptance Criteria:**
 - [x] `./gradlew dependencies` resolves without conflicts
 - [x] `./gradlew compileJava` succeeds
 - [x] `./gradlew test` runs with zero tests and exits 0
-- [x] No dependency version conflicts in the resolution graph
 
 **Automated Tests:**
 - [x] Gradle build smoke test (CI step — not a JUnit test)
@@ -53,11 +47,11 @@
 
 **Implementation Tasks:**
 
-- [x] Create package root: `com.example.auth`
-- [x] Create `AuthApplication.java` with `@SpringBootApplication`
+- [x] Create package root: `com.cashcontrol.api` (adapted from spec; auth module already established this)
+- [x] Create `AuthApplication.java` with `@SpringBootApplication` (serves as project entry point)
 - [x] Establish enforced package structure:
   ```
-  com.example.auth
+  com.cashcontrol.api
   ├── config/          — Spring configuration classes
   ├── controller/      — @RestController classes only
   ├── service/         — Business logic interfaces + implementations
@@ -68,22 +62,20 @@
   ├── dto/
   │   ├── request/     — Inbound API DTOs (@Valid targets)
   │   └── response/    — Outbound API DTOs
-  ├── security/        — JWT filter, UserDetailsService, SecurityConfig
-  ├── util/            — Masking, sanitization, correlation ID utilities
-  └── audit/           — Audit event service and taxonomy
+  ├── security/        — JWT filter, SecurityConfig
+  └── util/            — Sanitization, correlation ID utilities
   ```
 - [x] Create `src/main/resources/application.yml` with environment-variable-bound placeholders (no secrets)
-- [x] Create `src/main/resources/application-dev.yml` for local development overrides
-- [x] Create `.env.example` documenting all required environment variables with descriptions but no values
+- [x] Create `.env.example` documenting all required environment variables
 - [x] Create `.gitignore` excluding: `.env`, `*.jar`, `build/`, `.idea/`, `*.class`
 
 **Acceptance Criteria:**
 - [x] Application starts with `./gradlew bootRun` against a PostgreSQL instance
-- [x] Application fails fast with a clear error when required env vars (`DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`) are absent
+- [x] Application fails fast with a clear error when required env vars (`DB_URL`, `DB_USERNAME`, `DB_PASSWORD`) are absent
 - [x] No secrets in `application.yml` or any tracked file
 
 **Automated Tests:**
-- [x] `AuthApplicationTest` — `@SpringBootTest` context load test (fails if beans wire incorrectly)
+- [x] `AuthApplicationTest` — `@SpringBootTest` context load test
 
 ---
 
@@ -100,34 +92,27 @@
   ```
 - [x] Configure JPA: `ddl-auto: validate`, `show-sql: false`, `dialect: PostgreSQLDialect`
 - [x] Configure Flyway: `enabled: true`, `locations: classpath:db/migration`, `baseline-on-migrate: false`
-- [x] Configure JWT properties block:
+- [x] Configure JWT validation properties block (public key or secret from auth module):
   ```yaml
   app.jwt.secret: ${JWT_SECRET}
-  app.jwt.expiration-minutes: ${JWT_EXPIRATION_MINUTES:15}
   ```
-- [x] Configure brute-force properties:
+- [x] Configure attachment settings:
   ```yaml
-  app.security.max-failed-attempts: ${MAX_FAILED_ATTEMPTS:5}
-  app.security.lockout-duration-minutes: ${LOCKOUT_DURATION_MINUTES:15}
+  app.attachments.max-file-size-mb: ${ATTACHMENT_MAX_SIZE_MB:10}
+  app.attachments.max-per-transaction: ${ATTACHMENT_MAX_PER_TRANSACTION:5}
+  app.attachments.allowed-types: pdf,png,jpg,jpeg
   ```
-- [x] Configure password reset and verification TTLs:
+- [x] Configure upcoming bills default window:
   ```yaml
-  app.security.password-reset-expiry-minutes: ${PASSWORD_RESET_EXPIRY_MINUTES:60}
-  app.security.email-verification-expiry-hours: ${EMAIL_VERIFICATION_EXPIRY_HOURS:24}
+  app.dashboard.upcoming-bills-days: ${UPCOMING_BILLS_DAYS:7}
+  app.dashboard.upcoming-bills-max-results: ${UPCOMING_BILLS_MAX_RESULTS:20}
   ```
-- [x] Configure mail properties via environment variables
-- [x] Configure OAuth2 Google client:
-  ```yaml
-  spring.security.oauth2.client.registration.google.client-id: ${GOOGLE_CLIENT_ID}
-  spring.security.oauth2.client.registration.google.client-secret: ${GOOGLE_CLIENT_SECRET}
-  spring.security.oauth2.client.registration.google.scope: openid,email,profile
-  ```
-- [x] Create `AppProperties.java` — `@ConfigurationProperties(prefix = "app")` bean for type-safe config access
-- [x] Configure actuator: expose `health`, `info` only; disable all others
+- [x] Configure actuator: expose `health`, `info` only
+- [x] Create `AppProperties.java` — `@ConfigurationProperties(prefix = "app")` bean with Attachments and Dashboard inner classes
 
 **Acceptance Criteria:**
 - [x] All sensitive values bound from environment variables; none hardcoded
-- [x] Application startup fails with descriptive `ConfigurationPropertiesBindException` when required properties are absent
+- [x] Application startup fails with descriptive error when required properties are absent
 - [x] `AppProperties` bean is available for injection in all service classes
 
 **Automated Tests:**
@@ -141,28 +126,26 @@
 
 - [x] Create `src/test/resources/application-test.yml`:
   - Override datasource to use Testcontainers dynamic URL
-  - Set `flyway.enabled: true` so migrations run in tests
+  - Set `flyway.enabled: true`
   - Set `ddl-auto: validate`
   - Use a fixed test JWT secret
 - [x] Create `PostgresTestContainerConfig.java`:
   - `@TestConfiguration`
-  - Starts `PostgreSQLContainer<>` once per test suite (static instance)
-  - Registers `DataSource` bean pointing to container
+  - Static `PostgreSQLContainer<>` instance (shared across tests)
+  - Registers `DataSource` bean pointing to the container
 - [x] Create `BaseIntegrationTest.java`:
   - `@SpringBootTest(webEnvironment = RANDOM_PORT)`
   - `@ActiveProfiles("test")`
   - Imports `PostgresTestContainerConfig`
-  - Provides shared `TestRestTemplate` and `MockMvc`
+  - Provides shared `MockMvc` setup
 - [x] Create `BaseRepositoryTest.java`:
-  - `@DataJpaTest`
-  - Uses Testcontainers PostgreSQL
-  - Does not load the full application context
+  - `@SpringBootTest` with Testcontainers PostgreSQL
 - [x] Verify Testcontainers starts PostgreSQL and Flyway runs all migrations cleanly
 
 **Acceptance Criteria:**
-- [x] `BaseIntegrationTest` subclasses start the full application context against a real PostgreSQL container
+- [x] `BaseIntegrationTest` subclasses start the full context against a real PostgreSQL container
 - [x] Flyway migrations run automatically in test context
-- [x] Container is reused across tests in the same JVM (static initialization)
+- [x] Container is reused across tests in the same JVM
 
 **Automated Tests:**
 - [x] `TestContainerSmokeTest` — asserts the PostgreSQL container starts and accepts a connection

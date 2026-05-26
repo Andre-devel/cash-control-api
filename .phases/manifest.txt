@@ -1,16 +1,15 @@
-phase-0-project-bootstrap-build-infrastructure.md|Phase 0 — Project Bootstrap & Build Infrastructure
-phase-1-database-migrations-flyway.md|Phase 1 — Database Migrations (Flyway)
-phase-2-domain-layer-jpa-entities.md|Phase 2 — Domain Layer (JPA Entities)
-phase-3-repository-layer.md|Phase 3 — Repository Layer
-phase-4-security-infrastructure.md|Phase 4 — Security Infrastructure
-phase-5-cross-cutting-utilities.md|Phase 5 — Cross-Cutting Utilities
-phase-6-service-layer.md|Phase 6 — Service Layer
-phase-7-dto-layer-input-validation.md|Phase 7 — DTO Layer & Input Validation
-phase-8-controller-layer.md|Phase 8 — Controller Layer
-phase-9-oauth2-google-integration.md|Phase 9 — OAuth2 Google Integration
-phase-10-brute-force-protection-rate-limiting.md|Phase 10 — Brute Force Protection & Rate Limiting
-phase-11-lgpd-privacy-data-retention.md|Phase 11 — LGPD, Privacy & Data Retention
-phase-12-observability-structured-logging.md|Phase 12 — Observability & Structured Logging
-phase-13-openapi-documentation.md|Phase 13 — OpenAPI Documentation
-phase-14-comprehensive-test-suite.md|Phase 14 — Comprehensive Test Suite
-phase-15-docker-ci-cd-readiness.md|Phase 15 — Docker & CI/CD Readiness
+phase-00-project-bootstrap-build-infrastructure.md|Phase 0 — Project Bootstrap & Build Infrastructure
+phase-01-database-schema-flyway-migrations.md|Phase 1 — Database Schema (Flyway Migrations)
+phase-02-domain-layer-jpa-entities.md|Phase 2 — Domain Layer (JPA Entities)
+phase-03-security-user-scoping.md|Phase 3 — Security & User Scoping
+phase-04-account-wallet-management.md|Phase 4 — Account & Wallet Management
+phase-05-transaction-management.md|Phase 5 — Transaction Management
+phase-06-installment-transactions.md|Phase 6 — Installment Transactions
+phase-07-recurring-transactions.md|Phase 7 — Recurring Transactions
+phase-08-category-management.md|Phase 8 — Category Management
+phase-09-credit-card-management.md|Phase 9 — Credit Card Management
+phase-10-dashboard-reporting.md|Phase 10 — Dashboard & Reporting
+phase-11-overdue-detection-scheduled-jobs.md|Phase 11 — Overdue Detection & Scheduled Jobs
+phase-12-api-documentation-openapi-swagger.md|Phase 12 — API Documentation (OpenAPI / Swagger)
+phase-13-observability-logging.md|Phase 13 — Observability & Logging
+phase-14-testing-docker-ci-cd.md|Phase 14 — Testing, Docker & CI/CD
