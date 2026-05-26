@@ -13,7 +13,11 @@ public interface CreditCardRepository extends JpaRepository<CreditCard, UUID> {
 
     List<CreditCard> findAllByUserIdAndDeletedAtIsNull(UUID userId);
 
+    List<CreditCard> findAllByUserIdAndDeletedAtIsNullAndArchivedAtIsNull(UUID userId);
+
     Optional<CreditCard> findByIdAndUserIdAndDeletedAtIsNull(UUID id, UUID userId);
 
     boolean existsByUserIdAndNameAndDeletedAtIsNull(UUID userId, String name);
+
+    boolean existsByUserIdAndNameAndDeletedAtIsNullAndIdNot(UUID userId, String name, UUID excludeId);
 }

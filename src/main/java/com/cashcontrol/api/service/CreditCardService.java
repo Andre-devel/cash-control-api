@@ -1,0 +1,36 @@
+package com.cashcontrol.api.service;
+
+import com.cashcontrol.api.dto.request.CreateCardRequest;
+import com.cashcontrol.api.dto.request.EditCardRequest;
+import com.cashcontrol.api.dto.request.PayInvoiceRequest;
+import com.cashcontrol.api.dto.request.RecordChargeRequest;
+import com.cashcontrol.api.dto.response.CreditCardResponse;
+import com.cashcontrol.api.dto.response.InvoiceItemResponse;
+import com.cashcontrol.api.dto.response.InvoiceResponse;
+import com.cashcontrol.api.dto.response.LimitUsageResponse;
+import com.cashcontrol.api.dto.response.SpendingByCategoryResponse;
+
+import java.time.LocalDate;
+import java.util.List;
+import java.util.UUID;
+
+public interface CreditCardService {
+
+    CreditCardResponse createCard(CreateCardRequest request, UUID userId);
+
+    List<CreditCardResponse> listCards(UUID userId);
+
+    CreditCardResponse editCard(UUID id, EditCardRequest request, UUID userId);
+
+    CreditCardResponse archiveCard(UUID id, UUID userId);
+
+    InvoiceItemResponse recordCharge(UUID cardId, RecordChargeRequest request, UUID userId);
+
+    InvoiceResponse getInvoice(UUID cardId, String referenceMonth, UUID userId, int page, int size);
+
+    InvoiceResponse payInvoice(UUID invoiceId, PayInvoiceRequest request, UUID userId);
+
+    LimitUsageResponse getLimitUsage(UUID cardId, UUID userId);
+
+    List<SpendingByCategoryResponse> getSpendingByCategory(UUID cardId, LocalDate from, LocalDate to, UUID userId);
+}

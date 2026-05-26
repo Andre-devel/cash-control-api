@@ -954,8 +954,8 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `CreditCardRepository.java`, `InvoiceRepository.java`, `InvoiceItemRepository.java`
-- [ ] Create `CreditCardService.java` and `CreditCardServiceImpl.java`:
+- [x] Create `CreditCardRepository.java`, `InvoiceRepository.java`, `InvoiceItemRepository.java`
+- [x] Create `CreditCardService.java` and `CreditCardServiceImpl.java`:
   - `createCard(CreateCardRequest, UUID userId)`:
     - Validates `closingDay` and `dueDay` 1–28
     - Creates card and opens first invoice for the current billing cycle
@@ -973,18 +973,18 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
     - Creates debit transaction on source account
   - `getLimitUsage(UUID cardId, UUID userId)` — computed in real time
   - `getSpendingByCategory(UUID cardId, DateRange, UUID userId)`
-- [ ] Create `InvoiceCycleCalculator.java` — utility determining which invoice a charge belongs to based on `closingDay`
+- [x] Create `InvoiceCycleCalculator.java` — utility determining which invoice a charge belongs to based on `closingDay`
 
 **Acceptance Criteria:**
-- [ ] Charge assigned to correct invoice; post-closing charges go to next cycle
-- [ ] Partial payment creates revolving item on next invoice atomically
-- [ ] `getLimitUsage` reflects real-time state after every charge or payment
-- [ ] `closingDay`/`dueDay` validated 1–28; `BusinessRuleException` otherwise
+- [x] Charge assigned to correct invoice; post-closing charges go to next cycle
+- [x] Partial payment creates revolving item on next invoice atomically
+- [x] `getLimitUsage` reflects real-time state after every charge or payment
+- [x] `closingDay`/`dueDay` validated 1–28; `BusinessRuleException` otherwise
 
 **Automated Tests:**
-- [ ] `InvoiceCycleCalculatorTest` — edge cases around month boundaries and closing day
-- [ ] `CreditCardServiceIntegrationTest` — full charge → invoice → payment lifecycle
-- [ ] `PartialPaymentTest` — asserts revolving item creation and next invoice update
+- [x] `InvoiceCycleCalculatorTest` — edge cases around month boundaries and closing day
+- [x] `CreditCardServiceIntegrationTest` — full charge → invoice → payment lifecycle
+- [x] `PartialPaymentTest` — asserts revolving item creation and next invoice update
 
 ---
 
@@ -992,7 +992,7 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `CreditCardController.java` — `@RestController @RequestMapping("/api/v1/cards")`:
+- [x] Create `CreditCardController.java` — `@RestController @RequestMapping("/api/v1/cards")`:
   - `POST /` → 201
   - `GET /` → 200
   - `PUT /{id}` → 200
@@ -1004,7 +1004,7 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
   - `GET /{id}/spending` → spending by category (with `from`, `to` params) → 200
 
 **Automated Tests:**
-- [ ] `CreditCardControllerTest` — HTTP validation for all endpoints
+- [x] `CreditCardControllerTest` — HTTP validation for all endpoints
 
 ---
 
