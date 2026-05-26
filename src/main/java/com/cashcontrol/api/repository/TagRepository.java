@@ -13,6 +13,8 @@ public interface TagRepository extends JpaRepository<Tag, UUID> {
 
     List<Tag> findAllByUserId(UUID userId);
 
+    List<Tag> findAllByUserIdAndIdIn(UUID userId, List<UUID> ids);
+
     Optional<Tag> findByIdAndUserId(UUID id, UUID userId);
 
     boolean existsByUserIdAndName(UUID userId, String name);

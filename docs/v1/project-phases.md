@@ -22,7 +22,7 @@
 | Test infrastructure | `[x]` Done — unit + integration test suites (Testcontainers) |
 | CI/CD pipeline | `[ ]` Pending — `.github/workflows/ci.yml` |
 
-**Status:** Phase 0 (Bootstrap), Phase 1 (Database Schema), and Phase 2 (Domain Layer JPA Entities) complete. Phase 3 (Security & User Scoping) is next.
+**Status:** Phases 0–5 complete. Phase 6 (Installment Transactions) is next.
 
 ---
 
@@ -590,11 +590,11 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `AccountRepository.java` — extends `JpaRepository<Account, UUID>`:
+- [x] Create `AccountRepository.java` — extends `JpaRepository<Account, UUID>`:
   - `findAllByUserIdAndDeletedAtIsNull(UUID userId)`
   - `findByIdAndUserIdAndDeletedAtIsNull(UUID id, UUID userId)`
   - `existsByUserIdAndNameAndDeletedAtIsNull(UUID userId, String name)`
-- [ ] Create `AccountService.java` interface and `AccountServiceImpl.java`:
+- [x] Create `AccountService.java` interface and `AccountServiceImpl.java`:
   - `createAccount(CreateAccountRequest, UUID userId)` — creates account + seed `MANUAL_ADJUSTMENT` transaction for initial balance
   - `listAccounts(UUID userId, boolean includeArchived)` — sorted by `displayOrder` then `createdAt`
   - `getAccount(UUID id, UUID userId)` — throws `ResourceNotFoundException` if not found
@@ -606,13 +606,13 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
   - `manualAdjustment(ManualAdjustmentRequest, UUID userId)` — creates a `MANUAL_ADJUSTMENT` transaction for the delta
 
 **Acceptance Criteria:**
-- [ ] Account name uniqueness per user enforced; `ConflictException` on duplicate
-- [ ] Archived account balance excluded from portfolio aggregations
-- [ ] Deletion rejected with 422 if account has non-seed transactions
+- [x] Account name uniqueness per user enforced; `ConflictException` on duplicate
+- [x] Archived account balance excluded from portfolio aggregations
+- [x] Deletion rejected with 422 if account has non-seed transactions
 
 **Automated Tests:**
-- [ ] `AccountServiceTest` — unit tests for each service method with mocked repositories
-- [ ] `AccountIntegrationTest` — full lifecycle against Testcontainers PostgreSQL
+- [x] `AccountServiceTest` — unit tests for each service method with mocked repositories
+- [x] `AccountIntegrationTest` — full lifecycle against Testcontainers PostgreSQL
 
 ---
 
@@ -620,7 +620,7 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `AccountController.java` — `@RestController @RequestMapping("/api/v1/accounts")`:
+- [x] Create `AccountController.java` — `@RestController @RequestMapping("/api/v1/accounts")`:
   - `POST /` → `createAccount` → 201
   - `GET /` → `listAccounts` (query param `includeArchived`) → 200
   - `GET /{id}` → `getAccount` → 200
@@ -629,16 +629,16 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
   - `POST /{id}/unarchive` → `unarchiveAccount` → 200
   - `DELETE /{id}` → `deleteAccount` → 204
   - `POST /{id}/adjust` → `manualAdjustment` → 200
-- [ ] Create request DTOs: `CreateAccountRequest`, `EditAccountRequest`, `ManualAdjustmentRequest`
-- [ ] Create response DTO: `AccountResponse` (never expose the JPA entity)
+- [x] Create request DTOs: `CreateAccountRequest`, `EditAccountRequest`, `ManualAdjustmentRequest`
+- [x] Create response DTO: `AccountResponse` (never expose the JPA entity)
 
 **Acceptance Criteria:**
-- [ ] All endpoints require a valid JWT
-- [ ] `userId` always sourced from the JWT; never from the request body
-- [ ] `AccountResponse` includes computed balance but never the JPA entity
+- [x] All endpoints require a valid JWT
+- [x] `userId` always sourced from the JWT; never from the request body
+- [x] `AccountResponse` includes computed balance but never the JPA entity
 
 **Automated Tests:**
-- [ ] `AccountControllerTest` — `@WebMvcTest` for all endpoints; validates HTTP status and response body structure
+- [x] `AccountControllerTest` — `@WebMvcTest` for all endpoints; validates HTTP status and response body structure
 
 ---
 
@@ -646,22 +646,22 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Add `createTransfer(TransferRequest, UUID userId)` to `AccountService`:
+- [x] Add `createTransfer(TransferRequest, UUID userId)` to `AccountService`:
   - Validates both accounts belong to `userId`
   - Validates source ≠ destination
   - Validates neither account is archived
   - Creates two linked `TRANSFER` transactions atomically with the same `transferGroupId`
-- [ ] Add `POST /api/v1/accounts/transfers` endpoint to `AccountController`
-- [ ] Add `DELETE /api/v1/accounts/transfers/{groupId}` — deletes both legs atomically
-- [ ] Create request DTO: `TransferRequest`
+- [x] Add `POST /api/v1/accounts/transfers` endpoint to `AccountController`
+- [x] Add `DELETE /api/v1/accounts/transfers/{groupId}` — deletes both legs atomically
+- [x] Create request DTO: `TransferRequest`
 
 **Acceptance Criteria:**
-- [ ] Both legs created atomically; if either fails, neither is persisted
-- [ ] Transfer nets to zero in portfolio balance calculations
-- [ ] Deleting one leg individually rejected with 422
+- [x] Both legs created atomically; if either fails, neither is persisted
+- [x] Transfer nets to zero in portfolio balance calculations
+- [x] Deleting one leg individually rejected with 422
 
 **Automated Tests:**
-- [ ] `TransferIntegrationTest` — asserts both legs are created; asserts portfolio balance is unchanged
+- [x] `TransferIntegrationTest` — asserts both legs are created; asserts portfolio balance is unchanged
 
 ---
 
@@ -677,7 +677,7 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `TransactionRepository.java` — `JpaRepository<Transaction, UUID>`:
+- [x] Create `TransactionRepository.java` — `JpaRepository<Transaction, UUID>`:
   - `findByIdAndUserId(UUID id, UUID userId)`
   - `findAllByUserId(UUID userId, Pageable pageable)`
   - `findAllByAccountIdAndUserId(UUID accountId, UUID userId, Pageable pageable)`
@@ -691,7 +691,7 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `TransactionService.java` and `TransactionServiceImpl.java`:
+- [x] Create `TransactionService.java` and `TransactionServiceImpl.java`:
   - `createTransaction(CreateTransactionRequest, UUID userId)` → 201
   - `editTransaction(UUID id, EditTransactionRequest, UUID userId)` — detaches from installment series if part of one
   - `deleteTransaction(UUID id, UUID userId)` — rejects individual deletion of a transfer leg with 422
@@ -700,20 +700,20 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
   - `listTransactions(TransactionFilterRequest, UUID userId, Pageable pageable)` — filtered + paginated
   - `getTransaction(UUID id, UUID userId)` — full detail
   - `detectOverdue(UUID userId)` — transitions eligible `PENDING` → `OVERDUE` (for scheduled/on-demand use)
-- [ ] Enforce status transition rules; throw `BusinessRuleException` on invalid transitions
-- [ ] Ensure `BigDecimal` arithmetic throughout; never `double` or `float`
-- [ ] Apply category rules at creation time
+- [x] Enforce status transition rules; throw `BusinessRuleException` on invalid transitions
+- [x] Ensure `BigDecimal` arithmetic throughout; never `double` or `float`
+- [x] Apply category rules at creation time
 
 **Acceptance Criteria:**
-- [ ] Invalid status transitions rejected with 422
-- [ ] `CANCELLED` transactions never affect balance
-- [ ] All monetary arithmetic uses `BigDecimal` with `HALF_UP` rounding
-- [ ] Category auto-assignment applied at creation when a matching rule exists
+- [x] Invalid status transitions rejected with 422
+- [x] `CANCELLED` transactions never affect balance
+- [x] All monetary arithmetic uses `BigDecimal` with `HALF_UP` rounding
+- [x] Category auto-assignment applied at creation when a matching rule exists
 
 **Automated Tests:**
-- [ ] `TransactionServiceTest` — unit tests for all methods
-- [ ] `TransactionStatusTransitionTest` — asserts valid and invalid transitions
-- [ ] `BalanceConsistencyTest` — known transaction sequences verified against expected balance
+- [x] `TransactionServiceTest` — unit tests for all methods
+- [x] `TransactionStatusTransitionTest` — asserts valid and invalid transitions
+- [x] `BalanceConsistencyTest` — known transaction sequences verified against expected balance
 
 ---
 
@@ -721,7 +721,7 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `TransactionController.java` — `@RestController @RequestMapping("/api/v1/transactions")`:
+- [x] Create `TransactionController.java` — `@RestController @RequestMapping("/api/v1/transactions")`:
   - `POST /` → 201
   - `GET /` → paginated list with filter query params → 200
   - `GET /{id}` → full detail → 200
@@ -729,16 +729,16 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
   - `DELETE /{id}` → 204
   - `POST /{id}/pay` → mark as paid → 200
   - `POST /{id}/cancel` → cancel → 200
-- [ ] Create request DTOs with Jakarta Validation: `CreateTransactionRequest`, `EditTransactionRequest`, `MarkAsPaidRequest`, `TransactionFilterRequest`
-- [ ] Create response DTOs: `TransactionSummaryResponse`, `TransactionDetailResponse`
+- [x] Create request DTOs with Jakarta Validation: `CreateTransactionRequest`, `EditTransactionRequest`, `MarkAsPaidRequest`, `TransactionFilterRequest`
+- [x] Create response DTOs: `TransactionSummaryResponse`, `TransactionDetailResponse`
 
 **Acceptance Criteria:**
-- [ ] Validation failures return 400 with field-level error body
-- [ ] Entities never leak outside the service boundary
-- [ ] `CANCELLED` transactions excluded from list by default; `includeCancelled=true` param to include
+- [x] Validation failures return 400 with field-level error body
+- [x] Entities never leak outside the service boundary
+- [x] `CANCELLED` transactions excluded from list by default; `includeCancelled=true` param to include
 
 **Automated Tests:**
-- [ ] `TransactionControllerTest` — `@WebMvcTest` for all endpoints
+- [x] `TransactionControllerTest` — `@WebMvcTest` for all endpoints
 
 ---
 
@@ -746,27 +746,27 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `AttachmentRepository.java`
-- [ ] Create `AttachmentService.java`:
+- [x] Create `AttachmentRepository.java`
+- [x] Create `AttachmentService.java`:
   - `attach(UUID transactionId, MultipartFile[] files, UUID userId)` — validates file type, size, and per-transaction limit
   - `deleteAttachment(UUID attachmentId, UUID userId)`
   - `getAttachments(UUID transactionId, UUID userId)`
   - Storage: persist file to configurable storage (local filesystem for dev, S3-compatible for prod) using a `StoragePort` interface
   - Never expose raw file paths in API responses — return signed access references only
-- [ ] Create `StoragePort.java` interface + `LocalFileStorageAdapter.java` implementation (dev/test)
-- [ ] Add attachment endpoints to `TransactionController`:
+- [x] Create `StoragePort.java` interface + `LocalFileStorageAdapter.java` implementation (dev/test)
+- [x] Add attachment endpoints to `TransactionController`:
   - `POST /{id}/attachments` → 201
   - `GET /{id}/attachments` → 200
   - `DELETE /{id}/attachments/{attachmentId}` → 204
 
 **Acceptance Criteria:**
-- [ ] Only PDF, PNG, JPG, JPEG accepted; others → 400
-- [ ] File size above configured max → 422
-- [ ] Per-transaction limit enforced → 422
-- [ ] Storage keys never exposed in API responses
+- [x] Only PDF, PNG, JPG, JPEG accepted; others → 400
+- [x] File size above configured max → 422
+- [x] Per-transaction limit enforced → 422
+- [x] Storage keys never exposed in API responses
 
 **Automated Tests:**
-- [ ] `AttachmentServiceTest` — file validation, limit enforcement
+- [x] `AttachmentServiceTest` — file validation, limit enforcement
 
 ---
 

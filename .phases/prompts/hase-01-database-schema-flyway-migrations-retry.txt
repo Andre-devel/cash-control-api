@@ -1,8 +1,0 @@
-Os testes falharam apos a implementacao anterior. Corrija os erros.
-
-Saida dos testes:
-```
-
-```
-
-Corrija o codigo para que todos os testes passem. Rode os testes novamente apos cada correcao.

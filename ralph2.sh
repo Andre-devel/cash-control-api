@@ -303,15 +303,23 @@ build_prompt_file() {
   local phase_file="$1"
   local prompt_file="$PROMPT_DIR/${phase_file%.md}.txt"
 
-  cat > "$prompt_file" <<PROMPT
-- `@docs/v1/project-description.md`
-- `@docs/v1/user-stories.md`
-- `@docs/v1/database-schema.md`
-- `@docs/v1/project-phases.md`
-
+  {
+    echo "=== docs/v1/project-description.md ==="
+    cat "docs/v1/project-description.md"
+    echo ""
+    echo "=== docs/v1/user-stories.md ==="
+    cat "docs/v1/user-stories.md"
+    echo ""
+    echo "=== docs/v1/database-schema.md ==="
+    cat "docs/v1/database-schema.md"
+    echo ""
+    echo "=== docs/v1/project-phases.md ==="
+    cat "docs/v1/project-phases.md"
+    echo ""
+    cat <<'PROMPT'
 Inspect the current codebase and identify what is already implemented.
 
-Find the FIRST pending phase in `@docs/v1/project-phases.md` that still contains unchecked tasks (`[ ]`).
+Find the FIRST pending phase in docs/v1/project-phases.md that still contains unchecked tasks ([ ]).
 
 Implement the ENTIRE phase completely, including:
 - all sub-phases
@@ -322,8 +330,8 @@ Do not partially implement the phase.
 
 Do not skip ahead to future phases.
 
-Update `@docs/v1/project-phases.md` as tasks are completed by changing:
-- `[ ]` → `[x]`
+Update docs/v1/project-phases.md as tasks are completed by changing:
+- [ ] to [x]
 
 Requirements:
 
@@ -346,8 +354,8 @@ Before finishing:
 - ensure imports and references are correct
 - ensure project phase tracking was updated
 - ensure the entire phase is fully completed
-
 PROMPT
+  } > "$prompt_file"
 
   echo "$prompt_file"
 }
@@ -357,16 +365,11 @@ build_retry_prompt_file() {
   local test_output="$2"
   local prompt_file="$PROMPT_DIR/${phase_file%.md}-retry.txt"
 
-  cat > "$prompt_file" <<PROMPT
-Os testes falharam apos a implementacao anterior. Corrija os erros.
-
-Saida dos testes:
-\`\`\`
-$test_output
-\`\`\`
-
-Corrija o codigo para que todos os testes passem. Rode os testes novamente apos cada correcao.
-PROMPT
+  {
+    printf 'Os testes falharam apos a implementacao anterior. Corrija os erros.\n\nSaida dos testes:\n```\n'
+    printf '%s\n' "$test_output"
+    printf '```\n\nCorrija o codigo para que todos os testes passem. Rode os testes novamente apos cada correcao.\n'
+  } > "$prompt_file"
 
   echo "$prompt_file"
 }
@@ -386,7 +389,7 @@ run_engine() {
   if [[ "$ENGINE" == "codex" ]]; then
     cat "$prompt_file" | codex exec --sandbox danger-full-access - 2>&1 | tee "$log_file"
   elif [[ "$ENGINE" == "claude" ]]; then
-    env -u CLAUDECODE claude --model claude-sonnet-4-6 --dangerously-skip-permissions -p "$(cat "$prompt_file")" --output-format text --verbose 2>&1 | tee "$log_file"
+    cat "$prompt_file" | env -u CLAUDECODE claude --model claude-sonnet-4-6 --dangerously-skip-permissions -p - --output-format text --verbose 2>&1 | tee "$log_file"
   fi
 }
 

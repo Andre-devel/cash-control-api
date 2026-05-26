@@ -1,11 +1,3429 @@
-- 
-- 
-- 
-- 
+=== docs/v1/project-description.md ===
+# Cash Control — Technical & Architectural Specification
 
+## Document Purpose
+
+This document defines the technical and functional architecture of a production-ready
+personal finance management module built on Spring Boot 4 and Java 25. It serves as
+the core domain specification for the Cash Control API, covering all financial entities,
+workflows, and behavioral contracts.
+
+This document covers architecture, design decisions, domain model, and functional
+behavior. It does not prescribe implementation steps, database migrations, code, or
+delivery phases.
+
+---
+
+## 1. System Overview
+
+### 1.1 Purpose
+
+A self-contained personal finance management backend designed to track accounts,
+transactions, categories, credit cards, and spending patterns for individual users
+in a multi-account, multi-currency-aware environment.
+
+### 1.2 Core Capabilities
+
+| Capability                  | Description                                                       |
+|-----------------------------|-------------------------------------------------------------------|
+| Account & wallet management | Multiple account types with balance tracking and archiving        |
+| Transaction lifecycle       | Income, expense, transfer, refund, manual adjustment              |
+| Installment tracking        | Recurring and installment payment series with partial editing     |
+| Category management         | Hierarchical categories with color, icon, and auto-suggestion     |
+| Credit card billing         | Card limits, billing cycles, invoice tracking, partial payment    |
+| Dashboard & reporting       | Aggregated views, cash flow, charts, and configurable widgets     |
+| Tag system                  | Free-form tagging for cross-category transaction grouping         |
+| Attachment support          | Receipt and proof-of-payment file association                     |
+
+### 1.3 Architectural Posture
+
+- **User-scoped isolation**: all financial data is strictly scoped to the authenticated user.
+- **Audit-ready**: all mutations produce structured event records.
+- **Privacy-by-design**: LGPD-aligned minimal data collection.
+- **Stateless backend**: integrates with the authentication module for JWT-based identity.
+- **Cloud-native ready**: Docker/Kubernetes-friendly, environment-based configuration.
+
+---
+
+## 2. Technology Stack
+
+| Layer                  | Technology                                      |
+|------------------------|-------------------------------------------------|
+| Language               | Java 25                                         |
+| Framework              | Spring Boot 4.0.6                               |
+| Security               | Spring Security 7 (JWT via auth module)         |
+| Persistence            | Spring Data JPA / Hibernate, PostgreSQL 18      |
+| Schema migrations      | Flyway                                          |
+| Build tool             | Gradle                                          |
+| Validation             | Bean Validation / Jakarta Validation            |
+| Utilities              | Lombok                                          |
+| Infrastructure         | Docker-ready architecture                       |
+
+---
+
+## 3. Account & Wallet Architecture
+
+### 3.1 Account Types
+
+The system supports multiple account types under a single user, each with independent
+balance tracking and lifecycle management.
+
+| Type                  | Description                                                         |
+|-----------------------|---------------------------------------------------------------------|
+| `CHECKING`            | Standard bank checking account                                      |
+| `SAVINGS`             | Savings account with optional interest tracking                     |
+| `CASH`                | Physical cash wallet                                                |
+| `VIRTUAL_WALLET`      | Digital wallet (e.g., PIX keys, digital payment apps)              |
+| `INTERNATIONAL`       | Foreign currency account; supports currency code                    |
+| `JOINT`               | Shared account between two or more users or participants            |
+| `INVESTMENT`          | Investment account; balance treated as asset in net worth           |
+
+### 3.2 Account Lifecycle
+
+- Accounts are created with an **initial balance** that seeds the account's opening state.
+- Accounts may be **archived** (soft-disabled) without deleting historical transaction data.
+- Archived accounts are excluded from active balance aggregations but remain queryable.
+- **Manual balance adjustment** is supported as a special transaction type that reconciles
+  the actual balance with the system-calculated balance without distorting cash flow reports.
+
+### 3.3 Balance Semantics
+
+- The system maintains a computed balance derived from transaction history.
+- The initial balance is treated as a seed transaction at account creation time.
+- Manual adjustments are recorded as `MANUAL_ADJUSTMENT` transactions with an
+  explicit before/after balance for auditability.
+- Transfers between accounts produce two linked transactions (debit + credit) that
+  net to zero at the total portfolio level.
+
+### 3.4 Multiple Accounts
+
+- A user may hold an unlimited number of accounts across all types.
+- Dashboard aggregations (total balance, net worth) span all non-archived accounts.
+- Investment accounts are included in net worth but excluded from liquid cash calculations.
+
+---
+
+## 4. Transaction Architecture
+
+### 4.1 Transaction Types
+
+| Type               | Description                                                          |
+|--------------------|----------------------------------------------------------------------|
+| `INCOME`           | Money received (salary, freelance, sale, etc.)                       |
+| `EXPENSE`          | Money spent                                                          |
+| `TRANSFER`         | Movement between two accounts owned by the user                      |
+| `REFUND`           | Reversal of a previous expense; increases balance                    |
+| `MANUAL_ADJUSTMENT`| Balance reconciliation; does not affect cash flow reports            |
+
+### 4.2 Transaction Data Model
+
+Each transaction carries the following data fields:
+
+| Field               | Description                                                         |
+|---------------------|---------------------------------------------------------------------|
+| `amount`            | Monetary value (positive; direction encoded by type)                |
+| `description`       | Short human-readable label                                          |
+| `notes`             | Free-form long-form observations                                    |
+| `competenceDate`    | The date the financial event occurred (accrual date)                |
+| `paymentDate`       | The date the payment was actually settled (cash date)               |
+| `attachments`       | File references (receipts, invoices, proofs of payment)             |
+| `location`          | Optional geolocation or address associated with the transaction     |
+| `tags`              | Free-form labels for cross-category grouping                        |
+| `category`          | Primary category classification                                     |
+| `subcategory`       | Secondary classification within the parent category                 |
+| `status`            | Payment status: `PAID`, `PENDING`, `OVERDUE`, `CANCELLED`          |
+
+### 4.3 Transaction Status Lifecycle
+
+```
+PENDING → PAID
+PENDING → OVERDUE  (automatic, when paymentDate passes without settlement)
+PENDING → CANCELLED
+OVERDUE → PAID
+OVERDUE → CANCELLED
+```
+
+- Status transitions are validated; invalid transitions are rejected with a domain error.
+- `OVERDUE` status may be updated by a scheduled background job or on-demand at query time.
+- `CANCELLED` transactions are preserved for audit purposes; they do not affect balances.
+
+### 4.4 Installment Transactions
+
+Installments represent a single financial commitment split across multiple payment dates.
+
+**Installment model:**
+- A root `installment_series` record holds the master terms (total amount, total installments,
+  description, category, account, original date).
+- Each installment is an individual `transaction` record linked to the series, carrying its
+  own `installmentNumber`, `totalInstallments`, `amount` (per installment), and `paymentDate`.
+
+**Installment operations:**
+- **Edit individual installment**: modifies only the selected installment record.
+- **Edit entire series**: propagates changes to all future (unpaid) installments in the series.
+- **Early settlement (quitação antecipada)**: marks all remaining installments as paid and
+  optionally adjusts amounts for early payoff discount.
+- **Early advance (antecipação)**: moves the payment date of one or more future installments
+  forward, optionally with a discount amount.
+
+### 4.5 Recurring Transactions
+
+Recurring transactions auto-generate future transaction instances on a defined schedule.
+
+| Frequency    | Description                                     |
+|--------------|-------------------------------------------------|
+| `DAILY`      | Every day                                       |
+| `WEEKLY`     | Every 7 days                                    |
+| `BIWEEKLY`   | Every 14 days                                   |
+| `MONTHLY`    | Same day each month                             |
+| `YEARLY`     | Same date each year                             |
+
+**Recurrence model:**
+- A `recurrence_rule` record holds the schedule, frequency, start date, and optional end date.
+- Transactions are generated ahead of time or lazily on request, depending on implementation choice.
+- **End conditions**: open-ended (no end date) or bounded by a specific end date.
+- **Pause**: a recurrence may be paused; no new instances are generated during the pause window.
+- Editing a single instance detaches it from the series (generates a divergent copy).
+- Editing the entire series from a point forward re-generates all future instances.
+
+---
+
+## 5. Category Architecture
+
+### 5.1 Category Structure
+
+Categories form a two-level hierarchy:
+
+```
+Category (parent)
+└── Subcategory (child)
+```
+
+- A category without a parent is a root category.
+- A subcategory always has exactly one parent category.
+- Transactions reference either a category or a subcategory; if a subcategory is selected,
+  the parent category is implicitly associated.
+
+### 5.2 Category Properties
+
+| Property          | Description                                                       |
+|-------------------|-------------------------------------------------------------------|
+| `name`            | Human-readable label (user-customizable)                          |
+| `color`           | Hex color code for UI rendering                                   |
+| `icon`            | Icon identifier (from a predefined set or custom upload)          |
+| `order`           | User-defined display sort order                                   |
+| `isDefault`       | System-provided category (cannot be deleted, only hidden)         |
+| `isUserDefined`   | Created by the user                                               |
+| `isHidden`        | Excluded from category pickers; not deleted                       |
+| `isArchived`      | Soft-disabled; no new transactions may reference it               |
+
+### 5.3 Default vs User Categories
+
+- The system ships with a set of **default categories** covering common expense and income types.
+- Default categories cannot be deleted. They may be hidden or renamed.
+- Users may create unlimited custom categories and subcategories.
+- Custom categories may be archived when no longer needed.
+
+### 5.4 Category Intelligence
+
+| Feature                | Description                                                       |
+|------------------------|-------------------------------------------------------------------|
+| Auto-suggestion        | Suggests category based on transaction description using history  |
+| Automatic rules        | User-defined rules mapping keywords or merchants to categories    |
+| Category learning      | System improves suggestions based on confirmed categorizations    |
+
+---
+
+## 6. Credit Card Architecture
+
+### 6.1 Card Model
+
+Each credit card is a distinct entity linked to a user, with its own billing configuration.
+
+| Field              | Description                                                       |
+|--------------------|-------------------------------------------------------------------|
+| `name`             | User-defined card name                                            |
+| `brand`            | Card network: `VISA`, `MASTERCARD`, `ELO`, `AMEX`, etc.          |
+| `issuer`           | Issuing bank or institution                                       |
+| `limit`            | Total credit limit                                                |
+| `sharedLimit`      | Whether this card shares its limit with another card (group)      |
+| `closingDay`       | Day of month when the billing cycle closes                        |
+| `dueDay`           | Day of month when payment is due                                  |
+
+### 6.2 Invoice Architecture
+
+Each billing cycle produces one invoice.
+
+| Field                | Description                                                     |
+|----------------------|-----------------------------------------------------------------|
+| `referenceMonth`     | The month and year this invoice covers                          |
+| `closingDate`        | Date the invoice closed (no more charges added)                 |
+| `dueDate`            | Payment due date                                                |
+| `totalAmount`        | Sum of all charges in this cycle                                |
+| `status`             | `OPEN`, `CLOSED`, `PAID`, `PARTIAL`, `OVERDUE`                  |
+| `paidAmount`         | Amount paid when status is `PARTIAL`                            |
+
+**Invoice states:**
+- `OPEN`: current cycle, still accepting new charges.
+- `CLOSED`: cycle ended; awaiting payment.
+- `PAID`: full payment recorded.
+- `PARTIAL`: partial payment made; remainder enters revolving credit.
+- `OVERDUE`: due date passed without full payment.
+
+**Partial payment and revolving credit:**
+- A partial payment records the paid amount and carries the remainder as a new charge
+  on the next invoice, tagged as `REVOLVING`.
+- The system tracks installments that belong to future invoices as `FUTURE_INSTALLMENTS`.
+
+### 6.3 Card Visualizations
+
+| View                      | Description                                                    |
+|---------------------------|----------------------------------------------------------------|
+| Limit usage               | Used vs. available credit limit                                |
+| Available limit           | Remaining credit after current open invoice charges           |
+| Spending by card          | Total spending per card per period                             |
+| Spending by category      | Category breakdown of charges on a given card                  |
+| Multiple cards            | Consolidated view across all cards                             |
+
+---
+
+## 7. Dashboard & Reporting Architecture
+
+### 7.1 Overview Metrics
+
+The dashboard provides at-a-glance financial health indicators:
+
+| Metric               | Description                                                      |
+|----------------------|------------------------------------------------------------------|
+| Total balance        | Sum of all non-archived, non-investment account balances         |
+| Total net worth      | Total balance + investment account balances                      |
+| Monthly income       | Total `INCOME` transactions in the current calendar month        |
+| Monthly expenses     | Total `EXPENSE` transactions in the current calendar month       |
+| Monthly savings      | Monthly income minus monthly expenses                            |
+| Cash flow            | Net movement (income − expense) over a configurable time window  |
+
+### 7.2 Charts
+
+| Chart Type              | Description                                                    |
+|-------------------------|----------------------------------------------------------------|
+| Category pie chart      | Expense distribution by category for a given period           |
+| Timeline line chart     | Balance or cash flow trend over time                          |
+| Monthly bar chart       | Income vs. expense bars per month                             |
+| Monthly comparison      | Side-by-side comparison of two or more months                 |
+| Net worth evolution     | Net worth progression over time                               |
+
+### 7.3 Dashboard Widgets
+
+Widgets are configurable, composable units that populate the main dashboard view.
+
+| Widget                | Description                                                       |
+|-----------------------|-------------------------------------------------------------------|
+| Upcoming bills        | Pending/overdue transactions due within a configurable window      |
+| Upcoming invoices     | Credit card invoices due soon                                     |
+| Goals                 | Progress toward user-defined financial goals                      |
+| Subscriptions         | Recurring expenses tagged as subscriptions                        |
+| Recent transactions   | Latest N transactions across all accounts                         |
+| Largest expenses      | Top spending transactions in the current period                   |
+
+---
+
+## 8. Persistence Architecture
+
+### 8.1 Primary Entities
+
+| Entity                 | Purpose                                                            |
+|------------------------|--------------------------------------------------------------------|
+| `accounts`             | User accounts and wallets with type, balance, and lifecycle state  |
+| `transactions`         | All financial movements with full data model                       |
+| `installment_series`   | Master record for installment payment commitments                  |
+| `recurrence_rules`     | Schedule definition for recurring transaction generation           |
+| `categories`           | Category and subcategory definitions                               |
+| `category_rules`       | Auto-categorization rules defined by the user                      |
+| `tags`                 | Tag definitions per user                                           |
+| `transaction_tags`     | Many-to-many: transaction ↔ tag                                    |
+| `credit_cards`         | Credit card configuration per user                                 |
+| `invoices`             | Monthly billing cycle records per credit card                      |
+| `invoice_items`        | Individual charges belonging to an invoice                         |
+| `attachments`          | File metadata linked to transactions                               |
+
+### 8.2 Entity Design Constraints
+
+- **UUID** primary keys on all entities.
+- `created_at` and `updated_at` timestamps, auto-managed by JPA/Hibernate.
+- All entities are strictly scoped to a `user_id` foreign key; cross-user access is
+  architecturally impossible at the query level.
+- Soft-delete on `accounts` and `categories` via `deleted_at` nullable timestamp.
+- `CANCELLED` transactions are never hard-deleted; `cancelled_at` timestamp is set.
+- Appropriate unique constraints: account name per user, category name per parent per user,
+  card name per user.
+- Indexes on: `user_id` (all entities), `transactions.competence_date`,
+  `transactions.payment_date`, `transactions.status`, `invoices.due_date`.
+
+### 8.3 Schema Management
+
+- All schema changes managed exclusively via Flyway versioned migrations.
+- No schema changes via Hibernate `ddl-auto` in production environments.
+- Flyway is configured to run automatically on application startup in controlled
+  environments only.
+
+---
+
+## 9. Authorization & Data Scoping
+
+### 9.1 User Isolation
+
+Every domain entity carries a `user_id` foreign key referencing the authenticated principal.
+All repository queries include a `WHERE user_id = :currentUserId` predicate enforced at
+the service layer — never rely on the client to scope data.
+
+### 9.2 Authorization Enforcement
+
+- Spring Security method-level security (`@PreAuthorize`) gates all service operations.
+- JWT identity from the authentication module is the sole source of `currentUserId`.
+- No cross-user data access is permitted; attempts return `403 Forbidden`.
+
+---
+
+## 10. API Response Conventions
+
+- Consistent envelope structure for all API responses.
+- Errors return a standardized error body with: error code, generic message, and correlation ID.
+- HTTP status codes follow REST conventions strictly.
+- Authorization failures: `403 Forbidden`.
+- Validation errors: `400 Bad Request` with field-level details.
+- Resource not found: `404 Not Found` (only when the resource exists for the authenticated user).
+- All timestamps are returned in ISO 8601 format, UTC timezone.
+- Monetary values are returned as `BigDecimal` strings to avoid floating-point imprecision.
+
+---
+
+## 11. Privacy & LGPD Requirements
+
+### 11.1 Data Minimization
+
+- Only data necessary for personal finance management is collected.
+- No sensitive government identifiers (CPF, RG) are required or stored.
+- Location data is optional and user-initiated; never collected passively.
+
+### 11.2 Sensitive Data Handling
+
+- Attachment files are stored with access-controlled URLs; direct URL exposure is avoided.
+- Financial data is never included in logs beyond correlation identifiers.
+- Account numbers and card numbers (if stored) are masked in all log output.
+
+### 11.3 LGPD Future Readiness
+
+| Future Capability               | Architecture Requirement                            |
+|---------------------------------|-----------------------------------------------------|
+| Account deletion / right to erasure | Soft-delete + anonymization pipeline on all entities |
+| Data portability                | Exportable transaction and account history (CSV/JSON)|
+| Consent management              | Consent flags for optional data features (location) |
+| Log retention controls          | Configurable TTL on audit and transaction tables     |
+
+---
+
+## 12. Architectural Patterns & Design Principles
+
+### 12.1 Layered Architecture
+
+```
+Controller (API) Layer
+→ Receives HTTP requests, validates DTOs, delegates to service
+→ Returns standardized API responses
+
+Service Layer
+→ Encapsulates all business and financial logic
+→ Enforces user scoping and authorization
+→ Throws domain-specific exceptions
+
+Repository Layer
+→ Spring Data JPA repositories
+→ No business logic; data access only
+
+Domain Layer
+→ JPA entities and value objects
+→ Domain exceptions and enums
+
+Security Layer
+→ JWT authentication via auth module integration
+→ Method-level authorization
+```
+
+### 12.2 Design Principles
+
+- **Single Responsibility**: each class has one clear reason to change.
+- **Dependency Inversion**: services depend on interfaces, not concrete implementations.
+- **DTO pattern**: request/response objects are strictly separated from JPA entities;
+  entities never leak outside the service layer.
+- **Centralized exception handling**: a global `@ControllerAdvice` maps domain exceptions
+  to appropriate HTTP responses uniformly.
+- **Environment-based configuration**: `application.yml` uses environment variable binding;
+  no secrets in default profiles.
+
+### 12.3 Extensibility Points
+
+| Extension Point                | Future Use Case                                      |
+|--------------------------------|------------------------------------------------------|
+| Multi-currency support         | Exchange rate integration and currency conversion    |
+| Goal engine                    | Savings goal tracking with progress calculations     |
+| Subscription detection         | Auto-detecting recurring expenses as subscriptions   |
+| Notification port              | Due-date alerts, overspending warnings               |
+| Report export                  | PDF/CSV statement generation                         |
+| Open Banking integration       | Automatic transaction import from bank feeds         |
+| Multi-tenancy / family sharing | Shared budget views across accounts                  |
+
+---
+
+## 13. Non-Functional Requirements
+
+| Requirement          | Target                                                              |
+|----------------------|---------------------------------------------------------------------|
+| **Availability**     | Stateless design enables horizontal scaling with no affinity        |
+| **Security**         | All data strictly user-scoped; no cross-user leakage possible       |
+| **Observability**    | Structured JSON logs; correlation IDs; domain event stream          |
+| **Testability**      | Pure service layer, mockable ports, no static coupling              |
+| **Deployability**    | Docker-ready; externalized configuration; health endpoints          |
+| **Compliance**       | LGPD-aligned data minimization and audit trail                      |
+| **Precision**        | Monetary values use `BigDecimal`; no floating-point arithmetic       |
+| **Portability**      | No vendor-specific APIs; standard Spring ecosystem only             |
+=== docs/v1/user-stories.md ===
+# User Stories — Cash Control API
+
+## Overview
+
+This document captures production-grade user stories for the Cash Control API — a personal
+finance management backend built on Spring Boot 4 / Java 25, designed for multi-account
+balance tracking, transaction lifecycle management, credit card billing, and financial reporting.
+
+The module serves two categories of principals:
+
+- **Authenticated Users**: principals with a valid JWT access token managing their own financial data. All financial data is strictly scoped to the authenticated user — no cross-user access is architecturally possible.
+- **System**: automated processes responsible for status recalculation, recurring transaction generation, overdue detection, and scheduled data maintenance.
+
+All stories are MVP-first, implementation-aware, and aligned with the stateless JWT identity model provided by the authentication module, Spring Data JPA repositories, granular user-scoped data isolation, and LGPD privacy-by-design requirements.
+
+---
+
+# 1. Account & Wallet Management
+
+## US-1.1: Create Account
+
+**As an** authenticated user  
+**I want to** create a new financial account or wallet  
+**So that** I can track the balance and transactions associated with that account
+
+**Acceptance Criteria:**
+- [ ] Endpoint requires a valid JWT; the account is created scoped to the authenticated user's UUID.
+- [ ] Accepts: name, type (`CHECKING`, `SAVINGS`, `CASH`, `VIRTUAL_WALLET`, `INTERNATIONAL`, `JOINT`, `INVESTMENT`), initial balance (defaults to 0), optional currency code (defaults to `BRL`), and optional description.
+- [ ] Name is validated as non-blank and unique per user.
+- [ ] Initial balance is stored as a seed `MANUAL_ADJUSTMENT` transaction at account creation time, preserving the balance history from day one.
+- [ ] Account is created with active status; `archived_at` is null.
+- [ ] HTTP 201 returns the created account DTO; the entity is never exposed directly.
+
+**Expected Result:** A new account is created and immediately available for transactions. The initial balance is recorded as the first transaction in history.
+
+---
+
+## US-1.2: List Accounts
+
+**As an** authenticated user  
+**I want to** list all my accounts  
+**So that** I can see my financial accounts at a glance and navigate to each one
+
+**Acceptance Criteria:**
+- [ ] Returns all non-deleted accounts belonging to the authenticated user.
+- [ ] Each account entry includes: UUID, name, type, currency, computed balance, archived status.
+- [ ] Archived accounts are excluded by default; included when `includeArchived=true` query param is set.
+- [ ] Investment accounts are flagged so the client can separate liquid assets from net worth assets.
+- [ ] Result is ordered by user-defined sort order (defaulting to creation date ascending).
+
+**Expected Result:** The user sees their full list of accounts with current balances. Archived accounts are hidden by default.
+
+---
+
+## US-1.3: Edit Account
+
+**As an** authenticated user  
+**I want to** update the details of one of my accounts  
+**So that** I can correct the name, description, or metadata without recreating the account
+
+**Acceptance Criteria:**
+- [ ] Accepts: name, description. Type and initial balance are immutable after creation.
+- [ ] Name must remain unique per user; HTTP 409 if a duplicate name results.
+- [ ] Currency is immutable after creation to preserve transaction history consistency.
+- [ ] Returns the updated account DTO.
+
+**Expected Result:** The account's editable fields are updated. Immutable fields (type, currency) are silently ignored or explicitly rejected.
+
+---
+
+## US-1.4: Archive Account
+
+**As an** authenticated user  
+**I want to** archive an account I no longer actively use  
+**So that** it is excluded from my active dashboards and balance aggregations while its history is preserved
+
+**Acceptance Criteria:**
+- [ ] Sets `archived_at` timestamp on the account record; no physical deletion.
+- [ ] Archived accounts are excluded from total balance and cash flow calculations.
+- [ ] Historical transactions on the archived account remain queryable and reportable.
+- [ ] Archived accounts cannot receive new transactions; attempts return HTTP 422.
+- [ ] An archived account can be unarchived at any time, restoring it to active status.
+
+**Expected Result:** The account is hidden from active views and excluded from aggregations. History is fully preserved and the account can be restored.
+
+---
+
+## US-1.5: Delete Account
+
+**As an** authenticated user  
+**I want to** permanently delete an account  
+**So that** I can remove an account that was created by mistake and has no meaningful transaction history
+
+**Acceptance Criteria:**
+- [ ] Deletion is only permitted if the account has no transactions beyond the seed initial balance record.
+- [ ] If the account has transactions, deletion is rejected with HTTP 422 and a message suggesting archiving instead.
+- [ ] On permitted deletion: the account and its seed record are hard-deleted.
+- [ ] The user receives HTTP 204 on success.
+
+**Expected Result:** Empty accounts can be deleted. Accounts with transaction history must be archived, not deleted, to preserve data integrity.
+
+---
+
+## US-1.6: Manual Balance Adjustment
+
+**As an** authenticated user  
+**I want to** manually adjust the balance of an account to match its real-world balance  
+**So that** I can reconcile the system balance with my actual bank statement after a discrepancy
+
+**Acceptance Criteria:**
+- [ ] Accepts: account UUID, target balance (the desired real-world balance), optional notes.
+- [ ] The system calculates the difference between the current computed balance and the target balance.
+- [ ] A `MANUAL_ADJUSTMENT` transaction is created for the difference amount, with `competenceDate` set to today.
+- [ ] The adjustment transaction stores both the before and after balance in its metadata for auditability.
+- [ ] The adjustment does not affect cash flow reports (income/expense aggregations exclude `MANUAL_ADJUSTMENT` type).
+- [ ] Returns the adjustment transaction and the new computed balance.
+
+**Expected Result:** The account balance is reconciled. The adjustment is transparent in history, distinguishable from normal income/expense transactions, and does not distort cash flow reports.
+
+---
+
+## US-1.7: Transfer Between Accounts
+
+**As an** authenticated user  
+**I want to** record a transfer between two of my accounts  
+**So that** the money movement is tracked without affecting my net income or expenses
+
+**Acceptance Criteria:**
+- [ ] Accepts: source account UUID, destination account UUID, amount, date, optional description.
+- [ ] Both accounts must belong to the authenticated user; cross-user transfers are rejected with HTTP 403.
+- [ ] Source and destination must be different accounts; same-account transfer is rejected with HTTP 422.
+- [ ] Creates two linked transactions atomically: a debit on the source and a credit on the destination, both with `type = TRANSFER` and a shared `transfer_group_id`.
+- [ ] The transfer nets to zero at the portfolio level — it does not appear in income or expense totals.
+- [ ] If either account is archived, the transfer is rejected with HTTP 422.
+- [ ] Returns both linked transactions.
+
+**Expected Result:** The transfer is recorded as a paired debit/credit. Portfolio totals are unaffected. Both transactions are linked for traceability.
+
+---
+
+# 2. Transaction Management
+
+## US-2.1: Create Transaction
+
+**As an** authenticated user  
+**I want to** record a new financial transaction  
+**So that** my account balance and spending history accurately reflect my real-world financial activity
+
+**Acceptance Criteria:**
+- [ ] Accepts: account UUID, type (`INCOME`, `EXPENSE`, `REFUND`), amount (positive), description, `competenceDate`, optional `paymentDate`, optional notes, optional category UUID, optional subcategory UUID, optional tags, optional location, optional status (defaults to `PAID`).
+- [ ] Account must belong to the authenticated user.
+- [ ] Amount must be positive and greater than zero.
+- [ ] If `status = PAID` and no `paymentDate` is provided, `paymentDate` defaults to `competenceDate`.
+- [ ] If `status = PENDING`, the transaction does not yet affect the account's settled balance — this is configurable per implementation (cash vs. accrual view).
+- [ ] Category and subcategory, if provided, must belong to the authenticated user or be system defaults.
+- [ ] HTTP 201 returns the created transaction DTO.
+
+**Expected Result:** The transaction is recorded with all provided data. Balance is updated according to the transaction's status and type.
+
+---
+
+## US-2.2: Edit Transaction
+
+**As an** authenticated user  
+**I want to** edit a transaction I previously recorded  
+**So that** I can correct mistakes or update missing information
+
+**Acceptance Criteria:**
+- [ ] Only transactions belonging to the authenticated user are editable.
+- [ ] Editable fields: amount, description, notes, `competenceDate`, `paymentDate`, status, category, subcategory, tags, location.
+- [ ] Changing `type` on an existing transaction is not permitted; the user must delete and recreate.
+- [ ] If a transaction is part of an installment series, editing it individually detaches it from the series (see US-3.3).
+- [ ] Returns the updated transaction DTO.
+
+**Expected Result:** Transaction details are corrected. Changes are reflected immediately in balance and report calculations.
+
+---
+
+## US-2.3: Delete Transaction
+
+**As an** authenticated user  
+**I want to** delete a transaction  
+**So that** I can remove erroneously recorded entries from my history
+
+**Acceptance Criteria:**
+- [ ] Only transactions belonging to the authenticated user are deletable.
+- [ ] Transactions that are part of an installment series may be deleted individually; the series record is not affected.
+- [ ] Transfer transactions must be deleted as a pair via a dedicated transfer-delete endpoint; deleting one leg individually is rejected with HTTP 422.
+- [ ] The account balance is recalculated after deletion.
+- [ ] HTTP 204 on success.
+
+**Expected Result:** The transaction is removed. Balance and reports are immediately updated to reflect the deletion.
+
+---
+
+## US-2.4: Mark Transaction as Paid
+
+**As an** authenticated user  
+**I want to** mark a pending or overdue transaction as paid  
+**So that** my settled balance reflects the actual payment
+
+**Acceptance Criteria:**
+- [ ] Accepts: transaction UUID and optional `paymentDate` (defaults to today).
+- [ ] Transition is valid from `PENDING` → `PAID` and `OVERDUE` → `PAID`.
+- [ ] `paymentDate` is set to the provided date or today's date.
+- [ ] The settled balance of the account is updated accordingly.
+- [ ] Returns the updated transaction.
+
+**Expected Result:** The transaction is marked paid. Settled account balance reflects the payment.
+
+---
+
+## US-2.5: Cancel Transaction
+
+**As an** authenticated user  
+**I want to** cancel a transaction  
+**So that** it no longer affects my balance while being preserved in history for reference
+
+**Acceptance Criteria:**
+- [ ] Valid from any non-cancelled status.
+- [ ] `CANCELLED` transactions do not affect account balance calculations.
+- [ ] `CANCELLED` transactions remain visible in history with their cancelled status.
+- [ ] `cancelled_at` timestamp is set; no hard deletion.
+- [ ] A cancelled transaction cannot be re-activated; the user must create a new transaction.
+
+**Expected Result:** The transaction is cancelled and excluded from balance calculations. The historical record is preserved.
+
+---
+
+## US-2.6: List Transactions
+
+**As an** authenticated user  
+**I want to** retrieve a filtered, paginated list of transactions  
+**So that** I can browse my financial history and find specific entries
+
+**Acceptance Criteria:**
+- [ ] Returns only transactions belonging to the authenticated user.
+- [ ] Supports filtering by: account UUID, type, status, category UUID, date range (`competenceDate` or `paymentDate`), tags, amount range.
+- [ ] Supports full-text search on description and notes.
+- [ ] Results are paginated; default order is `competenceDate` descending.
+- [ ] `CANCELLED` transactions are excluded by default; included when `includeCancelled=true`.
+- [ ] Each item in the response is a summary DTO; a separate endpoint provides the full transaction detail.
+
+**Expected Result:** The user retrieves a filtered, paginated transaction list. Cancelled transactions are hidden by default.
+
+---
+
+## US-2.7: Attach File to Transaction
+
+**As an** authenticated user  
+**I want to** attach a receipt or proof-of-payment file to a transaction  
+**So that** I have documentary evidence associated with each spending record
+
+**Acceptance Criteria:**
+- [ ] Accepts: transaction UUID and one or more file uploads (receipt, invoice, proof).
+- [ ] Supported file types: PDF, PNG, JPG, JPEG. Maximum file size is configurable.
+- [ ] Files are stored with access-controlled references; raw file paths are never exposed in API responses.
+- [ ] Multiple attachments per transaction are permitted up to a configurable limit.
+- [ ] Attachment metadata (UUID, filename, MIME type, size, uploaded timestamp) is returned; never the raw file URL in a public-facing form.
+- [ ] Attachments may be deleted individually from a transaction.
+
+**Expected Result:** Files are securely attached to transactions. Metadata is retrievable; file access is controlled.
+
+---
+
+## US-2.8: Automatic Overdue Detection
+
+**As the** system  
+**I want to** automatically update transactions to `OVERDUE` status when their payment date passes without settlement  
+**So that** users see an accurate representation of unpaid obligations
+
+**Acceptance Criteria:**
+- [ ] A scheduled process (or on-demand query-time evaluation) transitions `PENDING` transactions to `OVERDUE` when `paymentDate < today` and status is still `PENDING`.
+- [ ] Only transactions with a defined `paymentDate` are subject to overdue detection.
+- [ ] `OVERDUE` detection does not modify `paymentDate` or any other field — only `status` changes.
+- [ ] The transition is non-destructive and reversible (marking as paid from `OVERDUE` is valid).
+- [ ] Overdue transitions are not individually logged as audit events; the status change is implicit in the transaction record.
+
+**Expected Result:** Unpaid transactions past their due date are surfaced as overdue without any user action required.
+
+---
+
+# 3. Installment Transactions
+
+## US-3.1: Create Installment Transaction
+
+**As an** authenticated user  
+**I want to** record a purchase split into multiple installments  
+**So that** each future payment is individually tracked and reflected in the correct billing month
+
+**Acceptance Criteria:**
+- [ ] Accepts: account UUID (or credit card UUID), total amount, number of installments, first installment date, description, optional category, optional notes.
+- [ ] An `installment_series` master record is created holding the aggregate terms.
+- [ ] Individual transaction records are generated for each installment: `installmentNumber`, `totalInstallments`, per-installment amount (total / installments, with remainder on last), and sequential `paymentDate` (monthly by default).
+- [ ] All installment transactions are linked to the series via `installment_series_id`.
+- [ ] First installment status may be `PAID` if `firstPaymentDate` is today or past; remaining installments default to `PENDING`.
+- [ ] HTTP 201 returns the series record and the list of generated installment transactions.
+
+**Expected Result:** The purchase is split into individually trackable installment records. Each installment appears in the correct month's cash flow.
+
+---
+
+## US-3.2: Edit Entire Installment Series
+
+**As an** authenticated user  
+**I want to** edit all remaining unpaid installments of a series at once  
+**So that** I can correct the description, category, or account for the entire commitment
+
+**Acceptance Criteria:**
+- [ ] Accepts: series UUID and the fields to update (description, notes, category, account).
+- [ ] Only future installments with status `PENDING` or `OVERDUE` are updated; already-`PAID` or `CANCELLED` installments are not modified.
+- [ ] Amount redistribution across remaining installments is not performed by this endpoint (use early settlement for that).
+- [ ] The `installment_series` master record is also updated.
+- [ ] Returns the updated series and the count of affected installments.
+
+**Expected Result:** All remaining unpaid installments are updated consistently. Paid installments are preserved as-is.
+
+---
+
+## US-3.3: Edit Individual Installment
+
+**As an** authenticated user  
+**I want to** edit a single installment without affecting the rest of the series  
+**So that** I can record a specific payment variation (e.g., a late fee on one installment)
+
+**Acceptance Criteria:**
+- [ ] Editing an individual installment's amount, date, or notes detaches it from the series: `installment_series_id` is preserved for reference but the installment is flagged as `detached = true`.
+- [ ] Detached installments are excluded from series-wide edit operations (US-3.2).
+- [ ] The series record reflects the actual remaining installments excluding detached ones.
+- [ ] Returns the updated individual installment.
+
+**Expected Result:** The selected installment is updated independently. The series continues to manage the remaining non-detached installments.
+
+---
+
+## US-3.4: Early Settlement (Quitação Antecipada)
+
+**As an** authenticated user  
+**I want to** pay off all remaining installments at once before their due dates  
+**So that** I can record a full early payoff, optionally at a discounted amount
+
+**Acceptance Criteria:**
+- [ ] Accepts: series UUID, settlement amount (may differ from the remaining total for discount), settlement date.
+- [ ] All remaining `PENDING` / `OVERDUE` installments are cancelled (`CANCELLED` status).
+- [ ] A single new `PAID` transaction is created for the settlement amount, linked to the series via `installment_series_id` and flagged as `early_settlement = true`.
+- [ ] The series record is marked `settled` with a `settled_at` timestamp.
+- [ ] Returns the settlement transaction and the count of cancelled installments.
+
+**Expected Result:** Remaining installments are cancelled and replaced by a single settlement transaction. The series is closed.
+
+---
+
+## US-3.5: Advance Installment (Antecipação de Parcela)
+
+**As an** authenticated user  
+**I want to** move one or more future installments to an earlier payment date  
+**So that** I can record a partial advance payment, optionally with an early-payment discount
+
+**Acceptance Criteria:**
+- [ ] Accepts: a list of installment UUIDs, new payment date, and optional adjusted amount per installment.
+- [ ] All selected installments must belong to the authenticated user and have status `PENDING`.
+- [ ] `paymentDate` is updated to the new date; if the new date is today or past and status remains `PENDING`, it transitions to `PAID`.
+- [ ] Optional adjusted amount replaces the original installment amount (for early-payment discount).
+- [ ] Returns the list of updated installments.
+
+**Expected Result:** Selected installments are moved forward in time. Optional discount amounts are recorded on the individual installment records.
+
+---
+
+# 4. Recurring Transactions
+
+## US-4.1: Create Recurring Transaction
+
+**As an** authenticated user  
+**I want to** set up a transaction that repeats on a defined schedule  
+**So that** regular income or expenses (salary, rent, subscriptions) are automatically recorded without manual entry each period
+
+**Acceptance Criteria:**
+- [ ] Accepts: account UUID, type, amount, description, category, first occurrence date, frequency (`DAILY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`, `YEARLY`), and optional end date.
+- [ ] A `recurrence_rule` record is created with the schedule definition.
+- [ ] The first transaction instance is created immediately for the first occurrence date.
+- [ ] Subsequent instances are generated proactively (e.g., for the next N periods) or lazily on demand — implementation choice.
+- [ ] Open-ended recurrences (no `endDate`) generate indefinitely until paused or deleted.
+- [ ] HTTP 201 returns the recurrence rule and the first generated transaction.
+
+**Expected Result:** A recurrence rule is established. The first transaction is immediately visible and future instances are generated according to the schedule.
+
+---
+
+## US-4.2: Edit Recurring Series
+
+**As an** authenticated user  
+**I want to** update the terms of a recurring transaction for all future occurrences  
+**So that** changes to a subscription price or salary take effect going forward
+
+**Acceptance Criteria:**
+- [ ] Accepts: recurrence UUID and updated fields (amount, description, category, account).
+- [ ] Changes apply to all future (`PENDING`) instances from the current date forward.
+- [ ] Already-`PAID` instances are not modified.
+- [ ] The `recurrence_rule` master record is updated.
+- [ ] Returns the updated recurrence rule and the count of regenerated/updated future instances.
+
+**Expected Result:** Future recurrences reflect the updated terms. Historical instances are unchanged.
+
+---
+
+## US-4.3: Pause Recurrence
+
+**As an** authenticated user  
+**I want to** pause a recurring transaction temporarily  
+**So that** no new instances are generated during a period when the recurring obligation is suspended
+
+**Acceptance Criteria:**
+- [ ] Accepts: recurrence UUID and optional pause end date.
+- [ ] The `recurrence_rule` status is set to `PAUSED`; `paused_at` and optional `resume_at` are stored.
+- [ ] No new transaction instances are generated while the rule is paused.
+- [ ] Existing `PENDING` instances for the pause period are cancelled.
+- [ ] The user may manually resume the recurrence at any time, which restores `ACTIVE` status and re-generates instances from the resume date.
+
+**Expected Result:** The recurring series is paused. No new transactions appear until the user resumes it.
+
+---
+
+## US-4.4: Delete Recurring Series
+
+**As an** authenticated user  
+**I want to** permanently delete a recurring transaction rule  
+**So that** I can remove a recurrence that is no longer relevant and stop future instance generation
+
+**Acceptance Criteria:**
+- [ ] Accepts: recurrence UUID and a deletion strategy: `FUTURE_ONLY` (cancel future pending instances) or `ALL` (cancel all instances including past pending).
+- [ ] Already-`PAID` instances are never deleted regardless of strategy.
+- [ ] The `recurrence_rule` record is soft-deleted (`deleted_at` set).
+- [ ] Returns the count of cancelled instances.
+
+**Expected Result:** The recurrence rule is removed and no new instances will be generated. Historical paid records are preserved.
+
+---
+
+# 5. Category Management
+
+## US-5.1: List Categories
+
+**As an** authenticated user  
+**I want to** browse all available categories and subcategories  
+**So that** I can assign them to transactions or manage my category structure
+
+**Acceptance Criteria:**
+- [ ] Returns all system default categories plus categories created by the authenticated user.
+- [ ] Each category includes: UUID, name, color, icon, parent UUID (null for root), isDefault flag, isHidden flag, isArchived flag, display order.
+- [ ] Subcategories are nested under their parent in the response structure.
+- [ ] Hidden categories are excluded by default; included with `includeHidden=true`.
+- [ ] Archived categories are excluded by default; included with `includeArchived=true`.
+
+**Expected Result:** The user sees their full, structured category tree with user-defined and system categories clearly distinguished.
+
+---
+
+## US-5.2: Create Custom Category
+
+**As an** authenticated user  
+**I want to** create a custom category or subcategory  
+**So that** I can organize transactions according to my personal financial structure
+
+**Acceptance Criteria:**
+- [ ] Accepts: name, optional parent category UUID (if provided, creates a subcategory), color (hex), icon identifier.
+- [ ] Name must be unique within the same parent scope per user; HTTP 409 on duplicate.
+- [ ] Parent UUID, if provided, must belong to a root-level category (subcategories cannot be nested more than two levels).
+- [ ] Category is created scoped to the authenticated user.
+- [ ] HTTP 201 returns the created category DTO.
+
+**Expected Result:** A new custom category or subcategory is available for use in transactions.
+
+---
+
+## US-5.3: Edit Category
+
+**As an** authenticated user  
+**I want to** update the name, color, icon, or display order of one of my categories  
+**So that** my category structure accurately reflects my current organizational preferences
+
+**Acceptance Criteria:**
+- [ ] Only user-defined categories are editable; system default categories can only have `isHidden` toggled (see US-5.4).
+- [ ] Accepts: name, color, icon, display order.
+- [ ] Name uniqueness within parent scope is re-validated; HTTP 409 on conflict.
+- [ ] Returns the updated category DTO.
+
+**Expected Result:** The category is updated. Changes are immediately reflected in category pickers and reports.
+
+---
+
+## US-5.4: Hide System Category
+
+**As an** authenticated user  
+**I want to** hide a default system category I never use  
+**So that** my category picker is uncluttered without affecting other users or system integrity
+
+**Acceptance Criteria:**
+- [ ] Accepts: category UUID and `isHidden = true/false`.
+- [ ] Works on both system default and user-defined categories.
+- [ ] Hidden categories do not appear in transaction category pickers.
+- [ ] Transactions already categorized under a hidden category retain their assignment; the category is simply excluded from future selection.
+- [ ] System categories cannot be deleted — hiding is the maximum action available.
+
+**Expected Result:** The selected category disappears from pickers. Existing categorized transactions are unaffected.
+
+---
+
+## US-5.5: Archive Category
+
+**As an** authenticated user  
+**I want to** archive a custom category I no longer use  
+**So that** it stops appearing in my pickers while its transaction history is preserved
+
+**Acceptance Criteria:**
+- [ ] Only user-defined categories may be archived; system defaults use hiding only.
+- [ ] Archived categories cannot be assigned to new transactions; attempts return HTTP 422.
+- [ ] Transactions already assigned to the archived category retain their assignment.
+- [ ] Archiving a parent category also archives all its subcategories.
+- [ ] Archived categories can be unarchived at any time.
+
+**Expected Result:** The archived category is excluded from transaction pickers. Historical categorizations are intact.
+
+---
+
+## US-5.6: Auto-Suggest Category
+
+**As an** authenticated user  
+**I want to** receive an automatic category suggestion when I type a transaction description  
+**So that** categorization is faster and more consistent across similar transactions
+
+**Acceptance Criteria:**
+- [ ] Endpoint accepts a partial or complete transaction description string.
+- [ ] Returns a ranked list of suggested categories based on the user's prior categorization history for similar descriptions.
+- [ ] If no history exists, returns the most commonly used categories for the user.
+- [ ] Suggestions include: category UUID, name, and a confidence score.
+- [ ] The suggestion is non-binding — the user may override it freely.
+
+**Expected Result:** Category suggestions reduce manual categorization effort and improve consistency.
+
+---
+
+## US-5.7: Create Category Rule
+
+**As an** authenticated user  
+**I want to** create a rule that automatically assigns a category to transactions matching a description pattern  
+**So that** recurring merchants or payees are always categorized correctly without manual intervention
+
+**Acceptance Criteria:**
+- [ ] Accepts: keyword or pattern, target category UUID, optional subcategory UUID, optional account scope.
+- [ ] Rules are applied at transaction creation time when the description matches the pattern.
+- [ ] Multiple rules may match; priority order is user-configurable.
+- [ ] Rules are scoped to the authenticated user.
+- [ ] If a rule auto-assigns a category, the user may override it on the individual transaction.
+- [ ] HTTP 201 returns the created rule.
+
+**Expected Result:** Matching transactions are auto-categorized. The user's categorization intent is encoded in reusable rules.
+
+---
+
+# 6. Credit Card Management
+
+## US-6.1: Create Credit Card
+
+**As an** authenticated user  
+**I want to** add a credit card to my financial profile  
+**So that** I can track charges, invoices, and limit usage for that card
+
+**Acceptance Criteria:**
+- [ ] Accepts: name, brand (`VISA`, `MASTERCARD`, `ELO`, `AMEX`, `HIPERCARD`, `OTHER`), issuer name, credit limit, closing day (1–28), due day (1–28), optional `sharedLimitGroupId`.
+- [ ] Name must be unique per user; HTTP 409 on duplicate.
+- [ ] `closingDay` and `dueDay` are validated as valid day-of-month values.
+- [ ] The first open invoice is automatically created on card creation for the current billing cycle.
+- [ ] HTTP 201 returns the created card DTO.
+
+**Expected Result:** A new credit card is registered. Its first invoice cycle is immediately open for charges.
+
+---
+
+## US-6.2: Record Credit Card Expense
+
+**As an** authenticated user  
+**I want to** record a credit card charge  
+**So that** it is assigned to the correct billing invoice and reflected in my limit usage
+
+**Acceptance Criteria:**
+- [ ] Accepts: card UUID, amount, description, `competenceDate`, optional category, optional subcategory, optional tags, optional notes.
+- [ ] The charge is assigned to the correct invoice based on `competenceDate` relative to the card's `closingDay`.
+- [ ] If `competenceDate` falls after the current cycle's closing date, the charge is assigned to the next invoice.
+- [ ] The card's used limit is updated in real time.
+- [ ] HTTP 201 returns the charge transaction and its assigned invoice reference.
+
+**Expected Result:** The charge is recorded under the correct invoice cycle. Limit usage is updated immediately.
+
+---
+
+## US-6.3: View Invoice
+
+**As an** authenticated user  
+**I want to** view the details of a credit card invoice  
+**So that** I can see all charges for a billing cycle, the total due, and the payment status
+
+**Acceptance Criteria:**
+- [ ] Accepts: card UUID and optional `referenceMonth` (defaults to current open invoice).
+- [ ] Returns: invoice UUID, reference month, closing date, due date, total amount, status, paid amount, list of charge transactions.
+- [ ] Charge transactions are paginated within the invoice response.
+- [ ] Future installment charges attributed to this invoice are included with a `FUTURE` flag.
+- [ ] The response distinguishes between the open (current) invoice and closed/paid invoices.
+
+**Expected Result:** The user has a clear, itemized view of each billing cycle including all charges, totals, and payment status.
+
+---
+
+## US-6.4: Pay Invoice
+
+**As an** authenticated user  
+**I want to** record payment of a credit card invoice  
+**So that** the invoice status reflects the payment and the corresponding debit is registered on my bank account
+
+**Acceptance Criteria:**
+- [ ] Accepts: invoice UUID, paid amount, payment date, source account UUID (the bank account debited for the payment).
+- [ ] If `paidAmount == invoice.totalAmount`: invoice status transitions to `PAID`.
+- [ ] If `paidAmount < invoice.totalAmount`: invoice status transitions to `PARTIAL`; the unpaid remainder is recorded as a `REVOLVING` charge added to the next invoice.
+- [ ] A debit transaction is created on the source account for the `paidAmount`.
+- [ ] Returns the updated invoice and the generated debit transaction.
+
+**Expected Result:** The payment is recorded. Full payment closes the invoice; partial payment moves the remainder to the next cycle as revolving credit.
+
+---
+
+## US-6.5: View Limit Usage
+
+**As an** authenticated user  
+**I want to** see my current limit usage and available credit for each card  
+**So that** I know how much credit I have left before making a new purchase
+
+**Acceptance Criteria:**
+- [ ] Returns for each card: total limit, used amount (charges in current open invoice + pending installments on future invoices), available limit.
+- [ ] Available limit = total limit − used amount.
+- [ ] For shared-limit groups, the group-level available limit is also shown.
+- [ ] Updates in real time after every charge or payment.
+
+**Expected Result:** The user always sees an up-to-date snapshot of their credit availability per card.
+
+---
+
+## US-6.6: List Card Spending by Category
+
+**As an** authenticated user  
+**I want to** see a breakdown of my credit card spending by category for a given period  
+**So that** I can understand where my card expenses are concentrated
+
+**Acceptance Criteria:**
+- [ ] Accepts: card UUID, date range (defaults to current invoice cycle).
+- [ ] Returns: list of categories, total amount per category, percentage of total spending.
+- [ ] Uncategorized charges are grouped under a special `UNCATEGORIZED` entry.
+- [ ] Results are sorted by amount descending.
+
+**Expected Result:** The user sees a ranked category breakdown of their card spending for the selected period.
+
+---
+
+# 7. Dashboard & Reporting
+
+## US-7.1: Dashboard Overview Metrics
+
+**As an** authenticated user  
+**I want to** see aggregated financial health metrics on my dashboard  
+**So that** I have an immediate snapshot of my current financial position
+
+**Acceptance Criteria:**
+- [ ] Returns all metrics scoped to the authenticated user.
+- [ ] **Total balance**: sum of all non-archived, non-investment account balances (settled transactions only).
+- [ ] **Total net worth**: total balance + investment account balances.
+- [ ] **Monthly income**: sum of `PAID` `INCOME` transactions with `paymentDate` in the current calendar month.
+- [ ] **Monthly expenses**: sum of `PAID` `EXPENSE` transactions with `paymentDate` in the current calendar month.
+- [ ] **Monthly savings**: monthly income minus monthly expenses.
+- [ ] **Cash flow**: net movement (income − expense) over a configurable window (default: current month).
+- [ ] All monetary values use `BigDecimal` string representation; no floating-point.
+
+**Expected Result:** A single endpoint returns the complete financial health snapshot. All figures are scoped to the authenticated user and computed on demand from transaction history.
+
+---
+
+## US-7.2: Category Pie Chart Data
+
+**As an** authenticated user  
+**I want to** retrieve spending distribution by category for a given period  
+**So that** I can visualize where my money is going
+
+**Acceptance Criteria:**
+- [ ] Accepts: date range, optional account UUID filter, transaction type filter (default: `EXPENSE`).
+- [ ] Returns: list of categories with total amount and percentage of total for the period.
+- [ ] Only `PAID` transactions are included; `PENDING`, `OVERDUE`, and `CANCELLED` are excluded.
+- [ ] Transactions without a category are grouped under `UNCATEGORIZED`.
+- [ ] Subcategories roll up to their parent category unless `groupBySubcategory=true` is set.
+- [ ] Results are sorted by amount descending.
+
+**Expected Result:** A dataset ready for pie chart rendering, showing the proportional breakdown of spending by category.
+
+---
+
+## US-7.3: Monthly Bar Chart Data
+
+**As an** authenticated user  
+**I want to** retrieve monthly income and expense totals for a range of months  
+**So that** I can visualize my spending and earning trends over time
+
+**Acceptance Criteria:**
+- [ ] Accepts: number of months (default: 6, max: 24), optional account UUID filter.
+- [ ] Returns: one entry per month with: month label (YYYY-MM), total income, total expenses, net (income − expenses).
+- [ ] Only `PAID` transactions are included.
+- [ ] Months with no transactions are included with zero values (no gaps in the timeline).
+- [ ] Ordered chronologically, oldest to newest.
+
+**Expected Result:** A month-by-month dataset for bar chart rendering, covering the requested historical window.
+
+---
+
+## US-7.4: Net Worth Evolution Chart Data
+
+**As an** authenticated user  
+**I want to** retrieve the evolution of my net worth over time  
+**So that** I can track my overall financial progress
+
+**Acceptance Criteria:**
+- [ ] Accepts: date range and granularity (`DAILY`, `WEEKLY`, `MONTHLY`).
+- [ ] Returns: one entry per period with a computed net worth snapshot (total balance + investments at that point in time).
+- [ ] Net worth is computed by replaying the transaction history up to each snapshot date.
+- [ ] Only `PAID` transactions contribute to historical balance calculations.
+- [ ] Results are ordered chronologically.
+
+**Expected Result:** A time-series dataset for line chart rendering showing how total net worth has changed over the selected period.
+
+---
+
+## US-7.5: Monthly Comparison Data
+
+**As an** authenticated user  
+**I want to** compare income and expenses between two selected months  
+**So that** I can understand how my financial behavior has changed period-over-period
+
+**Acceptance Criteria:**
+- [ ] Accepts: two month references (YYYY-MM format).
+- [ ] Returns: for each month — total income, total expenses, savings, and a per-category expense breakdown.
+- [ ] Delta values (difference and percentage change) are computed for each metric.
+- [ ] Only `PAID` transactions are included.
+
+**Expected Result:** A side-by-side comparison dataset showing income, expenses, and category-level changes between the two months.
+
+---
+
+## US-7.6: Upcoming Bills Widget
+
+**As an** authenticated user  
+**I want to** see a list of pending and overdue transactions due in the near future  
+**So that** I can plan payments and avoid missing due dates
+
+**Acceptance Criteria:**
+- [ ] Returns `PENDING` and `OVERDUE` transactions where `paymentDate <= today + configurable window` (default: 7 days).
+- [ ] Results are ordered by `paymentDate` ascending (most urgent first).
+- [ ] Each entry includes: amount, description, account name, category, `paymentDate`, status.
+- [ ] Optional `daysAhead` parameter allows the user to extend or narrow the window.
+- [ ] Limited to a maximum of N results (configurable, default 20) for widget purposes.
+
+**Expected Result:** The user sees an urgency-ranked list of upcoming obligations, enabling proactive cash flow management.
+
+---
+
+## US-7.7: Upcoming Invoices Widget
+
+**As an** authenticated user  
+**I want to** see a list of credit card invoices due in the near future  
+**So that** I can ensure sufficient funds are available for upcoming card payments
+
+**Acceptance Criteria:**
+- [ ] Returns all credit card invoices with `dueDate <= today + configurable window` and status in (`CLOSED`, `PARTIAL`, `OVERDUE`).
+- [ ] Ordered by `dueDate` ascending.
+- [ ] Each entry includes: card name, total amount, paid amount, remaining amount, due date, status.
+- [ ] Already-`PAID` invoices are excluded.
+
+**Expected Result:** The user sees upcoming card payment obligations ranked by urgency.
+
+---
+
+## US-7.8: Largest Expenses Widget
+
+**As an** authenticated user  
+**I want to** see my largest expense transactions in the current period  
+**So that** I can quickly identify unusual or high-value spending
+
+**Acceptance Criteria:**
+- [ ] Returns the top N `PAID` `EXPENSE` transactions by amount for the current calendar month (configurable N, default 5).
+- [ ] Each entry includes: amount, description, category, account name, `paymentDate`.
+- [ ] Optional `period` parameter accepts a custom date range.
+- [ ] Only transactions belonging to the authenticated user are included.
+
+**Expected Result:** The user sees a ranked list of their biggest expenses for the selected period.
+
+---
+
+## US-7.9: Recent Transactions Widget
+
+**As an** authenticated user  
+**I want to** see my most recent transactions across all accounts  
+**So that** I have immediate visibility into my latest financial activity
+
+**Acceptance Criteria:**
+- [ ] Returns the N most recent transactions ordered by `competenceDate` descending (configurable N, default 10).
+- [ ] Includes transactions from all non-archived accounts of the authenticated user.
+- [ ] Each entry includes: amount, description, type, status, account name, category, `competenceDate`.
+- [ ] `CANCELLED` transactions are excluded.
+
+**Expected Result:** The user sees a cross-account feed of their latest financial activity at a glance.
+
+---
+
+# 8. Privacy & LGPD Compliance
+
+## US-8.1: Data Scoping and User Isolation
+
+**As the** system  
+**I want to** enforce strict user-scoped data isolation on all financial data access  
+**So that** no user can access, modify, or infer another user's financial data under any circumstances
+
+**Acceptance Criteria:**
+- [ ] Every repository query includes a `user_id = :currentUserId` predicate derived from the JWT subject claim.
+- [ ] Service methods validate resource ownership before any operation; HTTP 403 is returned (not 404) when a user attempts to access a resource belonging to another user.
+- [ ] No endpoint accepts a `userId` parameter from the request body or query string to scope data — the user identity is always derived from the authenticated JWT.
+- [ ] Database-level: all financial tables have a `user_id` foreign key with a NOT NULL constraint.
+
+**Expected Result:** Financial data isolation is architecturally guaranteed. Cross-user data access is impossible regardless of client behavior.
+
+---
+
+## US-8.2: Financial Data Not Included in Logs
+
+**As the** system  
+**I want to** ensure financial data (amounts, descriptions, account names) is never emitted in application logs  
+**So that** the logging infrastructure does not create a LGPD data exposure risk
+
+**Acceptance Criteria:**
+- [ ] Transaction amounts, descriptions, and account balances are never logged at any log level.
+- [ ] Category names and tag values are not included in log output.
+- [ ] Logs reference resources by UUID only (e.g., `transactionId=<UUID>`) — never by human-readable content.
+- [ ] A centralized log sanitization utility enforces these rules; ad hoc per-class masking is not sufficient.
+
+**Expected Result:** Log infrastructure contains operational metadata (UUIDs, event types, correlation IDs) but no financial content data.
+
+---
+
+## US-8.3: Soft-Delete for LGPD Erasure Readiness
+
+**As an** authenticated user  
+**I want to** be able to delete my account  
+**So that** my personal and financial data can be removed in compliance with LGPD right-to-erasure
+
+**Acceptance Criteria:**
+- [ ] Account deletion sets a `deleted_at` timestamp on the user's record in the auth module; no immediate hard deletion.
+- [ ] Financial data (accounts, transactions, categories) is soft-deleted: `deleted_at` timestamps are set across all user-scoped tables.
+- [ ] A documented anonymization pipeline can zero out PII-adjacent fields (account names, transaction descriptions) while preserving UUIDs and aggregate statistics for internal reporting.
+- [ ] After soft-deletion, the user cannot authenticate or access any financial data.
+
+**Expected Result:** Data is retained for internal integrity after logical deletion. A clear path exists for LGPD-compliant PII anonymization on erasure requests.
+
+---
+
+## US-8.4: Data Portability Export
+
+**As an** authenticated user  
+**I want to** export all my financial data  
+**So that** I can exercise my LGPD right to data portability
+
+**Acceptance Criteria:**
+- [ ] Export endpoint is available to any authenticated user for their own data only.
+- [ ] Returns a structured export (JSON or CSV) containing: accounts, transactions (with all fields), categories, recurrence rules, credit cards, invoices.
+- [ ] Sensitive operational fields (internal UUIDs of system records) are included; password hashes and auth tokens are excluded.
+- [ ] Export is generated asynchronously for large datasets; the user is notified when ready.
+- [ ] The export file is accessible only to the authenticated user who requested it.
+
+**Expected Result:** The user receives a complete, structured export of all their financial data in a portable format.
+
+---
+
+# 9. Non-Functional & Architecture Requirements
+
+## US-9.1: Monetary Precision
+
+**As the** system  
+**I want to** perform all monetary calculations using `BigDecimal` arithmetic  
+**So that** no financial values are subject to floating-point rounding errors
+
+**Acceptance Criteria:**
+- [ ] All amount fields use `BigDecimal` with a scale of 2 (currency precision) throughout the stack: database (NUMERIC), JPA entity, DTO, and API response.
+- [ ] Arithmetic operations (sum, division for installment split, percentage calculation) use `BigDecimal` methods with explicit rounding modes (`HALF_UP`).
+- [ ] No `double` or `float` types are used for monetary values anywhere in the codebase.
+- [ ] Division remainders (e.g., installment amounts that don't divide evenly) are handled deterministically: remainder assigned to the first or last installment consistently.
+- [ ] API responses serialize amounts as strings (e.g., `"150.75"`) to prevent client-side floating-point loss.
+
+**Expected Result:** Financial calculations are exact. No rounding errors accumulate across transactions or installment series.
+
+---
+
+## US-9.2: Enforced Layered Architecture
+
+**As a** developer  
+**I want to** work within a clearly enforced layered architecture  
+**So that** responsibilities are separated, the codebase is maintainable, and the financial domain logic is extensible
+
+**Acceptance Criteria:**
+- [ ] Four enforced layers: Controller, Service, Repository, Domain.
+- [ ] JPA entities never cross the service boundary into response DTOs; the API layer uses only DTOs.
+- [ ] Services depend on repository interfaces; no concrete repository references in business logic.
+- [ ] A global `@ControllerAdvice` maps all domain exceptions to appropriate HTTP responses uniformly.
+- [ ] No business logic exists in controllers or repositories.
+- [ ] Financial calculations (balance aggregation, installment generation, recurrence expansion) live exclusively in the service layer.
+
+**Expected Result:** The codebase is maintainable and testable. Financial logic is centralized and protected from infrastructure-layer concerns.
+
+---
+
+## US-9.3: Balance Consistency
+
+**As the** system  
+**I want to** maintain a consistent computed account balance at all times  
+**So that** the balance shown to the user always reflects the actual sum of their transaction history
+
+**Acceptance Criteria:**
+- [ ] Account balance is computed by summing the signed amounts of all `PAID` transactions (income positive, expense/transfer-debit negative, refund positive, manual-adjustment as-signed).
+- [ ] Balance is recomputed and consistent after every transaction creation, edit, deletion, or status change.
+- [ ] `PENDING`, `OVERDUE`, and `CANCELLED` transactions are excluded from the settled balance.
+- [ ] A separate `pendingBalance` may be provided in account details showing what the balance would be if all pending transactions settled.
+- [ ] Balance integrity is verified by the test suite with known transaction sequences.
+
+**Expected Result:** Account balances are always exact and consistent with the underlying transaction history.
+
+---
+
+## US-9.4: Input Validation at the API Boundary
+
+**As the** system  
+**I want to** validate all incoming request DTOs before any business logic executes  
+**So that** malformed input is rejected early and never reaches the service layer
+
+**Acceptance Criteria:**
+- [ ] All request DTOs use Jakarta Validation: `@NotNull`, `@NotBlank`, `@Positive`, `@Size`, `@DecimalMin`, custom domain constraints.
+- [ ] `@Valid` is applied to all controller method parameters.
+- [ ] Validation failures return HTTP 400 with a structured field-level error body.
+- [ ] Amount fields are validated as positive and within a maximum configurable value.
+- [ ] Date fields are validated for coherence: e.g., `paymentDate` must not precede `competenceDate` by more than a configurable threshold.
+- [ ] The 400 body never exposes stack traces or internal class names.
+
+**Expected Result:** Invalid input is rejected at the controller boundary with a clean 400. The service layer processes only validated data.
+
+---
+
+## US-9.5: Standardized API Response Envelope
+
+**As an** API consumer  
+**I want to** receive consistent, predictable response structures from all endpoints  
+**So that** client-side handling is uniform and self-describing
+
+**Acceptance Criteria:**
+- [ ] All error responses follow: `{ "errorCode": "...", "message": "...", "correlationId": "..." }`.
+- [ ] HTTP status codes follow REST conventions: 200/201 (success), 400 (validation), 401 (authentication), 403 (authorization), 404 (not found), 409 (conflict), 422 (business rule violation), 500 (server error).
+- [ ] 422 is used for business rule violations (e.g., transfer to archived account, delete non-empty account) to distinguish from validation errors (400).
+- [ ] 500 responses never expose stack traces, exception class names, or database error messages.
+- [ ] All timestamps are returned in ISO 8601 UTC format.
+
+**Expected Result:** API consumers rely on a consistent response structure. Internal implementation details are never leaked via error responses.
+
+---
+
+## US-9.6: Docker and Cloud-Native Deployment Readiness
+
+**As a** DevOps engineer  
+**I want to** deploy the Cash Control API as a containerized service  
+**So that** it integrates into Docker and Kubernetes-based infrastructure
+
+**Acceptance Criteria:**
+- [ ] A `Dockerfile` is provided using a multi-stage build optimized for image size and security.
+- [ ] All secrets and environment-specific configuration are injected via environment variables (12-factor app).
+- [ ] A `docker-compose.yml` is available for local development with PostgreSQL.
+- [ ] The application exposes `/actuator/health` for liveness and readiness probes.
+- [ ] Flyway migrations run on startup in development; production startup behavior is configurable.
+- [ ] Application fails fast with a clear error message if required environment variables are absent.
+
+**Expected Result:** The module is deployable in any container environment. Configuration is fully externalized and the service is orchestrator-ready.
+
+---
+
+## US-9.7: Database Schema Management via Flyway
+
+**As a** developer or DBA  
+**I want to** manage all database schema changes through Flyway versioned migrations  
+**So that** schema evolution is tracked, reproducible, and safe for production deployments
+
+**Acceptance Criteria:**
+- [ ] Flyway is the sole mechanism for schema changes; `ddl-auto` is `validate` or `none` in production.
+- [ ] All migrations are versioned (`V{n}__{description}.sql`) in `src/main/resources/db/migration`.
+- [ ] The baseline migration defines all tables with correct `NUMERIC` amount columns, UUID PKs, foreign keys, NOT NULL constraints, and indexes.
+- [ ] Indexes are defined in migrations: `user_id` on all financial tables, `transactions.competence_date`, `transactions.payment_date`, `transactions.status`, `invoices.due_date`, `recurrence_rules.next_occurrence_date`.
+- [ ] Migration checksums are validated on startup; tampered migrations block application startup.
+
+**Expected Result:** The database schema is fully version-controlled and reproducible across all environments.
+
+---
+
+## US-9.8: Financial Domain Test Suite
+
+**As a** developer  
+**I want to** have a comprehensive test suite covering financial calculations and domain rules  
+**So that** financial logic regressions are caught before production
+
+**Acceptance Criteria:**
+- [ ] Unit tests cover: balance calculation from transaction history, installment generation (amount split, remainder assignment), recurrence expansion, category rule matching, invoice cycle assignment logic.
+- [ ] Integration tests cover: full transaction lifecycle (create → edit → pay → cancel), installment series creation and early settlement, transfer atomicity (both legs or neither), manual adjustment reconciliation.
+- [ ] Boundary tests verify: `BigDecimal` precision in installment amount splits, balance consistency after concurrent-scenario transaction sequences, overdue status detection logic.
+- [ ] Integration tests use a real PostgreSQL instance (Testcontainers) — no mocked repositories for core financial flows.
+- [ ] The test suite runs in CI/CD and gates merges and deployments.
+
+**Expected Result:** Financial calculation correctness is continuously verified. Precision and domain-rule regressions are blocked before production.
+
+=== docs/v1/database-schema.md ===
+# Database Schema — Cash Control API v1
+
+**Stack:** Java 25 · Spring Boot 4.0.6 · Spring Security 7 · PostgreSQL 18 · Flyway · JPA/Hibernate  
+**Format:** [DBML](https://dbml.dbdiagram.io/) — paste into [dbdiagram.io](https://dbdiagram.io/) to render  
+**Design principles:**
+- UUID primary keys (`gen_random_uuid()`) on all entities
+- `NUMERIC(19,2)` for all monetary values — no `float` or `double`
+- `timestamptz` for all timestamps (UTC-aware); `date` for calendar-only fields
+- No database ENUM types — lookup tables for all categorical values
+- All financial entities carry `user_id` FK — cross-user access is architecturally impossible
+- Soft-delete on `accounts`, `categories`, `credit_cards`, `recurrence_rules` via `deleted_at`
+- `CANCELLED` transactions are never hard-deleted — `cancelled_at` is set instead
+- Append-only semantics respected: no destructive mutations on paid transactions
+- Schema managed exclusively via Flyway versioned migrations
+
+---
+
+## Schema (DBML)
+
+```dbml
+// ============================================================
+// Database Schema — Cash Control API v1
+// ============================================================
+// Stack   : Java 25 · Spring Boot 4.0.6 · Spring Security 7
+//           PostgreSQL 18 · Flyway · JPA/Hibernate
+// ============================================================
+//
+// Sections:
+//   1. Lookup Tables        — categorical values (no ENUMs)
+//   2. Accounts & Wallets   — financial accounts per user
+//   3. Transactions         — all financial movements on accounts
+//   4. Installment Series   — installment payment commitments
+//   5. Recurring Rules      — scheduled transaction generation
+//   6. Categories           — hierarchical transaction classification
+//   7. Tags                 — free-form cross-category labeling
+//   8. Credit Cards         — card configuration and shared limits
+//   9. Invoices             — billing cycles and credit card charges
+//  10. Attachments          — receipt and proof-of-payment files
+// ============================================================
+
+// ============================================================
+// SECTION 1 — LOOKUP TABLES
+// All categorical values are data-driven lookup rows, never
+// database ENUMs or bare string columns.
+// Standard shape: id · name · slug · description · is_active
+//                 created_at · updated_at
+// Seeded by Flyway baseline migration.
+// ============================================================
+
+Table account_types {
+  id          uuid        [pk, default: `gen_random_uuid()`]
+  name        varchar(50) [not null, unique]
+  slug        varchar(50) [not null, unique]
+  description text
+  is_active   boolean     [not null, default: true]
+  created_at  timestamptz [not null, default: `now()`]
+  updated_at  timestamptz [not null, default: `now()`]
+
+  indexes {
+    slug [unique, name: "uidx_account_types_slug"]
+  }
+
+  Note: "Seed values: CHECKING, SAVINGS, CASH, VIRTUAL_WALLET, INTERNATIONAL, JOINT, INVESTMENT. INVESTMENT accounts are included in net worth but excluded from liquid balance aggregations."
+}
+
+Table transaction_types {
+  id          uuid        [pk, default: `gen_random_uuid()`]
+  name        varchar(50) [not null, unique]
+  slug        varchar(50) [not null, unique]
+  description text
+  is_active   boolean     [not null, default: true]
+  created_at  timestamptz [not null, default: `now()`]
+  updated_at  timestamptz [not null, default: `now()`]
+
+  indexes {
+    slug [unique, name: "uidx_transaction_types_slug"]
+  }
+
+  Note: "Seed values: INCOME, EXPENSE, TRANSFER, REFUND, MANUAL_ADJUSTMENT. TRANSFER creates two linked transactions (debit + credit) via transfer_group_id. MANUAL_ADJUSTMENT is excluded from cash flow reports."
+}
+
+Table transaction_statuses {
+  id          uuid        [pk, default: `gen_random_uuid()`]
+  name        varchar(50) [not null, unique]
+  slug        varchar(50) [not null, unique]
+  description text
+  is_active   boolean     [not null, default: true]
+  created_at  timestamptz [not null, default: `now()`]
+  updated_at  timestamptz [not null, default: `now()`]
+
+  indexes {
+    slug [unique, name: "uidx_transaction_statuses_slug"]
+  }
+
+  Note: "Seed values: PAID, PENDING, OVERDUE, CANCELLED. Valid transitions: PENDING→PAID, PENDING→OVERDUE (auto), PENDING→CANCELLED, OVERDUE→PAID, OVERDUE→CANCELLED. CANCELLED transactions are excluded from balance calculations but preserved for audit."
+}
+
+Table recurrence_frequencies {
+  id          uuid        [pk, default: `gen_random_uuid()`]
+  name        varchar(50) [not null, unique]
+  slug        varchar(50) [not null, unique]
+  description text
+  is_active   boolean     [not null, default: true]
+  created_at  timestamptz [not null, default: `now()`]
+  updated_at  timestamptz [not null, default: `now()`]
+
+  indexes {
+    slug [unique, name: "uidx_recurrence_frequencies_slug"]
+  }
+
+  Note: "Seed values: DAILY, WEEKLY, BIWEEKLY, MONTHLY, YEARLY."
+}
+
+Table recurrence_rule_statuses {
+  id          uuid        [pk, default: `gen_random_uuid()`]
+  name        varchar(50) [not null, unique]
+  slug        varchar(50) [not null, unique]
+  description text
+  is_active   boolean     [not null, default: true]
+  created_at  timestamptz [not null, default: `now()`]
+  updated_at  timestamptz [not null, default: `now()`]
+
+  indexes {
+    slug [unique, name: "uidx_recurrence_rule_statuses_slug"]
+  }
+
+  Note: "Seed values: ACTIVE (generating instances), PAUSED (suspended, no generation), ENDED (past end_date or manually closed), DELETED (soft-deleted, no future instances)."
+}
+
+Table card_brands {
+  id          uuid        [pk, default: `gen_random_uuid()`]
+  name        varchar(50) [not null, unique]
+  slug        varchar(50) [not null, unique]
+  description text
+  is_active   boolean     [not null, default: true]
+  created_at  timestamptz [not null, default: `now()`]
+  updated_at  timestamptz [not null, default: `now()`]
+
+  indexes {
+    slug [unique, name: "uidx_card_brands_slug"]
+  }
+
+  Note: "Seed values: VISA, MASTERCARD, ELO, AMEX, HIPERCARD, OTHER."
+}
+
+Table invoice_statuses {
+  id          uuid        [pk, default: `gen_random_uuid()`]
+  name        varchar(50) [not null, unique]
+  slug        varchar(50) [not null, unique]
+  description text
+  is_active   boolean     [not null, default: true]
+  created_at  timestamptz [not null, default: `now()`]
+  updated_at  timestamptz [not null, default: `now()`]
+
+  indexes {
+    slug [unique, name: "uidx_invoice_statuses_slug"]
+  }
+
+  Note: "Seed values: OPEN (current cycle, still accepting charges), CLOSED (cycle ended, awaiting payment), PAID (full payment recorded), PARTIAL (partial payment made, remainder carried as revolving), OVERDUE (due date passed without full payment)."
+}
+
+// ============================================================
+// SECTION 2 — ACCOUNTS & WALLETS
+// ============================================================
+
+Table accounts {
+  id            uuid         [pk, default: `gen_random_uuid()`]
+  user_id       uuid         [not null, ref: > users.id, note: "Owning user. All queries must filter by user_id — cross-user access is rejected at the service layer."]
+  type_id       uuid         [not null, ref: > account_types.id]
+  name          varchar(100) [not null, note: "Unique per user among non-deleted accounts. Enforced via partial unique index on (user_id, name) WHERE deleted_at IS NULL."]
+  currency_code varchar(3)   [not null, default: "BRL", note: "ISO 4217 code. Immutable after account creation to preserve transaction history consistency."]
+  description   text
+  sort_order    int          [not null, default: 0, note: "User-defined display ordering within account list."]
+  archived_at   timestamptz  [note: "Set on archive action. Archived accounts are excluded from balance aggregations and cannot receive new transactions (HTTP 422)."]
+  deleted_at    timestamptz  [note: "Soft-delete. Deletion only permitted when no transactions exist beyond the seed initial balance record. Non-null = logically deleted."]
+  created_at    timestamptz  [not null, default: `now()`]
+  updated_at    timestamptz  [not null, default: `now()`]
+
+  indexes {
+    user_id [name: "idx_accounts_user"]
+    type_id [name: "idx_accounts_type"]
+    (user_id, archived_at) [name: "idx_accounts_user_archived", note: "Active account list: WHERE archived_at IS NULL AND deleted_at IS NULL"]
+    (user_id, deleted_at) [name: "idx_accounts_user_deleted"]
+  }
+
+  Note: "Each account has a seeded MANUAL_ADJUSTMENT transaction created at registration to represent the initial balance (US-1.1). Currency is immutable after creation. Archived accounts retain full transaction history but are excluded from dashboard aggregations. Deletion is guarded: only empty accounts (no transactions beyond the seed) may be hard-deleted."
+}
+
+// ============================================================
+// SECTION 3 — TRANSACTIONS
+// All financial movements on accounts (income, expense,
+// transfer, refund, manual adjustment).
+// Credit card charges live in invoice_items (Section 9).
+// ============================================================
+
+Table transactions {
+  id                    uuid          [pk, default: `gen_random_uuid()`]
+  user_id               uuid          [not null, ref: > users.id]
+  account_id            uuid          [not null, ref: > accounts.id]
+  type_id               uuid          [not null, ref: > transaction_types.id]
+  status_id             uuid          [not null, ref: > transaction_statuses.id]
+  amount                numeric(19,2) [not null, note: "Always positive. Direction is encoded by type_id: INCOME/REFUND add to balance; EXPENSE/TRANSFER-debit subtract; MANUAL_ADJUSTMENT may be negative if stored as signed."]
+  description           varchar(255)  [not null]
+  notes                 text
+  competence_date       date          [not null, note: "The date the financial event occurred (accrual date)."]
+  payment_date          date          [note: "The date the payment was actually settled. Defaults to competence_date when status=PAID and no explicit date is provided. NULL for PENDING transactions."]
+  cancelled_at          timestamptz   [note: "Set when the transaction is cancelled. CANCELLED transactions are never hard-deleted and do not affect balances."]
+
+  // Installment-specific fields — NULL for non-installment transactions
+  installment_series_id uuid          [ref: > installment_series.id, note: "NULL for non-installment transactions. FK to the series master record."]
+  installment_number    int           [note: "1-based position within the installment series. NULL for non-installment transactions."]
+  total_installments    int           [note: "Total number of installments in the series at creation time. NULL for non-installment transactions."]
+  is_detached           boolean       [not null, default: false, note: "True when this installment was individually edited and detached from series-wide operations (US-3.3)."]
+  is_early_settlement   boolean       [not null, default: false, note: "True when this is the consolidated settlement transaction created by early payoff (US-3.4)."]
+
+  // Recurrence — NULL for manually created transactions
+  recurrence_rule_id    uuid          [ref: > recurrence_rules.id, note: "NULL for manually created transactions. Set when this transaction was generated by a recurrence_rule."]
+
+  // Category classification — both nullable
+  category_id           uuid          [ref: > categories.id, note: "Primary category. NULL if uncategorized."]
+  subcategory_id        uuid          [ref: > categories.id, note: "Must be a child of category_id when provided."]
+
+  // Transfer linking — NULL for non-transfer transactions
+  transfer_group_id     uuid          [note: "Shared UUID between the two legs of a transfer (debit + credit). Both legs share this value; neither may be deleted without the other."]
+
+  location              varchar(255)  [note: "Optional geolocation or address. Collected only when user explicitly provides it."]
+
+  created_at            timestamptz   [not null, default: `now()`]
+  updated_at            timestamptz   [not null, default: `now()`]
+
+  indexes {
+    user_id [name: "idx_transactions_user"]
+    account_id [name: "idx_transactions_account"]
+    (user_id, competence_date) [name: "idx_transactions_user_competence", note: "Primary history sort: reverse-chrono list"]
+    (user_id, payment_date) [name: "idx_transactions_user_payment", note: "Cash-date reports and overdue detection"]
+    (user_id, status_id) [name: "idx_transactions_user_status", note: "Filter by PENDING/OVERDUE for upcoming bills widget"]
+    (user_id, type_id) [name: "idx_transactions_user_type"]
+    (account_id, status_id) [name: "idx_transactions_account_status", note: "Balance computation: PAID transactions per account"]
+    installment_series_id [name: "idx_transactions_installment_series"]
+    recurrence_rule_id [name: "idx_transactions_recurrence"]
+    category_id [name: "idx_transactions_category"]
+    transfer_group_id [name: "idx_transactions_transfer_group", note: "Transfer pair lookup — both legs share this UUID"]
+    (user_id, payment_date, status_id) [name: "idx_transactions_overdue_scan", note: "Overdue detection: WHERE payment_date < today AND status = PENDING"]
+  }
+
+  Note: "balance = SUM of signed amounts of all PAID transactions on an account, where INCOME/REFUND are positive and EXPENSE/TRANSFER-debit are negative. PENDING, OVERDUE, and CANCELLED transactions do not affect the settled balance. MANUAL_ADJUSTMENT transactions are excluded from cash flow (income/expense) aggregations but included in balance. Transfer pairs share transfer_group_id and must be deleted as a unit."
+}
+
+// ============================================================
+// SECTION 4 — INSTALLMENT SERIES
+// Master record for installment payment commitments.
+// Individual installments are child transactions (account-based)
+// or child invoice_items (card-based).
+// ============================================================
+
+Table installment_series {
+  id                 uuid          [pk, default: `gen_random_uuid()`]
+  user_id            uuid          [not null, ref: > users.id]
+  account_id         uuid          [ref: > accounts.id, note: "Set for account-based installments; NULL for card-based. Exactly one of account_id or credit_card_id must be non-null."]
+  credit_card_id     uuid          [ref: > credit_cards.id, note: "Set for card-based installments; NULL for account-based. Exactly one of account_id or credit_card_id must be non-null."]
+  type_id            uuid          [not null, ref: > transaction_types.id, note: "Typically EXPENSE."]
+  description        varchar(255)  [not null]
+  total_amount       numeric(19,2) [not null, note: "Original committed total. Per-installment amount = total / count; remainder assigned to first installment."]
+  total_installments int           [not null]
+  first_payment_date date          [not null]
+  category_id        uuid          [ref: > categories.id]
+  subcategory_id     uuid          [ref: > categories.id]
+  is_settled         boolean       [not null, default: false, note: "True after early settlement (US-3.4). Remaining installments are cancelled and a single settlement transaction is created."]
+  settled_at         timestamptz
+  created_at         timestamptz   [not null, default: `now()`]
+  updated_at         timestamptz   [not null, default: `now()`]
+
+  indexes {
+    user_id [name: "idx_installment_series_user"]
+    account_id [name: "idx_installment_series_account"]
+    credit_card_id [name: "idx_installment_series_card"]
+    (user_id, is_settled) [name: "idx_installment_series_active"]
+  }
+
+  Note: "Exactly one of account_id or credit_card_id must be set; enforced at the application layer. Child records are transactions (for account_id) or invoice_items (for credit_card_id). is_settled=true indicates the series was closed by early settlement; settled_at is set and remaining installments are CANCELLED."
+}
+
+// ============================================================
+// SECTION 5 — RECURRING TRANSACTIONS
+// Schedule definitions for automatic transaction generation.
+// Applies to account-based transactions only.
+// ============================================================
+
+Table recurrence_rules {
+  id                   uuid          [pk, default: `gen_random_uuid()`]
+  user_id              uuid          [not null, ref: > users.id]
+  account_id           uuid          [not null, ref: > accounts.id]
+  type_id              uuid          [not null, ref: > transaction_types.id]
+  status_id            uuid          [not null, ref: > recurrence_rule_statuses.id]
+  frequency_id         uuid          [not null, ref: > recurrence_frequencies.id]
+  amount               numeric(19,2) [not null]
+  description          varchar(255)  [not null]
+  category_id          uuid          [ref: > categories.id]
+  subcategory_id       uuid          [ref: > categories.id]
+  start_date           date          [not null]
+  end_date             date          [note: "NULL = open-ended recurrence. Non-null = bounded by this date. Status transitions to ENDED when next_occurrence_date > end_date."]
+  next_occurrence_date date          [note: "Next date an instance should be generated. NULL when status=ENDED or DELETED. Updated after each instance generation."]
+  paused_at            timestamptz   [note: "Set when status transitions to PAUSED. No instances generated while paused."]
+  resume_at            timestamptz   [note: "Optional scheduled resume date set at pause time. When resume_at <= today, status transitions back to ACTIVE."]
+  deleted_at           timestamptz   [note: "Soft-delete. FUTURE_ONLY strategy: only cancels remaining PENDING instances. ALL strategy: cancels all PENDING instances."]
+  created_at           timestamptz   [not null, default: `now()`]
+  updated_at           timestamptz   [not null, default: `now()`]
+
+  indexes {
+    user_id [name: "idx_recurrence_rules_user"]
+    account_id [name: "idx_recurrence_rules_account"]
+    (status_id, next_occurrence_date) [name: "idx_recurrence_rules_scheduler", note: "Scheduler query: WHERE status=ACTIVE AND next_occurrence_date <= today"]
+    (user_id, status_id) [name: "idx_recurrence_rules_user_status"]
+    (user_id, deleted_at) [name: "idx_recurrence_rules_user_deleted"]
+  }
+
+  Note: "Instances are generated ahead of time or lazily at query time — implementation choice. Pausing cancels existing PENDING instances for the pause window. Editing updates all future PENDING instances and re-generates them. Individual instances may be detached from the rule (recurrence_rule_id preserved on the transaction but changes to that transaction do not affect siblings)."
+}
+
+// ============================================================
+// SECTION 6 — CATEGORIES
+// Two-level hierarchy: root category → subcategory.
+// System defaults (user_id IS NULL) cannot be deleted.
+// ============================================================
+
+Table categories {
+  id          uuid         [pk, default: `gen_random_uuid()`]
+  user_id     uuid         [ref: > users.id, note: "NULL for system default categories. Non-null = user-created. System defaults are shared across all users; user categories are strictly scoped."]
+  parent_id   uuid         [ref: > categories.id, note: "NULL for root categories. Non-null for subcategories. Max depth = 2: subcategories cannot have children."]
+  name        varchar(100) [not null]
+  color       varchar(7)   [note: "Hex color code (e.g. #FF5733). Used for UI rendering."]
+  icon        varchar(50)  [note: "Icon identifier from a predefined set."]
+  sort_order  int          [not null, default: 0]
+  is_default  boolean      [not null, default: false, note: "System-provided. Cannot be deleted; may only be hidden (is_hidden=true)."]
+  is_hidden   boolean      [not null, default: false, note: "Excluded from category pickers. Existing transactions retain their categorization."]
+  is_archived boolean      [not null, default: false, note: "User-defined categories only. Archived = excluded from pickers and cannot receive new transactions. Archiving a parent also archives all children."]
+  archived_at timestamptz
+  created_at  timestamptz  [not null, default: `now()`]
+  updated_at  timestamptz  [not null, default: `now()`]
+
+  indexes {
+    user_id [name: "idx_categories_user"]
+    parent_id [name: "idx_categories_parent"]
+    (user_id, parent_id, name) [unique, name: "uidx_categories_name_per_scope", note: "Name unique within parent scope per user. Partial uniqueness enforced at application layer for IS NULL parent_id cases."]
+    is_default [name: "idx_categories_default"]
+    (user_id, is_hidden) [name: "idx_categories_user_hidden"]
+    (user_id, is_archived) [name: "idx_categories_user_archived"]
+  }
+
+  Note: "user_id IS NULL = system default. user_id IS NOT NULL = user-created. Name uniqueness is scoped to (user_id, parent_id): a root category and a subcategory under a different root may share the same name. Auto-suggestion (US-5.6) and category rules (US-5.7) reference category_id and subcategory_id from this table."
+}
+
+Table category_rules {
+  id              uuid         [pk, default: `gen_random_uuid()`]
+  user_id         uuid         [not null, ref: > users.id]
+  pattern         varchar(255) [not null, note: "Keyword or text pattern matched against transaction description at creation time."]
+  category_id     uuid         [not null, ref: > categories.id]
+  subcategory_id  uuid         [ref: > categories.id, note: "Optional subcategory override. Must be a child of category_id."]
+  account_id      uuid         [ref: > accounts.id, note: "NULL = rule applies to all accounts. Non-null = scoped to a specific account."]
+  priority        int          [not null, default: 0, note: "Lower value = higher priority. When multiple rules match, the highest priority rule wins."]
+  is_active       boolean      [not null, default: true]
+  created_at      timestamptz  [not null, default: `now()`]
+  updated_at      timestamptz  [not null, default: `now()`]
+
+  indexes {
+    user_id [name: "idx_category_rules_user"]
+    (user_id, is_active, priority) [name: "idx_category_rules_active_priority", note: "Rule evaluation: all active rules for user ordered by priority"]
+    category_id [name: "idx_category_rules_category"]
+    account_id [name: "idx_category_rules_account"]
+  }
+
+  Note: "Rules are evaluated at transaction creation time. If auto-assigned, the user may override the category on the individual transaction without deleting the rule. Rules are applied in ascending priority order; first match wins."
+}
+
+// ============================================================
+// SECTION 7 — TAGS
+// Free-form labeling for cross-category transaction grouping.
+// ============================================================
+
+Table tags {
+  id         uuid        [pk, default: `gen_random_uuid()`]
+  user_id    uuid        [not null, ref: > users.id]
+  name       varchar(50) [not null]
+  color      varchar(7)  [note: "Hex color for tag chip rendering. Optional."]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (user_id, name) [unique, name: "uidx_tags_user_name"]
+    user_id [name: "idx_tags_user"]
+  }
+
+  Note: "User-scoped free-form labels. Tags may be assigned to any number of transactions. Tag name is unique per user."
+}
+
+Table transaction_tags {
+  id             uuid        [pk, default: `gen_random_uuid()`]
+  transaction_id uuid        [not null, ref: > transactions.id]
+  tag_id         uuid        [not null, ref: > tags.id]
+  created_at     timestamptz [not null, default: `now()`]
+
+  indexes {
+    (transaction_id, tag_id) [unique, name: "uidx_transaction_tags"]
+    transaction_id [name: "idx_transaction_tags_transaction"]
+    tag_id [name: "idx_transaction_tags_tag"]
+  }
+
+  Note: "Many-to-many join table. No soft-delete: tag removal drops the row. Tags can be filtered on transaction list queries (US-2.6)."
+}
+
+Table invoice_item_tags {
+  id              uuid        [pk, default: `gen_random_uuid()`]
+  invoice_item_id uuid        [not null, ref: > invoice_items.id]
+  tag_id          uuid        [not null, ref: > tags.id]
+  created_at      timestamptz [not null, default: `now()`]
+
+  indexes {
+    (invoice_item_id, tag_id) [unique, name: "uidx_invoice_item_tags"]
+    invoice_item_id [name: "idx_invoice_item_tags_item"]
+    tag_id [name: "idx_invoice_item_tags_tag"]
+  }
+
+  Note: "Many-to-many join table for tags on credit card charges (US-6.2). Mirrors transaction_tags for the invoice_items domain."
+}
+
+// ============================================================
+// SECTION 8 — CREDIT CARDS & SHARED LIMITS
+// ============================================================
+
+Table shared_limit_groups {
+  id          uuid          [pk, default: `gen_random_uuid()`]
+  user_id     uuid          [not null, ref: > users.id]
+  name        varchar(100)  [not null]
+  total_limit numeric(19,2) [not null, note: "The combined credit limit shared across all cards in this group."]
+  created_at  timestamptz   [not null, default: `now()`]
+  updated_at  timestamptz   [not null, default: `now()`]
+
+  indexes {
+    user_id [name: "idx_shared_limit_groups_user"]
+    (user_id, name) [unique, name: "uidx_shared_limit_groups_user_name"]
+  }
+
+  Note: "Optional grouping for cards that share a combined credit limit. US-6.5: available limit calculation must consider the group-level used amount, not just per-card usage."
+}
+
+Table credit_cards {
+  id                    uuid          [pk, default: `gen_random_uuid()`]
+  user_id               uuid          [not null, ref: > users.id]
+  brand_id              uuid          [not null, ref: > card_brands.id]
+  name                  varchar(100)  [not null, note: "Unique per user among non-deleted cards."]
+  issuer                varchar(100)  [note: "Issuing bank or institution name."]
+  credit_limit          numeric(19,2) [not null]
+  closing_day           int           [not null, note: "Day of month (1–28) when the billing cycle closes. Charges after closing_day are assigned to the next invoice."]
+  due_day               int           [not null, note: "Day of month (1–28) when payment is due."]
+  shared_limit_group_id uuid          [ref: > shared_limit_groups.id, note: "NULL if this card has an independent limit."]
+  archived_at           timestamptz   [note: "Archived cards cannot receive new charges (HTTP 422)."]
+  deleted_at            timestamptz   [note: "Soft-delete. Invoices and charge history are preserved."]
+  created_at            timestamptz   [not null, default: `now()`]
+  updated_at            timestamptz   [not null, default: `now()`]
+
+  indexes {
+    user_id [name: "idx_credit_cards_user"]
+    brand_id [name: "idx_credit_cards_brand"]
+    shared_limit_group_id [name: "idx_credit_cards_shared_group"]
+    (user_id, deleted_at) [name: "idx_credit_cards_user_deleted"]
+    (user_id, archived_at) [name: "idx_credit_cards_user_archived"]
+  }
+
+  Note: "On card creation, the first open invoice is created automatically for the current billing cycle (US-6.1). closing_day determines which billing cycle a charge falls into: a charge on competence_date after closing_day goes to the next invoice. used_limit is computed at query time as the sum of non-cancelled invoice_item amounts in the current open invoice plus future-attributed installment charges."
+}
+
+// ============================================================
+// SECTION 9 — INVOICES & CREDIT CARD CHARGES
+// ============================================================
+
+Table invoices {
+  id              uuid          [pk, default: `gen_random_uuid()`]
+  user_id         uuid          [not null, ref: > users.id]
+  credit_card_id  uuid          [not null, ref: > credit_cards.id]
+  status_id       uuid          [not null, ref: > invoice_statuses.id]
+  reference_month varchar(7)    [not null, note: "Billing cycle identifier in YYYY-MM format. Unique per credit card."]
+  closing_date    date          [not null]
+  due_date        date          [not null]
+  total_amount    numeric(19,2) [not null, default: 0, note: "Sum of all non-cancelled invoice_item amounts. Updated as charges are added or cancelled."]
+  paid_amount     numeric(19,2) [not null, default: 0, note: "Amount paid. For PARTIAL invoices, remainder = total_amount - paid_amount carried as REVOLVING charge on next invoice."]
+  created_at      timestamptz   [not null, default: `now()`]
+  updated_at      timestamptz   [not null, default: `now()`]
+
+  indexes {
+    user_id [name: "idx_invoices_user"]
+    credit_card_id [name: "idx_invoices_card"]
+    (credit_card_id, reference_month) [unique, name: "uidx_invoices_card_month"]
+    (user_id, due_date) [name: "idx_invoices_user_due", note: "Upcoming invoices widget: due_date <= today + window"]
+    (user_id, status_id) [name: "idx_invoices_user_status"]
+    due_date [name: "idx_invoices_due_date", note: "Overdue detection: WHERE due_date < today AND status NOT IN (PAID)"]
+  }
+
+  Note: "One invoice per billing cycle per card. OPEN: current cycle. CLOSED: awaiting payment after closing_date. PAID: full payment. PARTIAL: partial payment; unpaid remainder is carried as a new REVOLVING invoice_item on the next invoice. OVERDUE: due_date passed without payment."
+}
+
+Table invoice_items {
+  id                    uuid          [pk, default: `gen_random_uuid()`]
+  user_id               uuid          [not null, ref: > users.id]
+  invoice_id            uuid          [not null, ref: > invoices.id]
+  description           varchar(255)  [not null]
+  amount                numeric(19,2) [not null, note: "Always positive. Represents a charge on the card."]
+  competence_date       date          [not null, note: "Date the charge occurred. Determines which invoice this item belongs to based on the card's closing_day."]
+  category_id           uuid          [ref: > categories.id]
+  subcategory_id        uuid          [ref: > categories.id]
+  notes                 text
+
+  // Installment-specific fields — NULL for standalone charges
+  installment_series_id uuid          [ref: > installment_series.id, note: "NULL for one-off charges. Set for card-based installment charges."]
+  installment_number    int           [note: "1-based position within the series. NULL for non-installment items."]
+  total_installments    int           [note: "Total installments in the series. NULL for non-installment items."]
+  is_detached           boolean       [not null, default: false, note: "True when individually edited and detached from series-wide operations."]
+
+  // Revolving credit
+  is_revolving          boolean       [not null, default: false, note: "True when this charge was carried from a previous PARTIAL invoice as unpaid remainder."]
+
+  cancelled_at          timestamptz   [note: "Set when the charge is cancelled. Cancelled items are excluded from invoice total_amount."]
+  created_at            timestamptz   [not null, default: `now()`]
+  updated_at            timestamptz   [not null, default: `now()`]
+
+  indexes {
+    user_id [name: "idx_invoice_items_user"]
+    invoice_id [name: "idx_invoice_items_invoice"]
+    (invoice_id, competence_date) [name: "idx_invoice_items_invoice_date"]
+    installment_series_id [name: "idx_invoice_items_series"]
+    category_id [name: "idx_invoice_items_category"]
+    (user_id, cancelled_at) [name: "idx_invoice_items_user_cancelled"]
+  }
+
+  Note: "Represents a credit card charge within a billing cycle. Charge-to-invoice assignment is based on the card's closing_day relative to competence_date. Card-based installment charges are distributed across future invoices: the first installment goes to the current open invoice, subsequent ones to future invoices as they are created. is_revolving=true identifies the auto-generated remainder charge when a PARTIAL invoice payment is recorded."
+}
+
+// ============================================================
+// SECTION 10 — ATTACHMENTS
+// File metadata for receipts and proof-of-payment.
+// Only linked to account transactions (not invoice_items).
+// ============================================================
+
+Table attachments {
+  id                 uuid         [pk, default: `gen_random_uuid()`]
+  user_id            uuid         [not null, ref: > users.id]
+  transaction_id     uuid         [not null, ref: > transactions.id]
+  original_filename  varchar(255) [not null, note: "Original filename as provided by the user. Never used to construct storage paths."]
+  mime_type          varchar(100) [not null, note: "Validated MIME type: application/pdf, image/png, image/jpeg. Enforced at upload boundary."]
+  file_size_bytes    bigint       [not null]
+  storage_key        varchar(500) [not null, unique, note: "Internal storage reference (e.g. object storage key). Never exposed in API responses; raw file paths are access-controlled."]
+  uploaded_at        timestamptz  [not null, default: `now()`]
+  deleted_at         timestamptz  [note: "Soft-delete. Deletion removes access but preserves metadata for audit."]
+  created_at         timestamptz  [not null, default: `now()`]
+
+  indexes {
+    user_id [name: "idx_attachments_user"]
+    transaction_id [name: "idx_attachments_transaction"]
+    (transaction_id, deleted_at) [name: "idx_attachments_transaction_active", note: "Active attachments per transaction: WHERE deleted_at IS NULL"]
+    (user_id, deleted_at) [name: "idx_attachments_user_deleted"]
+    storage_key [unique, name: "uidx_attachments_storage_key"]
+  }
+
+  Note: "Multiple attachments per transaction are permitted up to a configurable limit. Supported MIME types are validated at the API boundary. storage_key is an internal reference to the object storage system; API responses return only metadata (UUID, filename, MIME type, size, timestamp) — never the raw storage URL."
+}
+```
+
+---
+
+## Table Summary
+
+| Table | Section | Purpose |
+|---|---|---|
+| `account_types` | Lookup | Account categories: CHECKING, SAVINGS, CASH, VIRTUAL_WALLET, INTERNATIONAL, JOINT, INVESTMENT |
+| `transaction_types` | Lookup | Financial movement types: INCOME, EXPENSE, TRANSFER, REFUND, MANUAL_ADJUSTMENT |
+| `transaction_statuses` | Lookup | Payment lifecycle states: PAID, PENDING, OVERDUE, CANCELLED |
+| `recurrence_frequencies` | Lookup | Recurrence schedules: DAILY, WEEKLY, BIWEEKLY, MONTHLY, YEARLY |
+| `recurrence_rule_statuses` | Lookup | Recurrence rule states: ACTIVE, PAUSED, ENDED, DELETED |
+| `card_brands` | Lookup | Credit card networks: VISA, MASTERCARD, ELO, AMEX, HIPERCARD, OTHER |
+| `invoice_statuses` | Lookup | Invoice billing states: OPEN, CLOSED, PAID, PARTIAL, OVERDUE |
+| `accounts` | Accounts | Financial accounts and wallets per user; supports archiving and soft-delete |
+| `transactions` | Transactions | All financial movements on accounts; includes installment and recurrence linkage |
+| `installment_series` | Installments | Master record for installment commitments on accounts or credit cards |
+| `recurrence_rules` | Recurrence | Recurring transaction schedule definitions for account-based transactions |
+| `categories` | Categories | Two-level category hierarchy; supports system defaults and user-created categories |
+| `category_rules` | Categories | User-defined auto-categorization rules matched at transaction creation |
+| `tags` | Tags | Free-form tag definitions per user |
+| `transaction_tags` | Tags | Many-to-many: transaction ↔ tag |
+| `invoice_item_tags` | Tags | Many-to-many: invoice_item ↔ tag (credit card charge tagging) |
+| `shared_limit_groups` | Credit Cards | Optional shared credit limit groups spanning multiple cards |
+| `credit_cards` | Credit Cards | Card configuration: brand, limit, billing cycle, due date |
+| `invoices` | Invoices | Monthly billing cycles per credit card with status and payment tracking |
+| `invoice_items` | Invoices | Individual credit card charges per invoice; supports installment and revolving credit |
+| `attachments` | Attachments | Receipt and proof-of-payment file metadata linked to transactions |
+
+---
+
+## Key Design Decisions
+
+### Transactions vs Invoice Items
+
+Account-based financial activity (`accounts` → `transactions`) and credit card charges (`credit_cards` → `invoices` → `invoice_items`) are modelled as separate entity trees. This separation reflects their different lifecycle semantics: account transactions affect the account balance directly, while credit card charges affect the invoice total and only impact a bank account when the invoice is paid (which creates a separate `EXPENSE` transaction on the source account).
+
+### Installment Series Across Both Domains
+
+`installment_series` can reference either `account_id` or `credit_card_id` — exactly one must be set. Account-based series generate `transactions` as children; card-based series generate `invoice_items` distributed across future invoices. This single master record models both domains without schema duplication.
+
+### Balance Semantics
+
+Account balance is computed at query time by summing signed amounts of all `PAID` transactions on an account:
+- `INCOME`, `REFUND`, positive `MANUAL_ADJUSTMENT` → add to balance
+- `EXPENSE`, `TRANSFER` debit leg → subtract from balance
+
+`PENDING`, `OVERDUE`, and `CANCELLED` transactions are excluded from the settled balance. A `pendingBalance` projection may include PENDING transactions for cash flow planning.
+
+### Monetary Precision
+
+All financial amounts use `NUMERIC(19,2)` in PostgreSQL, `BigDecimal` in Java, and string serialization in API responses. No `float`, `double`, or `real` types appear anywhere in the monetary data path.
+
+### Soft-Delete Strategy
+
+| Entity | Soft-Delete Field | Hard-Delete Allowed? |
+|---|---|---|
+| `accounts` | `deleted_at` | Only when no transactions beyond seed record |
+| `categories` | via `is_archived` + `archived_at` | Never for system defaults; archive is the maximum action |
+| `credit_cards` | `deleted_at` | No — invoice history is preserved |
+| `recurrence_rules` | `deleted_at` | No — PENDING instances are cancelled, rule is soft-deleted |
+| `transactions` | `cancelled_at` (CANCELLED status) | Never — CANCELLED records are preserved for audit |
+| `invoice_items` | `cancelled_at` | Never — cancelled items are preserved for audit |
+| `attachments` | `deleted_at` | Soft-delete removes access; metadata is retained |
+
+### Credit Card Invoice Assignment
+
+A charge's invoice is determined at creation time: if `competence_date` falls on or before the card's `closing_day` in the current month, the charge goes to the current open invoice; otherwise it goes to the next invoice. Card-based installment series distribute future installment items to upcoming invoices as those invoices are created.
+
+### No Database ENUMs
+
+Every categorical column uses a lookup table FK. New account types, transaction types, or card brands are added via Flyway data migrations — zero DDL changes required.
+=== docs/v1/project-phases.md ===
+# Implementation Roadmap — cash-control-api (v1)
+
+**Stack:** Java 25 · Spring Boot 4.0.6 · Spring Security 7 · PostgreSQL 18 · Flyway · JPA/Hibernate · Gradle  
+**Architecture:** Stateless JWT (via auth module) · User-scoped data isolation · LGPD-aligned · Docker-ready  
+**Domain:** Personal finance — accounts, transactions, installments, recurring, categories, credit cards, dashboard  
+**Generated:** 2026-05-25  
+**Status legend:** `[x]` = implemented · `[ ]` = pending
+
+---
+
+## Codebase Inspection Summary
+
+| Area | Status |
+|---|---|
+| Gradle build files | `[x]` Done — `build.gradle.kts`, `settings.gradle.kts` |
+| Spring Boot application entry point | `[x]` Done — `AuthApplication.java` (package: `com.cashcontrol.api`) |
+| Auth module source (`src/`) | `[x]` Done — full auth implementation (JWT, RBAC, users, audit) |
+| Flyway migrations (auth) | `[x]` Done — V1–V8 (auth schema, seed data) |
+| Flyway migrations (cash-control) | `[x]` Done — V9–V13 (accounts, categories, transactions, credit cards, seed) |
+| Configuration files | `[x]` Done — `application.yml`, `application-test.yml` |
+| Docker artifacts | `[ ]` Pending — `Dockerfile`, `docker-compose.yml`, `.dockerignore` |
+| Test infrastructure | `[x]` Done — unit + integration test suites (Testcontainers) |
+| CI/CD pipeline | `[ ]` Pending — `.github/workflows/ci.yml` |
+
+**Status:** Phase 0 (Bootstrap), Phase 1 (Database Schema), and Phase 2 (Domain Layer JPA Entities) complete. Phase 3 (Security & User Scoping) is next.
+
+---
+
+## Implementation Strategy
+
+Phases are ordered by dependency: infrastructure → database schema → domain entities → feature modules → cross-cutting concerns → testing → CI/CD. The auth module provides JWT-based identity; this module never manages credentials or authentication. Each phase produces a testable vertical slice. Security-critical foundations (user scoping, method-level authorization) are established before any business feature is implemented.
+
+---
+
+## Phase 0 — Project Bootstrap & Build Infrastructure
+
+**Objective:** Produce a compilable, runnable Spring Boot application skeleton with all dependencies declared, configuration externalized, and the test harness bootstrapped.
+
+**Dependencies:** None — this is the starting point.
+
+**Complexity:** Low
+
+### Phase 0.1 — Gradle Build Configuration
+
+**Implementation Tasks:**
+
+- [x] Create `settings.gradle.kts` — set `rootProject.name = "cash-control-api"`
+- [x] Create `build.gradle.kts` with the following dependency blocks:
+  - `org.springframework.boot` plugin version `4.0.6`
+  - `io.spring.dependency-management` plugin
+  - `java` plugin targeting Java 25 (toolchain `JavaLanguageVersion.of(25)`)
+  - Spring Boot Starter Web
+  - Spring Boot Starter Security
+  - Spring Boot Starter Data JPA
+  - Spring Boot Starter Validation
+  - Spring Boot Starter Actuator
+  - `org.flywaydb:flyway-core` + `flyway-database-postgresql`
+  - `org.postgresql:postgresql`
+  - Lombok + annotation processor
+  - `org.springframework.boot:spring-boot-starter-test` (test scope)
+  - `org.testcontainers:postgresql` (test scope)
+  - `org.testcontainers:junit-jupiter` (test scope)
+  - `org.springdoc:springdoc-openapi-starter-webmvc-ui` (v2.8.8)
+  - `net.logstash.logback:logstash-logback-encoder` (v8.0, JSON logging)
+- [x] Configure `compileJava.options.annotationProcessorPath` for Lombok
+- [x] Configure `test { useJUnitPlatform() }`
+- [x] Create `gradle/wrapper/gradle-wrapper.properties` targeting Gradle 9.5.1
+- [x] Verify `./gradlew build` succeeds on an empty source set
+
+**Acceptance Criteria:**
+- [x] `./gradlew dependencies` resolves without conflicts
+- [x] `./gradlew compileJava` succeeds
+- [x] `./gradlew test` runs with zero tests and exits 0
+
+**Automated Tests:**
+- [x] Gradle build smoke test (CI step — not a JUnit test)
+
+---
+
+### Phase 0.2 — Application Entry Point & Package Structure
+
+**Implementation Tasks:**
+
+- [x] Create package root: `com.cashcontrol.api` (adapted from spec; auth module already established this)
+- [x] Create `AuthApplication.java` with `@SpringBootApplication` (serves as project entry point)
+- [x] Establish enforced package structure:
+  ```
+  com.cashcontrol.api
+  ├── config/          — Spring configuration classes
+  ├── controller/      — @RestController classes only
+  ├── service/         — Business logic interfaces + implementations
+  ├── repository/      — Spring Data JPA interfaces
+  ├── domain/
+  │   ├── entity/      — JPA @Entity classes
+  │   └── exception/   — Domain-specific exceptions
+  ├── dto/
+  │   ├── request/     — Inbound API DTOs (@Valid targets)
+  │   └── response/    — Outbound API DTOs
+  ├── security/        — JWT filter, SecurityConfig
+  └── util/            — Sanitization, correlation ID utilities
+  ```
+- [x] Create `src/main/resources/application.yml` with environment-variable-bound placeholders (no secrets)
+- [x] Create `.env.example` documenting all required environment variables
+- [x] Create `.gitignore` excluding: `.env`, `*.jar`, `build/`, `.idea/`, `*.class`
+
+**Acceptance Criteria:**
+- [x] Application starts with `./gradlew bootRun` against a PostgreSQL instance
+- [x] Application fails fast with a clear error when required env vars (`DB_URL`, `DB_USERNAME`, `DB_PASSWORD`) are absent
+- [x] No secrets in `application.yml` or any tracked file
+
+**Automated Tests:**
+- [x] `AuthApplicationTest` — `@SpringBootTest` context load test
+
+---
+
+### Phase 0.3 — Application Configuration (application.yml)
+
+**Implementation Tasks:**
+
+- [x] Configure datasource via environment variables:
+  ```yaml
+  spring.datasource.url: ${DB_URL}
+  spring.datasource.username: ${DB_USERNAME}
+  spring.datasource.password: ${DB_PASSWORD}
+  spring.datasource.driver-class-name: org.postgresql.Driver
+  ```
+- [x] Configure JPA: `ddl-auto: validate`, `show-sql: false`, `dialect: PostgreSQLDialect`
+- [x] Configure Flyway: `enabled: true`, `locations: classpath:db/migration`, `baseline-on-migrate: false`
+- [x] Configure JWT validation properties block (public key or secret from auth module):
+  ```yaml
+  app.jwt.secret: ${JWT_SECRET}
+  ```
+- [x] Configure attachment settings:
+  ```yaml
+  app.attachments.max-file-size-mb: ${ATTACHMENT_MAX_SIZE_MB:10}
+  app.attachments.max-per-transaction: ${ATTACHMENT_MAX_PER_TRANSACTION:5}
+  app.attachments.allowed-types: pdf,png,jpg,jpeg
+  ```
+- [x] Configure upcoming bills default window:
+  ```yaml
+  app.dashboard.upcoming-bills-days: ${UPCOMING_BILLS_DAYS:7}
+  app.dashboard.upcoming-bills-max-results: ${UPCOMING_BILLS_MAX_RESULTS:20}
+  ```
+- [x] Configure actuator: expose `health`, `info` only
+- [x] Create `AppProperties.java` — `@ConfigurationProperties(prefix = "app")` bean with Attachments and Dashboard inner classes
+
+**Acceptance Criteria:**
+- [x] All sensitive values bound from environment variables; none hardcoded
+- [x] Application startup fails with descriptive error when required properties are absent
+- [x] `AppProperties` bean is available for injection in all service classes
+
+**Automated Tests:**
+- [x] `AppPropertiesTest` — verifies property binding from test environment
+
+---
+
+### Phase 0.4 — Test Infrastructure Setup
+
+**Implementation Tasks:**
+
+- [x] Create `src/test/resources/application-test.yml`:
+  - Override datasource to use Testcontainers dynamic URL
+  - Set `flyway.enabled: true`
+  - Set `ddl-auto: validate`
+  - Use a fixed test JWT secret
+- [x] Create `PostgresTestContainerConfig.java`:
+  - `@TestConfiguration`
+  - Static `PostgreSQLContainer<>` instance (shared across tests)
+  - Registers `DataSource` bean pointing to the container
+- [x] Create `BaseIntegrationTest.java`:
+  - `@SpringBootTest(webEnvironment = RANDOM_PORT)`
+  - `@ActiveProfiles("test")`
+  - Imports `PostgresTestContainerConfig`
+  - Provides shared `MockMvc` setup
+- [x] Create `BaseRepositoryTest.java`:
+  - `@SpringBootTest` with Testcontainers PostgreSQL
+- [x] Verify Testcontainers starts PostgreSQL and Flyway runs all migrations cleanly
+
+**Acceptance Criteria:**
+- [x] `BaseIntegrationTest` subclasses start the full context against a real PostgreSQL container
+- [x] Flyway migrations run automatically in test context
+- [x] Container is reused across tests in the same JVM
+
+**Automated Tests:**
+- [x] `TestContainerSmokeTest` — asserts the PostgreSQL container starts and accepts a connection
+
+---
+
+## Phase 1 — Database Schema (Flyway Migrations)
+
+**Objective:** Produce the complete, validated PostgreSQL schema via versioned Flyway migrations. All tables, indexes, constraints, and seed data must be in place before any entity or repository code is written.
+
+**Dependencies:** Phase 0 complete.
+
+**Complexity:** Medium
+
+### Phase 1.1 — Flyway Baseline Configuration
+
+**Implementation Tasks:**
+
+- [x] Create `src/main/resources/db/migration/` directory
+- [x] Confirm Flyway configuration: `locations = classpath:db/migration`, `validateOnMigrate = true`, `outOfOrder = false`
+- [x] Configure `baselineOnMigrate: false`
+- [x] Ensure `spring.jpa.hibernate.ddl-auto=validate`
+
+**Acceptance Criteria:**
+- [x] Application startup fails if a migration file is tampered (checksum mismatch)
+- [x] Flyway `flyway_schema_history` table is created automatically on first run
+
+**Automated Tests:**
+- [x] `FlywayMigrationTest` — asserts applied migration count equals the number of V*.sql files
+
+---
+
+### Phase 1.2 — V1: Account & Wallet Schema
+
+**File:** `V1__create_accounts.sql`
+
+**Implementation Tasks:**
+
+- [x] Create `accounts` table:
+  - `id UUID PK DEFAULT gen_random_uuid()`
+  - `user_id UUID NOT NULL`
+  - `name VARCHAR(100) NOT NULL`
+  - `type VARCHAR(30) NOT NULL` — `CHECKING`, `SAVINGS`, `CASH`, `VIRTUAL_WALLET`, `INTERNATIONAL`, `JOINT`, `INVESTMENT`
+  - `currency_code CHAR(3) NOT NULL DEFAULT 'BRL'`
+  - `description VARCHAR(255)`
+  - `display_order INT NOT NULL DEFAULT 0`
+  - `archived_at TIMESTAMP WITH TIME ZONE`
+  - `deleted_at TIMESTAMP WITH TIME ZONE`
+  - `created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()`
+  - `updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()`
+- [x] Add unique index: `(user_id, name)` WHERE `deleted_at IS NULL`
+- [x] Add index on `user_id`
+- [x] Add index on `archived_at`
+
+**Acceptance Criteria:**
+- [x] `accounts` table created with all columns, constraints, and indexes
+- [x] Migration applies cleanly on a fresh PostgreSQL 18 instance
+
+**Automated Tests:**
+- [x] `AccountsSchemaMigrationTest` — asserts table and all indexes exist via `DatabaseMetaData`
+
+---
+
+### Phase 1.3 — V2: Category & Tag Schema
+
+**File:** `V2__create_categories_and_tags.sql`
+
+**Implementation Tasks:**
+
+- [x] Create `categories` table:
+  - `id UUID PK DEFAULT gen_random_uuid()`
+  - `user_id UUID` — NULL for system defaults
+  - `parent_id UUID REFERENCES categories(id)`
+  - `name VARCHAR(100) NOT NULL`
+  - `color CHAR(7)` — hex color code
+  - `icon VARCHAR(100)`
+  - `display_order INT NOT NULL DEFAULT 0`
+  - `is_default BOOLEAN NOT NULL DEFAULT false`
+  - `is_hidden BOOLEAN NOT NULL DEFAULT false`
+  - `archived_at TIMESTAMP WITH TIME ZONE`
+  - `created_at`, `updated_at`
+- [x] Add unique index: `(user_id, parent_id, name)` WHERE `archived_at IS NULL`
+- [x] Add index on `user_id`, `parent_id`
+- [x] Create `tags` table:
+  - `id UUID PK`, `user_id UUID NOT NULL`, `name VARCHAR(50) NOT NULL`
+  - Unique index: `(user_id, name)`
+- [x] Create `category_rules` table:
+  - `id UUID PK`, `user_id UUID NOT NULL`, `keyword VARCHAR(255) NOT NULL`
+  - `category_id UUID NOT NULL REFERENCES categories(id)`
+  - `subcategory_id UUID REFERENCES categories(id)`
+  - `account_id UUID` — optional scope
+  - `priority INT NOT NULL DEFAULT 0`
+  - `created_at`, `updated_at`
+- [x] Add index on `user_id` in all tables
+
+**Acceptance Criteria:**
+- [x] All three tables created with correct constraints
+- [x] Self-referential FK on `categories.parent_id` created
+- [x] Migration applies cleanly
+
+**Automated Tests:**
+- [x] `CategoriesSchemaMigrationTest` — asserts tables, FKs, and indexes exist
+
+---
+
+### Phase 1.4 — V3: Transaction Schema
+
+**File:** `V3__create_transactions.sql`
+
+**Implementation Tasks:**
+
+- [x] Create `installment_series` table:
+  - `id UUID PK`, `user_id UUID NOT NULL`
+  - `total_amount NUMERIC(19,2) NOT NULL`
+  - `total_installments INT NOT NULL`
+  - `description VARCHAR(255) NOT NULL`
+  - `category_id UUID REFERENCES categories(id)`
+  - `account_id UUID NOT NULL REFERENCES accounts(id)`
+  - `original_date DATE NOT NULL`
+  - `settled BOOLEAN NOT NULL DEFAULT false`
+  - `settled_at TIMESTAMP WITH TIME ZONE`
+  - `created_at`, `updated_at`
+- [x] Create `recurrence_rules` table:
+  - `id UUID PK`, `user_id UUID NOT NULL`
+  - `account_id UUID NOT NULL REFERENCES accounts(id)`
+  - `type VARCHAR(20) NOT NULL`
+  - `amount NUMERIC(19,2) NOT NULL`
+  - `description VARCHAR(255) NOT NULL`
+  - `category_id UUID REFERENCES categories(id)`
+  - `frequency VARCHAR(20) NOT NULL` — `DAILY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`, `YEARLY`
+  - `start_date DATE NOT NULL`
+  - `end_date DATE`
+  - `next_occurrence_date DATE`
+  - `status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'`
+  - `paused_at TIMESTAMP WITH TIME ZONE`
+  - `resume_at TIMESTAMP WITH TIME ZONE`
+  - `deleted_at TIMESTAMP WITH TIME ZONE`
+  - `created_at`, `updated_at`
+- [x] Create `transactions` table:
+  - `id UUID PK DEFAULT gen_random_uuid()`
+  - `user_id UUID NOT NULL`
+  - `account_id UUID NOT NULL REFERENCES accounts(id)`
+  - `type VARCHAR(30) NOT NULL` — `INCOME`, `EXPENSE`, `TRANSFER`, `REFUND`, `MANUAL_ADJUSTMENT`
+  - `amount NUMERIC(19,2) NOT NULL`
+  - `description VARCHAR(255) NOT NULL`
+  - `notes TEXT`
+  - `competence_date DATE NOT NULL`
+  - `payment_date DATE`
+  - `status VARCHAR(20) NOT NULL DEFAULT 'PAID'` — `PAID`, `PENDING`, `OVERDUE`, `CANCELLED`
+  - `category_id UUID REFERENCES categories(id)`
+  - `subcategory_id UUID REFERENCES categories(id)`
+  - `location VARCHAR(255)`
+  - `transfer_group_id UUID`
+  - `installment_series_id UUID REFERENCES installment_series(id)`
+  - `installment_number INT`
+  - `total_installments INT`
+  - `detached BOOLEAN NOT NULL DEFAULT false`
+  - `early_settlement BOOLEAN NOT NULL DEFAULT false`
+  - `recurrence_rule_id UUID REFERENCES recurrence_rules(id)`
+  - `cancelled_at TIMESTAMP WITH TIME ZONE`
+  - `created_at`, `updated_at`
+- [x] Create `transaction_tags` table: `transaction_id UUID`, `tag_id UUID`, PK `(transaction_id, tag_id)`
+- [x] Create `attachments` table:
+  - `id UUID PK`, `user_id UUID NOT NULL`, `transaction_id UUID NOT NULL REFERENCES transactions(id)`
+  - `filename VARCHAR(255) NOT NULL`, `mime_type VARCHAR(100) NOT NULL`
+  - `file_size_bytes BIGINT NOT NULL`, `storage_key VARCHAR(512) NOT NULL`
+  - `uploaded_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()`
+- [x] Add indexes:
+  - `transactions(user_id)`, `transactions(account_id)`
+  - `transactions(competence_date)`, `transactions(payment_date)`
+  - `transactions(status)`, `transactions(installment_series_id)`
+  - `transactions(recurrence_rule_id)`, `transactions(transfer_group_id)`
+  - `recurrence_rules(next_occurrence_date)`
+  - `attachments(transaction_id)`, `attachments(user_id)`
+
+**Acceptance Criteria:**
+- [x] All tables created with correct `NUMERIC(19,2)` amount columns
+- [x] All FK constraints correct; no circular references
+- [x] All indexes as specified
+
+**Automated Tests:**
+- [x] `TransactionSchemaMigrationTest` — asserts tables, FKs, and indexes
+
+---
+
+### Phase 1.5 — V4: Credit Card Schema
+
+**File:** `V4__create_credit_cards.sql`
+
+**Implementation Tasks:**
+
+- [x] Create `credit_cards` table:
+  - `id UUID PK`, `user_id UUID NOT NULL`
+  - `name VARCHAR(100) NOT NULL`
+  - `brand VARCHAR(30) NOT NULL` — `VISA`, `MASTERCARD`, `ELO`, `AMEX`, `HIPERCARD`, `OTHER`
+  - `issuer VARCHAR(100)`
+  - `credit_limit NUMERIC(19,2) NOT NULL`
+  - `closing_day INT NOT NULL` — 1–28
+  - `due_day INT NOT NULL` — 1–28
+  - `shared_limit_group_id UUID`
+  - `archived_at TIMESTAMP WITH TIME ZONE`
+  - `created_at`, `updated_at`
+  - Unique index: `(user_id, name)` WHERE `deleted_at IS NULL`
+- [x] Create `invoices` table:
+  - `id UUID PK`, `credit_card_id UUID NOT NULL REFERENCES credit_cards(id)`
+  - `user_id UUID NOT NULL`
+  - `reference_month CHAR(7) NOT NULL` — YYYY-MM
+  - `closing_date DATE NOT NULL`
+  - `due_date DATE NOT NULL`
+  - `total_amount NUMERIC(19,2) NOT NULL DEFAULT 0`
+  - `paid_amount NUMERIC(19,2) NOT NULL DEFAULT 0`
+  - `status VARCHAR(20) NOT NULL DEFAULT 'OPEN'` — `OPEN`, `CLOSED`, `PAID`, `PARTIAL`, `OVERDUE`
+  - `created_at`, `updated_at`
+  - Unique index: `(credit_card_id, reference_month)`
+- [x] Create `invoice_items` table:
+  - `id UUID PK`, `invoice_id UUID NOT NULL REFERENCES invoices(id)`
+  - `transaction_id UUID REFERENCES transactions(id)`
+  - `amount NUMERIC(19,2) NOT NULL`
+  - `description VARCHAR(255) NOT NULL`
+  - `type VARCHAR(30) NOT NULL` — `CHARGE`, `REVOLVING`, `FUTURE_INSTALLMENT`
+  - `item_date DATE NOT NULL`
+  - `created_at`
+- [x] Add indexes: `invoices(user_id)`, `invoices(due_date)`, `invoice_items(invoice_id)`
+
+**Acceptance Criteria:**
+- [x] All three tables with correct constraints and indexes
+- [x] `closing_day` and `due_day` check constraints: `BETWEEN 1 AND 28`
+- [x] Migration applies cleanly
+
+**Automated Tests:**
+- [x] `CreditCardSchemaMigrationTest` — asserts tables and constraints
+
+---
+
+### Phase 1.6 — V5: Default Category Seed Data
+
+**File:** `V5__seed_default_categories.sql`
+
+**Implementation Tasks:**
+
+- [x] Insert default root categories (system-level, `user_id = NULL`, `is_default = true`):
+  - Expenses: `Housing`, `Food`, `Transport`, `Health`, `Education`, `Entertainment`, `Clothing`, `Personal Care`, `Subscriptions`, `Travel`, `Taxes & Fees`, `Other Expenses`
+  - Income: `Salary`, `Freelance`, `Investments`, `Gifts`, `Other Income`
+- [x] Insert default subcategories under each root (e.g., Housing → Rent, Condominium, Electricity, Water, Internet)
+- [x] Use `INSERT ... ON CONFLICT DO NOTHING` for idempotency
+
+**Acceptance Criteria:**
+- [x] All default categories present in `categories` table on fresh install
+- [x] Re-running migration produces no duplicate key errors
+- [x] All entries have `is_default = true`, `user_id = NULL`
+
+**Automated Tests:**
+- [x] `DefaultCategorySeedTest` — asserts minimum expected root categories exist
+
+---
+
+## Phase 2 — Domain Layer (JPA Entities)
+
+**Objective:** Implement all JPA entities mapping to the Flyway-created schema. Entities must match the schema exactly; no schema changes via Hibernate auto-DDL.
+
+**Dependencies:** Phase 1 complete.
+
+**Complexity:** Medium
+
+### Phase 2.1 — Account & Category Entities
+
+**Implementation Tasks:**
+
+- [x] Create `Account.java` entity: all fields from `accounts` table; `@Enumerated(EnumType.STRING)` for `type`; `@Column(nullable = false)` guards
+- [x] Create `AccountType.java` enum: `CHECKING`, `SAVINGS`, `CASH`, `VIRTUAL_WALLET`, `INTERNATIONAL`, `JOINT`, `INVESTMENT`
+- [x] Create `Category.java` entity: self-referential `@ManyToOne parent`; `@OneToMany subcategories`
+- [x] Create `Tag.java` entity
+- [x] Create `CategoryRule.java` entity
+
+**Acceptance Criteria:**
+- [x] `./gradlew test` with `ddl-auto: validate` passes (schema matches entities)
+- [x] All FK relationships navigable via entity graph
+
+**Automated Tests:**
+- [x] `AccountEntityTest` — CRUD via `BaseRepositoryTest`
+- [x] `CategoryEntityTest` — asserts parent-child navigation
+
+---
+
+### Phase 2.2 — Transaction & Related Entities
+
+**Implementation Tasks:**
+
+- [x] Create `TransactionType.java` enum: `INCOME`, `EXPENSE`, `TRANSFER`, `REFUND`, `MANUAL_ADJUSTMENT`
+- [x] Create `TransactionStatus.java` enum: `PAID`, `PENDING`, `OVERDUE`, `CANCELLED`
+- [x] Create `InstallmentSeries.java` entity
+- [x] Create `RecurrenceRule.java` entity; `RecurrenceFrequency.java` enum: `DAILY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`, `YEARLY`
+- [x] Create `Transaction.java` entity: all fields; `@ManyToMany tags`; `@ManyToOne` for account, category, subcategory, installmentSeries, recurrenceRule
+- [x] Create `Attachment.java` entity: `@ManyToOne transaction`
+
+**Acceptance Criteria:**
+- [x] Schema validation passes with `ddl-auto: validate`
+- [x] `Transaction` ↔ `Tag` many-to-many via `transaction_tags` join table
+
+**Automated Tests:**
+- [x] `TransactionEntityTest` — full lifecycle CRUD via repository
+
+---
+
+### Phase 2.3 — Credit Card Entities
+
+**Implementation Tasks:**
+
+- [x] Create `CardBrand.java` enum: `VISA`, `MASTERCARD`, `ELO`, `AMEX`, `HIPERCARD`, `OTHER`
+- [x] Create `InvoiceStatus.java` enum: `OPEN`, `CLOSED`, `PAID`, `PARTIAL`, `OVERDUE`
+- [x] Create `CreditCard.java` entity
+- [x] Create `Invoice.java` entity: `@ManyToOne creditCard`; `@OneToMany items`
+- [x] Create `InvoiceItem.java` entity: `@ManyToOne invoice`; `@ManyToOne transaction` (nullable)
+
+**Acceptance Criteria:**
+- [x] Schema validation passes
+- [x] Invoice ↔ CreditCard navigation works
+
+**Automated Tests:**
+- [x] `CreditCardEntityTest` — asserts invoice creation and item linking
+
+---
+
+### Phase 2.4 — Domain Exceptions
+
+**Implementation Tasks:**
+
+- [x] Create `ResourceNotFoundException.java` — thrown when a resource is not found for the authenticated user
+- [x] Create `BusinessRuleException.java` — thrown for 422 business rule violations (e.g., transfer to archived account)
+- [x] Create `ConflictException.java` — thrown for 409 conflicts (e.g., duplicate account name)
+- [x] Create `ForbiddenAccessException.java` — thrown on cross-user access attempts
+- [x] Create `GlobalExceptionHandler.java` — `@ControllerAdvice` mapping all domain exceptions to correct HTTP status codes and standardized error body
+
+**Acceptance Criteria:**
+- [x] `ResourceNotFoundException` → 404
+- [x] `BusinessRuleException` → 422
+- [x] `ConflictException` → 409
+- [x] `ForbiddenAccessException` → 403
+- [x] Error body always contains: `errorCode`, `message`, `correlationId`; never stack traces
+
+**Automated Tests:**
+- [x] `GlobalExceptionHandlerTest` — `@WebMvcTest` asserting each exception maps to the correct HTTP status and body structure
+
+---
+
+## Phase 3 — Security & User Scoping
+
+**Objective:** Integrate with the auth module's JWT tokens. Establish the `currentUserId` extraction mechanism and enforce user-scoped access on all operations.
+
+**Dependencies:** Phase 2 complete.
+
+**Complexity:** Medium
+
+### Phase 3.1 — JWT Filter & Security Configuration
+
+**Implementation Tasks:**
+
+- [x] Create `JwtAuthenticationFilter.java`:
+  - Reads `Authorization: Bearer <token>` from each request
+  - Validates the JWT signature using the shared secret / public key
+  - Extracts `userId` (subject) and populates `SecurityContextHolder`
+  - Returns 401 on invalid or missing tokens
+- [x] Create `SecurityConfig.java` — `@Configuration @EnableMethodSecurity`:
+  - Disable CSRF (stateless API)
+  - Permit unauthenticated access to `/actuator/health`, `/actuator/info`, `/v3/api-docs/**`, `/swagger-ui/**`
+  - Require authentication for all other endpoints
+  - Register `JwtAuthenticationFilter` before `UsernamePasswordAuthenticationFilter`
+- [x] Create `CurrentUser.java` annotation — `@AuthenticationPrincipal` shorthand for controller parameters
+
+**Acceptance Criteria:**
+- [x] Requests with a valid JWT proceed; requests without one are rejected with 401
+- [x] `userId` is extractable from the security context in any service method
+
+**Automated Tests:**
+- [x] `JwtAuthenticationFilterTest` — unit tests for valid, expired, malformed, and missing tokens
+- [x] `SecurityConfigIntegrationTest` — asserts public endpoints are accessible without auth; protected endpoints return 401
+
+---
+
+### Phase 3.2 — User Scoping Utilities
+
+**Implementation Tasks:**
+
+- [x] Create `SecurityUtils.java`:
+  - `getCurrentUserId()` — extracts UUID from `SecurityContextHolder`
+  - Throws `ForbiddenAccessException` if context is empty
+- [x] Create `UserScopedRepository.java` marker interface — documents that all implementations must include `user_id` predicates
+- [x] Create `CorrelationIdFilter.java` — sets a `X-Correlation-ID` on each request/response for log tracing
+
+**Acceptance Criteria:**
+- [x] `SecurityUtils.getCurrentUserId()` works in any service method during an authenticated request
+- [x] Correlation ID is present in all log lines and response headers
+
+**Automated Tests:**
+- [x] `SecurityUtilsTest` — asserts correct UUID is returned from the security context
+
+---
+
+## Phase 4 — Account & Wallet Management
+
+**Objective:** Implement full CRUD and lifecycle management for user accounts, including balance computation and transfer logic.
+
+**Dependencies:** Phase 3 complete.
+
+**Complexity:** Medium
+
+### Phase 4.1 — Account Repository & Service
+
+**Implementation Tasks:**
+
+- [ ] Create `AccountRepository.java` — extends `JpaRepository<Account, UUID>`:
+  - `findAllByUserIdAndDeletedAtIsNull(UUID userId)`
+  - `findByIdAndUserIdAndDeletedAtIsNull(UUID id, UUID userId)`
+  - `existsByUserIdAndNameAndDeletedAtIsNull(UUID userId, String name)`
+- [ ] Create `AccountService.java` interface and `AccountServiceImpl.java`:
+  - `createAccount(CreateAccountRequest, UUID userId)` — creates account + seed `MANUAL_ADJUSTMENT` transaction for initial balance
+  - `listAccounts(UUID userId, boolean includeArchived)` — sorted by `displayOrder` then `createdAt`
+  - `getAccount(UUID id, UUID userId)` — throws `ResourceNotFoundException` if not found
+  - `editAccount(UUID id, EditAccountRequest, UUID userId)` — validates name uniqueness
+  - `archiveAccount(UUID id, UUID userId)` — sets `archivedAt`; rejects if already archived
+  - `unarchiveAccount(UUID id, UUID userId)`
+  - `deleteAccount(UUID id, UUID userId)` — only allowed if no transactions beyond the seed record; else throws `BusinessRuleException`
+  - `computeBalance(UUID accountId, UUID userId)` — sum of `PAID` transaction amounts with direction encoding
+  - `manualAdjustment(ManualAdjustmentRequest, UUID userId)` — creates a `MANUAL_ADJUSTMENT` transaction for the delta
+
+**Acceptance Criteria:**
+- [ ] Account name uniqueness per user enforced; `ConflictException` on duplicate
+- [ ] Archived account balance excluded from portfolio aggregations
+- [ ] Deletion rejected with 422 if account has non-seed transactions
+
+**Automated Tests:**
+- [ ] `AccountServiceTest` — unit tests for each service method with mocked repositories
+- [ ] `AccountIntegrationTest` — full lifecycle against Testcontainers PostgreSQL
+
+---
+
+### Phase 4.2 — Account Controller
+
+**Implementation Tasks:**
+
+- [ ] Create `AccountController.java` — `@RestController @RequestMapping("/api/v1/accounts")`:
+  - `POST /` → `createAccount` → 201
+  - `GET /` → `listAccounts` (query param `includeArchived`) → 200
+  - `GET /{id}` → `getAccount` → 200
+  - `PUT /{id}` → `editAccount` → 200
+  - `POST /{id}/archive` → `archiveAccount` → 200
+  - `POST /{id}/unarchive` → `unarchiveAccount` → 200
+  - `DELETE /{id}` → `deleteAccount` → 204
+  - `POST /{id}/adjust` → `manualAdjustment` → 200
+- [ ] Create request DTOs: `CreateAccountRequest`, `EditAccountRequest`, `ManualAdjustmentRequest`
+- [ ] Create response DTO: `AccountResponse` (never expose the JPA entity)
+
+**Acceptance Criteria:**
+- [ ] All endpoints require a valid JWT
+- [ ] `userId` always sourced from the JWT; never from the request body
+- [ ] `AccountResponse` includes computed balance but never the JPA entity
+
+**Automated Tests:**
+- [ ] `AccountControllerTest` — `@WebMvcTest` for all endpoints; validates HTTP status and response body structure
+
+---
+
+### Phase 4.3 — Transfer Between Accounts
+
+**Implementation Tasks:**
+
+- [ ] Add `createTransfer(TransferRequest, UUID userId)` to `AccountService`:
+  - Validates both accounts belong to `userId`
+  - Validates source ≠ destination
+  - Validates neither account is archived
+  - Creates two linked `TRANSFER` transactions atomically with the same `transferGroupId`
+- [ ] Add `POST /api/v1/accounts/transfers` endpoint to `AccountController`
+- [ ] Add `DELETE /api/v1/accounts/transfers/{groupId}` — deletes both legs atomically
+- [ ] Create request DTO: `TransferRequest`
+
+**Acceptance Criteria:**
+- [ ] Both legs created atomically; if either fails, neither is persisted
+- [ ] Transfer nets to zero in portfolio balance calculations
+- [ ] Deleting one leg individually rejected with 422
+
+**Automated Tests:**
+- [ ] `TransferIntegrationTest` — asserts both legs are created; asserts portfolio balance is unchanged
+
+---
+
+## Phase 5 — Transaction Management
+
+**Objective:** Implement the full transaction lifecycle: create, edit, delete, status transitions, list with filters, and attachment management.
+
+**Dependencies:** Phase 4 complete.
+
+**Complexity:** High
+
+### Phase 5.1 — Transaction Repository
+
+**Implementation Tasks:**
+
+- [ ] Create `TransactionRepository.java` — `JpaRepository<Transaction, UUID>`:
+  - `findByIdAndUserId(UUID id, UUID userId)`
+  - `findAllByUserId(UUID userId, Pageable pageable)`
+  - `findAllByAccountIdAndUserId(UUID accountId, UUID userId, Pageable pageable)`
+  - Custom JPQL query for filtered search (account, type, status, category, date range, amount range, text search)
+  - `existsByAccountIdAndUserIdAndStatusNotIn(UUID accountId, UUID userId, List<TransactionStatus> statuses)` — for account deletion guard
+  - `sumPaidAmountByAccountIdAndUserId(UUID accountId, UUID userId)` — for balance computation
+
+---
+
+### Phase 5.2 — Transaction Service
+
+**Implementation Tasks:**
+
+- [ ] Create `TransactionService.java` and `TransactionServiceImpl.java`:
+  - `createTransaction(CreateTransactionRequest, UUID userId)` → 201
+  - `editTransaction(UUID id, EditTransactionRequest, UUID userId)` — detaches from installment series if part of one
+  - `deleteTransaction(UUID id, UUID userId)` — rejects individual deletion of a transfer leg with 422
+  - `markAsPaid(UUID id, MarkAsPaidRequest, UUID userId)` — validates `PENDING`/`OVERDUE` → `PAID` transition
+  - `cancelTransaction(UUID id, UUID userId)` — sets `cancelledAt`; validates not already cancelled
+  - `listTransactions(TransactionFilterRequest, UUID userId, Pageable pageable)` — filtered + paginated
+  - `getTransaction(UUID id, UUID userId)` — full detail
+  - `detectOverdue(UUID userId)` — transitions eligible `PENDING` → `OVERDUE` (for scheduled/on-demand use)
+- [ ] Enforce status transition rules; throw `BusinessRuleException` on invalid transitions
+- [ ] Ensure `BigDecimal` arithmetic throughout; never `double` or `float`
+- [ ] Apply category rules at creation time
+
+**Acceptance Criteria:**
+- [ ] Invalid status transitions rejected with 422
+- [ ] `CANCELLED` transactions never affect balance
+- [ ] All monetary arithmetic uses `BigDecimal` with `HALF_UP` rounding
+- [ ] Category auto-assignment applied at creation when a matching rule exists
+
+**Automated Tests:**
+- [ ] `TransactionServiceTest` — unit tests for all methods
+- [ ] `TransactionStatusTransitionTest` — asserts valid and invalid transitions
+- [ ] `BalanceConsistencyTest` — known transaction sequences verified against expected balance
+
+---
+
+### Phase 5.3 — Transaction Controller
+
+**Implementation Tasks:**
+
+- [ ] Create `TransactionController.java` — `@RestController @RequestMapping("/api/v1/transactions")`:
+  - `POST /` → 201
+  - `GET /` → paginated list with filter query params → 200
+  - `GET /{id}` → full detail → 200
+  - `PUT /{id}` → edit → 200
+  - `DELETE /{id}` → 204
+  - `POST /{id}/pay` → mark as paid → 200
+  - `POST /{id}/cancel` → cancel → 200
+- [ ] Create request DTOs with Jakarta Validation: `CreateTransactionRequest`, `EditTransactionRequest`, `MarkAsPaidRequest`, `TransactionFilterRequest`
+- [ ] Create response DTOs: `TransactionSummaryResponse`, `TransactionDetailResponse`
+
+**Acceptance Criteria:**
+- [ ] Validation failures return 400 with field-level error body
+- [ ] Entities never leak outside the service boundary
+- [ ] `CANCELLED` transactions excluded from list by default; `includeCancelled=true` param to include
+
+**Automated Tests:**
+- [ ] `TransactionControllerTest` — `@WebMvcTest` for all endpoints
+
+---
+
+### Phase 5.4 — Attachment Management
+
+**Implementation Tasks:**
+
+- [ ] Create `AttachmentRepository.java`
+- [ ] Create `AttachmentService.java`:
+  - `attach(UUID transactionId, MultipartFile[] files, UUID userId)` — validates file type, size, and per-transaction limit
+  - `deleteAttachment(UUID attachmentId, UUID userId)`
+  - `getAttachments(UUID transactionId, UUID userId)`
+  - Storage: persist file to configurable storage (local filesystem for dev, S3-compatible for prod) using a `StoragePort` interface
+  - Never expose raw file paths in API responses — return signed access references only
+- [ ] Create `StoragePort.java` interface + `LocalFileStorageAdapter.java` implementation (dev/test)
+- [ ] Add attachment endpoints to `TransactionController`:
+  - `POST /{id}/attachments` → 201
+  - `GET /{id}/attachments` → 200
+  - `DELETE /{id}/attachments/{attachmentId}` → 204
+
+**Acceptance Criteria:**
+- [ ] Only PDF, PNG, JPG, JPEG accepted; others → 400
+- [ ] File size above configured max → 422
+- [ ] Per-transaction limit enforced → 422
+- [ ] Storage keys never exposed in API responses
+
+**Automated Tests:**
+- [ ] `AttachmentServiceTest` — file validation, limit enforcement
+
+---
+
+## Phase 6 — Installment Transactions
+
+**Objective:** Implement installment series creation, series-wide and individual editing, early settlement, and advance payment.
+
+**Dependencies:** Phase 5 complete.
+
+**Complexity:** High
+
+### Phase 6.1 — Installment Service
+
+**Implementation Tasks:**
+
+- [ ] Create `InstallmentRepository.java` and `InstallmentSeriesRepository.java`
+- [ ] Create `InstallmentService.java` and `InstallmentServiceImpl.java`:
+  - `createInstallmentSeries(CreateInstallmentRequest, UUID userId)`:
+    - Creates `InstallmentSeries` master record
+    - Generates individual `Transaction` records for each installment
+    - Amount split: `totalAmount / totalInstallments` with remainder on the last installment
+    - First installment: `PAID` if firstPaymentDate ≤ today; remainder `PENDING`
+    - Monthly `paymentDate` progression from `firstPaymentDate`
+  - `editSeries(UUID seriesId, EditSeriesRequest, UUID userId)` — updates description, notes, category, account on all `PENDING`/`OVERDUE` installments
+  - `editInstallment(UUID transactionId, EditInstallmentRequest, UUID userId)` — marks `detached = true` on the transaction
+  - `earlySettlement(UUID seriesId, EarlySettlementRequest, UUID userId)`:
+    - Cancels all remaining `PENDING`/`OVERDUE` installments
+    - Creates one `PAID` settlement transaction linked to the series
+    - Sets `series.settled = true`, `series.settledAt = now()`
+  - `advanceInstallments(AdvanceInstallmentRequest, UUID userId)` — moves payment dates, optionally adjusts amounts
+
+**Acceptance Criteria:**
+- [ ] Installment amounts sum to `totalAmount` exactly (no floating-point rounding drift)
+- [ ] Remainder handling deterministic (last installment)
+- [ ] Detached installments excluded from series-wide edit
+- [ ] Early settlement atomic: all cancellations + settlement creation in one transaction
+
+**Automated Tests:**
+- [ ] `InstallmentAmountSplitTest` — verifies exact sum and remainder assignment across multiple total/count combinations
+- [ ] `EarlySettlementIntegrationTest` — asserts cancellations and settlement creation atomicity
+
+---
+
+### Phase 6.2 — Installment Controller
+
+**Implementation Tasks:**
+
+- [ ] Create `InstallmentController.java` — `@RestController @RequestMapping("/api/v1/installments")`:
+  - `POST /` → create series → 201
+  - `PUT /series/{seriesId}` → edit series → 200
+  - `PUT /{transactionId}` → edit individual installment → 200
+  - `POST /series/{seriesId}/settle` → early settlement → 200
+  - `POST /advance` → advance installments → 200
+
+**Automated Tests:**
+- [ ] `InstallmentControllerTest` — HTTP status and response body validation
+
+---
+
+## Phase 7 — Recurring Transactions
+
+**Objective:** Implement recurrence rules, instance generation, pausing, and deletion strategies.
+
+**Dependencies:** Phase 5 complete.
+
+**Complexity:** Medium
+
+### Phase 7.1 — Recurrence Service
+
+**Implementation Tasks:**
+
+- [ ] Create `RecurrenceRepository.java`
+- [ ] Create `RecurrenceService.java` and `RecurrenceServiceImpl.java`:
+  - `createRecurrence(CreateRecurrenceRequest, UUID userId)`:
+    - Creates `RecurrenceRule`
+    - Generates first instance immediately
+    - Pre-generates instances for the next N periods (configurable) or marks `nextOccurrenceDate` for lazy generation
+  - `editSeries(UUID ruleId, EditRecurrenceRequest, UUID userId)` — updates future `PENDING` instances; updates master rule
+  - `pauseRecurrence(UUID ruleId, PauseRequest, UUID userId)` — sets `status = PAUSED`; cancels future `PENDING` instances for the pause window
+  - `resumeRecurrence(UUID ruleId, UUID userId)` — restores `ACTIVE` status; regenerates instances from resume date
+  - `deleteRecurrence(UUID ruleId, DeleteRecurrenceStrategy, UUID userId)`:
+    - `FUTURE_ONLY`: cancels future `PENDING` instances; soft-deletes rule
+    - `ALL`: cancels all `PENDING` instances; soft-deletes rule
+    - Never touches `PAID` instances
+- [ ] Create `RecurrenceGeneratorService.java` — stateless utility that computes the next occurrence date given a frequency and a base date
+
+**Acceptance Criteria:**
+- [ ] `PAID` instances never modified by any recurrence operation
+- [ ] Pause cancels exactly the pending instances in the pause window
+- [ ] `RecurrenceGeneratorService` handles month-end edge cases (e.g., Jan 31 → Feb 28)
+
+**Automated Tests:**
+- [ ] `RecurrenceGeneratorServiceTest` — edge cases for all frequencies including month-end dates
+- [ ] `RecurrenceServiceIntegrationTest` — full lifecycle
+
+---
+
+### Phase 7.2 — Recurrence Controller
+
+**Implementation Tasks:**
+
+- [ ] Create `RecurrenceController.java` — `@RestController @RequestMapping("/api/v1/recurrences")`:
+  - `POST /` → 201
+  - `PUT /{id}` → edit series → 200
+  - `POST /{id}/pause` → 200
+  - `POST /{id}/resume` → 200
+  - `DELETE /{id}` → (strategy as query param) → 200
+
+**Automated Tests:**
+- [ ] `RecurrenceControllerTest` — HTTP validation
+
+---
+
+## Phase 8 — Category Management
+
+**Objective:** Implement full category lifecycle: list, create, edit, hide, archive, auto-suggest, and category rules.
+
+**Dependencies:** Phase 3 complete.
+
+**Complexity:** Medium
+
+### Phase 8.1 — Category Service
+
+**Implementation Tasks:**
+
+- [ ] Create `CategoryRepository.java`:
+  - `findAllSystemCategories()` — `user_id IS NULL`
+  - `findAllByUserId(UUID userId)` — user-defined categories
+  - `existsByUserIdAndParentIdAndName(UUID userId, UUID parentId, String name)`
+- [ ] Create `CategoryService.java` and `CategoryServiceImpl.java`:
+  - `listCategories(UUID userId, boolean includeHidden, boolean includeArchived)` — returns system + user categories; nested subcategories
+  - `createCategory(CreateCategoryRequest, UUID userId)` — validates max depth (root or subcategory only); validates name uniqueness within parent scope
+  - `editCategory(UUID id, EditCategoryRequest, UUID userId)` — only user-defined categories; validates name uniqueness
+  - `setHidden(UUID id, boolean hidden, UUID userId)` — works on system and user categories
+  - `archiveCategory(UUID id, UUID userId)` — archives parent and all subcategories; user-defined only
+  - `unarchiveCategory(UUID id, UUID userId)`
+  - `suggestCategory(String description, UUID userId)` — frequency-based suggestion from transaction history; falls back to most-used categories
+  - `createRule(CreateCategoryRuleRequest, UUID userId)`
+  - `listRules(UUID userId)`
+  - `deleteRule(UUID id, UUID userId)`
+
+**Acceptance Criteria:**
+- [ ] System categories cannot be archived; `BusinessRuleException` on attempt
+- [ ] Subcategory nesting limited to two levels; third-level creation → 422
+- [ ] `archiveCategory` propagates to all subcategories atomically
+- [ ] `suggestCategory` returns at least one suggestion when the user has transaction history
+
+**Automated Tests:**
+- [ ] `CategoryServiceTest` — unit tests for all methods
+- [ ] `CategorySuggestionTest` — asserts suggestion accuracy from seeded history
+
+---
+
+### Phase 8.2 — Category Controller
+
+**Implementation Tasks:**
+
+- [ ] Create `CategoryController.java` — `@RestController @RequestMapping("/api/v1/categories")`:
+  - `GET /` → list (with `includeHidden`, `includeArchived` params) → 200
+  - `POST /` → create → 201
+  - `PUT /{id}` → edit → 200
+  - `POST /{id}/hide` and `POST /{id}/show` → 200
+  - `POST /{id}/archive` and `POST /{id}/unarchive` → 200
+  - `GET /suggest?description=...` → suggestions → 200
+  - `POST /rules` → create rule → 201
+  - `GET /rules` → list rules → 200
+  - `DELETE /rules/{id}` → 204
+
+**Automated Tests:**
+- [ ] `CategoryControllerTest` — HTTP validation for all endpoints
+
+---
+
+## Phase 9 — Credit Card Management
+
+**Objective:** Implement credit card registration, charge recording, invoice lifecycle, payment, limit tracking, and spending analysis.
+
+**Dependencies:** Phase 5 complete.
+
+**Complexity:** High
+
+### Phase 9.1 — Credit Card Service
+
+**Implementation Tasks:**
+
+- [ ] Create `CreditCardRepository.java`, `InvoiceRepository.java`, `InvoiceItemRepository.java`
+- [ ] Create `CreditCardService.java` and `CreditCardServiceImpl.java`:
+  - `createCard(CreateCardRequest, UUID userId)`:
+    - Validates `closingDay` and `dueDay` 1–28
+    - Creates card and opens first invoice for the current billing cycle
+  - `listCards(UUID userId)`
+  - `editCard(UUID id, EditCardRequest, UUID userId)`
+  - `archiveCard(UUID id, UUID userId)`
+  - `recordCharge(UUID cardId, RecordChargeRequest, UUID userId)`:
+    - Assigns charge to correct invoice based on `competenceDate` vs `closingDay`
+    - Updates invoice `totalAmount`
+    - Updates card `usedLimit`
+  - `getInvoice(UUID cardId, String referenceMonth, UUID userId)` — with paginated charges
+  - `payInvoice(UUID invoiceId, PayInvoiceRequest, UUID userId)`:
+    - Full payment → `PAID`
+    - Partial payment → `PARTIAL`; creates `REVOLVING` item on next invoice
+    - Creates debit transaction on source account
+  - `getLimitUsage(UUID cardId, UUID userId)` — computed in real time
+  - `getSpendingByCategory(UUID cardId, DateRange, UUID userId)`
+- [ ] Create `InvoiceCycleCalculator.java` — utility determining which invoice a charge belongs to based on `closingDay`
+
+**Acceptance Criteria:**
+- [ ] Charge assigned to correct invoice; post-closing charges go to next cycle
+- [ ] Partial payment creates revolving item on next invoice atomically
+- [ ] `getLimitUsage` reflects real-time state after every charge or payment
+- [ ] `closingDay`/`dueDay` validated 1–28; `BusinessRuleException` otherwise
+
+**Automated Tests:**
+- [ ] `InvoiceCycleCalculatorTest` — edge cases around month boundaries and closing day
+- [ ] `CreditCardServiceIntegrationTest` — full charge → invoice → payment lifecycle
+- [ ] `PartialPaymentTest` — asserts revolving item creation and next invoice update
+
+---
+
+### Phase 9.2 — Credit Card Controller
+
+**Implementation Tasks:**
+
+- [ ] Create `CreditCardController.java` — `@RestController @RequestMapping("/api/v1/cards")`:
+  - `POST /` → 201
+  - `GET /` → 200
+  - `PUT /{id}` → 200
+  - `POST /{id}/archive` → 200
+  - `POST /{id}/charges` → record charge → 201
+  - `GET /{id}/invoices/{referenceMonth}` → invoice detail → 200
+  - `POST /invoices/{invoiceId}/pay` → pay invoice → 200
+  - `GET /{id}/limit` → limit usage → 200
+  - `GET /{id}/spending` → spending by category (with `from`, `to` params) → 200
+
+**Automated Tests:**
+- [ ] `CreditCardControllerTest` — HTTP validation for all endpoints
+
+---
+
+## Phase 10 — Dashboard & Reporting
+
+**Objective:** Implement all dashboard aggregation endpoints and chart data endpoints.
+
+**Dependencies:** Phases 4–9 complete.
+
+**Complexity:** Medium
+
+### Phase 10.1 — Dashboard Service
+
+**Implementation Tasks:**
+
+- [ ] Create `DashboardService.java` and `DashboardServiceImpl.java`:
+  - `getOverviewMetrics(UUID userId)`:
+    - Total balance: sum of `PAID` transactions across all non-archived, non-investment accounts
+    - Net worth: total balance + investment account balances
+    - Monthly income: `PAID` `INCOME` transactions with `paymentDate` in current calendar month
+    - Monthly expenses: `PAID` `EXPENSE` transactions with `paymentDate` in current calendar month
+    - Monthly savings: income − expenses
+    - Cash flow: configurable window (default: current month)
+    - All amounts as `BigDecimal`; no floating-point
+  - `getCategoryPieChart(UUID userId, DateRange, UUID accountId, TransactionType)`:
+    - `PAID` transactions only; grouped by category; percentage of total; sorted by amount desc
+    - Uncategorized → `UNCATEGORIZED` bucket
+  - `getMonthlyBarChart(UUID userId, int months, UUID accountId)`:
+    - One entry per month; months with no transactions filled with zero values; ordered chronologically
+  - `getNetWorthEvolution(UUID userId, DateRange, Granularity)`:
+    - Replays transaction history up to each snapshot date
+  - `getMonthlyComparison(UUID userId, String month1, String month2)`:
+    - Income, expenses, savings, category breakdown for each; delta values computed
+  - `getUpcomingBills(UUID userId, int daysAhead)` — `PENDING`/`OVERDUE`, `paymentDate ≤ today + daysAhead`
+  - `getUpcomingInvoices(UUID userId, int daysAhead)` — invoices with `dueDate ≤ today + daysAhead`, status `CLOSED`/`PARTIAL`/`OVERDUE`
+  - `getLargestExpenses(UUID userId, DateRange, int limit)`
+  - `getRecentTransactions(UUID userId, int limit)`
+
+**Acceptance Criteria:**
+- [ ] All metrics scoped to the authenticated user; no cross-user data
+- [ ] All monetary values use `BigDecimal` string representation in responses
+- [ ] Months with no transactions included with zero values in bar chart
+- [ ] Net worth evolution replays history accurately
+
+**Automated Tests:**
+- [ ] `DashboardServiceTest` — unit tests with seeded transaction data for each metric
+- [ ] `OverviewMetricsIntegrationTest` — asserts correct totals against known transaction sequences
+
+---
+
+### Phase 10.2 — Dashboard Controller
+
+**Implementation Tasks:**
+
+- [ ] Create `DashboardController.java` — `@RestController @RequestMapping("/api/v1/dashboard")`:
+  - `GET /overview` → overview metrics → 200
+  - `GET /charts/categories` → pie chart data → 200
+  - `GET /charts/monthly` → bar chart data → 200
+  - `GET /charts/net-worth` → net worth evolution → 200
+  - `GET /charts/comparison` → monthly comparison → 200
+  - `GET /widgets/upcoming-bills` → 200
+  - `GET /widgets/upcoming-invoices` → 200
+  - `GET /widgets/largest-expenses` → 200
+  - `GET /widgets/recent-transactions` → 200
+
+**Automated Tests:**
+- [ ] `DashboardControllerTest` — HTTP validation for all endpoints
+
+---
+
+## Phase 11 — Overdue Detection & Scheduled Jobs
+
+**Objective:** Implement automatic overdue status transitions and recurring transaction instance generation as scheduled background tasks.
+
+**Dependencies:** Phases 5, 7 complete.
+
+**Complexity:** Low
+
+### Phase 11.1 — Scheduled Services
+
+**Implementation Tasks:**
+
+- [ ] Create `OverdueDetectionScheduler.java` — `@Scheduled(cron = "0 0 1 * * *")` (daily at 01:00):
+  - Calls `TransactionService.detectOverdue()` for all users
+  - Transitions `PENDING` → `OVERDUE` where `paymentDate < today`
+  - Logs count of transitions; never logs financial content
+- [ ] Create `RecurrenceGenerationScheduler.java` — `@Scheduled(cron = "0 0 2 * * *")` (daily at 02:00):
+  - Generates upcoming instances for all active recurrence rules whose `nextOccurrenceDate ≤ today + lookahead`
+  - Updates `nextOccurrenceDate` after generation
+
+**Acceptance Criteria:**
+- [ ] Overdue detection runs daily; only affects `PENDING` with `paymentDate < today`
+- [ ] Recurrence generation is idempotent (does not create duplicates if run twice)
+
+**Automated Tests:**
+- [ ] `OverdueDetectionSchedulerTest` — asserts correct transitions for a seeded dataset
+- [ ] `RecurrenceGenerationSchedulerTest` — asserts no duplicates on double-run
+
+---
+
+## Phase 12 — API Documentation (OpenAPI / Swagger)
+
+**Objective:** Expose self-documenting OpenAPI specification via Springdoc.
+
+**Dependencies:** Phases 4–10 complete.
+
+**Complexity:** Low
+
+### Phase 12.1 — OpenAPI Configuration
+
+**Implementation Tasks:**
+
+- [ ] Add `springdoc-openapi-starter-webmvc-ui` to `build.gradle.kts`
+- [ ] Create `OpenApiConfig.java` — `@Configuration`:
+  - Set API title: `Cash Control API`
+  - Set version: `v1`
+  - Set description aligned with project-description.md
+  - Add JWT `BearerAuth` security scheme
+  - Apply global security requirement so all endpoints show the lock icon in Swagger UI
+- [ ] Annotate all controllers with `@Tag(name = "...", description = "...")`
+- [ ] Annotate key endpoints with `@Operation(summary = "...")` and `@ApiResponse` codes
+- [ ] Annotate all DTOs with `@Schema` where field-level description adds value
+
+**Acceptance Criteria:**
+- [ ] Swagger UI accessible at `/swagger-ui/index.html`
+- [ ] OpenAPI JSON available at `/v3/api-docs`
+- [ ] All endpoints visible with correct HTTP methods and response codes
+
+**Automated Tests:**
+- [ ] `OpenApiSmokeTest` — asserts `/v3/api-docs` returns 200 and contains expected path count
+
+---
+
+## Phase 13 — Observability & Logging
+
+**Objective:** Implement structured JSON logging with correlation IDs. Financial data must never appear in logs.
+
+**Dependencies:** Phase 3 complete.
+
+**Complexity:** Low
+
+### Phase 13.1 — Structured Logging Setup
+
+**Implementation Tasks:**
+
+- [ ] Add `logstash-logback-encoder` to `build.gradle.kts`
+- [ ] Create `logback-spring.xml`:
+  - JSON appender for production (`!local` profile)
+  - Console appender for local development
+  - Include `correlationId` MDC field in all log lines
+- [ ] Create `LogSanitizationGuard.java` — utility that enforces no financial content in logs (verifiable via code review; enforced by convention)
+- [ ] Update `CorrelationIdFilter.java` to set `MDC.put("correlationId", id)` on each request
+- [ ] Log only: event type, user UUID, resource UUID, correlation ID, HTTP method, path, status code, duration
+- [ ] Never log: amounts, descriptions, account names, category names, tag values
+
+**Acceptance Criteria:**
+- [ ] All log lines in production contain `correlationId`
+- [ ] No financial content (amounts, descriptions) in any log output at any level
+- [ ] Log format is JSON in non-local profiles
+
+**Automated Tests:**
+- [ ] `CorrelationIdFilterTest` — asserts `X-Correlation-ID` is present in the response header
+
+---
+
+## Phase 14 — Testing, Docker & CI/CD
+
+**Objective:** Complete the test suite covering all domain rules, containerize the application, and configure CI/CD.
+
+**Dependencies:** All previous phases complete.
+
+**Complexity:** Medium
+
+### Phase 14.1 — Comprehensive Test Suite
+
+**Implementation Tasks:**
+
+- [ ] Verify unit test coverage for all service methods
+- [ ] Verify integration tests for each major domain: accounts, transactions, installments, recurrences, categories, credit cards, dashboard
+- [ ] Add boundary tests:
+  - `BigDecimal` precision in installment splits (various total/count combinations)
+  - Balance consistency after concurrent-scenario transaction sequences
+  - Overdue detection edge cases (same day, past day, future day)
+  - Invoice cycle edge cases (month boundary with `closingDay = 31`)
+- [ ] Verify all integration tests use Testcontainers PostgreSQL (no mocked repositories for core financial flows)
+- [ ] Verify no `double` or `float` used for monetary values anywhere in the codebase (`./gradlew test` includes a custom lint check or inspection)
+
+**Acceptance Criteria:**
+- [ ] All tests pass on `./gradlew test`
+- [ ] Integration tests hit a real PostgreSQL container
+- [ ] No financial floating-point arithmetic anywhere in the production code
+
+**Automated Tests:**
+- [ ] Full test suite — all unit and integration tests
+
+---
+
+### Phase 14.2 — Docker & Docker Compose
+
+**Implementation Tasks:**
+
+- [ ] Create `Dockerfile` — multi-stage build:
+  - Stage 1 (`builder`): `gradle:jdk25` — runs `./gradlew bootJar`
+  - Stage 2 (`runtime`): `eclipse-temurin:25-jre-alpine` — copies JAR from builder
+  - Expose port 8080; non-root user; health check via `/actuator/health`
+- [ ] Create `.dockerignore` — exclude: `.git`, `build/`, `.gradle/`, `*.md`, `.env`
+- [ ] Create `docker-compose.yml`:
+  - `app` service: builds from `Dockerfile`; depends on `postgres`; env vars from `.env`
+  - `postgres` service: `postgres:18`; volume for data persistence; health check
+- [ ] Create `docker-compose.override.yml` for local development overrides
+
+**Acceptance Criteria:**
+- [ ] `docker compose up` starts both services and application is healthy at `/actuator/health`
+- [ ] All configuration injected via environment variables; no secrets in Docker files
+
+**Automated Tests:**
+- [ ] Docker build smoke test in CI
+
+---
+
+### Phase 14.3 — CI/CD Pipeline
+
+**Implementation Tasks:**
+
+- [ ] Create `.github/workflows/ci.yml`:
+  - Trigger: push to `main`, pull requests to `main`
+  - Job `build-and-test`:
+    - `actions/checkout@v4`
+    - `actions/setup-java@v4` with Java 25 and Gradle cache
+    - `./gradlew build` — compile and run all tests (Testcontainers spins up PostgreSQL in CI)
+    - Upload test reports as artifacts on failure
+  - Job `security-check`:
+    - OWASP Dependency Check or equivalent
+  - Job `docker-build`:
+    - Build Docker image; do not push unless on `main` tag
+- [ ] Ensure CI does not require any external secrets beyond the test JWT key
+
+**Acceptance Criteria:**
+- [ ] PR build fails if any test fails
+- [ ] PR build fails if Docker build fails
+- [ ] Test reports are available as CI artifacts
+
+**Automated Tests:**
+- [ ] All CI jobs green on a clean branch
+
+---
+
+### Phase 14.4 — Verification
+
+**Implementation Tasks:**
+
+- [ ] Run `./gradlew test` — all tests pass
+- [ ] Run `docker compose up --build` — application starts; `/actuator/health` returns `UP`
+- [ ] Smoke-test all major endpoints via Insomnia or curl:
+  - Create account → adjust balance → create transaction → create installment series → create recurrence → create credit card → record charge → pay invoice → dashboard overview
+- [ ] Verify no `double`/`float` arithmetic for monetary values (`grep -r "double\|float" src/main/java` returns zero hits in financial logic)
+- [ ] Verify no financial content in logs during the smoke test run
+- [ ] Confirm all Flyway migrations apply cleanly on a fresh PostgreSQL 18 container
+
+**Acceptance Criteria:**
+- [ ] All tests pass
+- [ ] Docker smoke test passes
+- [ ] All major flows work end-to-end
+- [ ] Zero floating-point monetary arithmetic
+
+---
+
+*End of Implementation Roadmap — cash-control-api v1*
 Inspect the current codebase and identify what is already implemented.
 
-Find the FIRST pending phase in  that still contains unchecked tasks ().
+Find the FIRST pending phase in docs/v1/project-phases.md that still contains unchecked tasks ([ ]).
 
 Implement the ENTIRE phase completely, including:
 - all sub-phases
@@ -16,8 +3434,8 @@ Do not partially implement the phase.
 
 Do not skip ahead to future phases.
 
-Update  as tasks are completed by changing:
--  → 
+Update docs/v1/project-phases.md as tasks are completed by changing:
+- [ ] to [x]
 
 Requirements:
 
@@ -40,4 +3458,3 @@ Before finishing:
 - ensure imports and references are correct
 - ensure project phase tracking was updated
 - ensure the entire phase is fully completed
-
