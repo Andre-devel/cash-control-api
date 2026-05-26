@@ -22,7 +22,7 @@
 | Test infrastructure | `[x]` Done — unit + integration test suites (Testcontainers) |
 | CI/CD pipeline | `[ ]` Pending — `.github/workflows/ci.yml` |
 
-**Status:** Phases 0–6 complete. Phase 7 (Recurring Transactions) is next.
+**Status:** Phases 0–7 complete. Phase 8 (Category Management) is next.
 
 ---
 
@@ -838,8 +838,8 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `RecurrenceRepository.java`
-- [ ] Create `RecurrenceService.java` and `RecurrenceServiceImpl.java`:
+- [x] Create `RecurrenceRepository.java`
+- [x] Create `RecurrenceService.java` and `RecurrenceServiceImpl.java`:
   - `createRecurrence(CreateRecurrenceRequest, UUID userId)`:
     - Creates `RecurrenceRule`
     - Generates first instance immediately
@@ -851,16 +851,16 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
     - `FUTURE_ONLY`: cancels future `PENDING` instances; soft-deletes rule
     - `ALL`: cancels all `PENDING` instances; soft-deletes rule
     - Never touches `PAID` instances
-- [ ] Create `RecurrenceGeneratorService.java` — stateless utility that computes the next occurrence date given a frequency and a base date
+- [x] Create `RecurrenceGeneratorService.java` — stateless utility that computes the next occurrence date given a frequency and a base date
 
 **Acceptance Criteria:**
-- [ ] `PAID` instances never modified by any recurrence operation
-- [ ] Pause cancels exactly the pending instances in the pause window
-- [ ] `RecurrenceGeneratorService` handles month-end edge cases (e.g., Jan 31 → Feb 28)
+- [x] `PAID` instances never modified by any recurrence operation
+- [x] Pause cancels exactly the pending instances in the pause window
+- [x] `RecurrenceGeneratorService` handles month-end edge cases (e.g., Jan 31 → Feb 28)
 
 **Automated Tests:**
-- [ ] `RecurrenceGeneratorServiceTest` — edge cases for all frequencies including month-end dates
-- [ ] `RecurrenceServiceIntegrationTest` — full lifecycle
+- [x] `RecurrenceGeneratorServiceTest` — edge cases for all frequencies including month-end dates
+- [x] `RecurrenceServiceIntegrationTest` — full lifecycle
 
 ---
 
@@ -868,15 +868,17 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `RecurrenceController.java` — `@RestController @RequestMapping("/api/v1/recurrences")`:
+- [x] Create `RecurrenceController.java` — `@RestController @RequestMapping("/api/v1/recurrences")`:
   - `POST /` → 201
+  - `GET /` → list rules → 200
+  - `GET /{id}` → get rule → 200
   - `PUT /{id}` → edit series → 200
   - `POST /{id}/pause` → 200
   - `POST /{id}/resume` → 200
   - `DELETE /{id}` → (strategy as query param) → 200
 
 **Automated Tests:**
-- [ ] `RecurrenceControllerTest` — HTTP validation
+- [x] `RecurrenceControllerTest` — HTTP validation
 
 ---
 

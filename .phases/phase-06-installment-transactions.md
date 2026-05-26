@@ -10,8 +10,8 @@
 
 **Implementation Tasks:**
 
-- [ ] Create `InstallmentRepository.java` and `InstallmentSeriesRepository.java`
-- [ ] Create `InstallmentService.java` and `InstallmentServiceImpl.java`:
+- [x] Create `InstallmentRepository.java` and `InstallmentSeriesRepository.java`
+- [x] Create `InstallmentService.java` and `InstallmentServiceImpl.java`:
   - `createInstallmentSeries(CreateInstallmentRequest, UUID userId)`:
     - Creates `InstallmentSeries` master record
     - Generates individual `Transaction` records for each installment
@@ -27,14 +27,14 @@
   - `advanceInstallments(AdvanceInstallmentRequest, UUID userId)` — moves payment dates, optionally adjusts amounts
 
 **Acceptance Criteria:**
-- [ ] Installment amounts sum to `totalAmount` exactly (no floating-point rounding drift)
-- [ ] Remainder handling deterministic (last installment)
-- [ ] Detached installments excluded from series-wide edit
-- [ ] Early settlement atomic: all cancellations + settlement creation in one transaction
+- [x] Installment amounts sum to `totalAmount` exactly (no floating-point rounding drift)
+- [x] Remainder handling deterministic (last installment)
+- [x] Detached installments excluded from series-wide edit
+- [x] Early settlement atomic: all cancellations + settlement creation in one transaction
 
 **Automated Tests:**
-- [ ] `InstallmentAmountSplitTest` — verifies exact sum and remainder assignment across multiple total/count combinations
-- [ ] `EarlySettlementIntegrationTest` — asserts cancellations and settlement creation atomicity
+- [x] `InstallmentAmountSplitTest` — verifies exact sum and remainder assignment across multiple total/count combinations
+- [x] `EarlySettlementIntegrationTest` — asserts cancellations and settlement creation atomicity
 
 ---
 
@@ -42,7 +42,7 @@
 
 **Implementation Tasks:**
 
-- [ ] Create `InstallmentController.java` — `@RestController @RequestMapping("/api/v1/installments")`:
+- [x] Create `InstallmentController.java` — `@RestController @RequestMapping("/api/v1/installments")`:
   - `POST /` → create series → 201
   - `PUT /series/{seriesId}` → edit series → 200
   - `PUT /{transactionId}` → edit individual installment → 200
@@ -50,7 +50,7 @@
   - `POST /advance` → advance installments → 200
 
 **Automated Tests:**
-- [ ] `InstallmentControllerTest` — HTTP status and response body validation
+- [x] `InstallmentControllerTest` — HTTP status and response body validation
 
 ---
 

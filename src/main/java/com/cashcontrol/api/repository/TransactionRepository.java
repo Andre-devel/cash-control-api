@@ -48,6 +48,10 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     List<Transaction> findAllByInstallmentSeries_Id(UUID installmentSeriesId);
 
+    List<Transaction> findAllByRecurrenceRule_Id(UUID recurrenceRuleId);
+
+    List<Transaction> findAllByRecurrenceRule_IdAndStatusIn(UUID recurrenceRuleId, List<TransactionStatus> statuses);
+
     @Query(value = "SELECT t FROM Transaction t " +
                    "WHERE t.userId = :userId " +
                    "AND (:accountId IS NULL OR t.account.id = :accountId) " +
