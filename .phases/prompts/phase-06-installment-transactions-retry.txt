@@ -1,0 +1,37 @@
+Os testes falharam apos a implementacao anterior. Corrija os erros.
+
+Saida dos testes:
+```
+- all required dependencies inside that phase
+
+Do not partially implement the phase.
+
+Do not skip ahead to future phases.
+
+Update  as tasks are completed by changing:
+-  → 
+
+Requirements:
+
+- Follow the existing architecture, conventions, and patterns already present in the project.
+- Use production-ready implementations only.
+- Add automated tests for everything implemented.
+- Use Flyway for schema changes.
+- Keep the implementation aligned with the documentation files.
+- Respect the project's stateless JWT architecture.
+- Do not implement refresh tokens, token persistence, or session management.
+- Keep security, LGPD, RBAC, and audit requirements consistent with the existing docs.
+- Do not rewrite unrelated code.
+- Do not add placeholder implementations or TODOs.
+
+Before finishing:
+
+- ensure the project compiles
+- ensure tests pass
+- ensure migrations are valid
+- ensure imports and references are correct
+- ensure project phase tracking was updated
+- ensure the entire phase is fully completed'
+```
+
+Corrija o codigo para que todos os testes passem. Rode os testes novamente apos cada correcao.
