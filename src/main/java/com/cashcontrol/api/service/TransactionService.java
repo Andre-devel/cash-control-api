@@ -28,4 +28,6 @@ public interface TransactionService {
     TransactionDetailResponse getTransaction(UUID id, UUID userId);
 
     int detectOverdue(UUID userId);
+
+    int detectOverdueAll();
 }

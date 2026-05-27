@@ -20,8 +20,10 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.ErrorResponseException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.Map;
@@ -108,6 +110,22 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleAuthException(AuthException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(ErrorResponse.of("UNAUTHORIZED", "Authentication failed.", ex.getCorrelationId()));
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ErrorResponse> handleMissingRequestParam(MissingServletRequestParameterException ex) {
+        UUID correlationId = CorrelationIdHolder.get();
+        return ResponseEntity.badRequest()
+                .body(ErrorResponse.of("MISSING_PARAMETER",
+                        "Required parameter '" + ex.getParameterName() + "' is missing.", correlationId));
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleMethodArgumentTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        UUID correlationId = CorrelationIdHolder.get();
+        return ResponseEntity.badRequest()
+                .body(ErrorResponse.of("INVALID_PARAMETER",
+                        "Invalid value for parameter '" + ex.getName() + "'.", correlationId));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

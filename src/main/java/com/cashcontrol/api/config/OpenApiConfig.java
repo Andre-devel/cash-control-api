@@ -17,33 +17,58 @@ public class OpenApiConfig {
     public OpenAPI openAPI() {
         return new OpenAPI()
                 .info(new Info()
-                        .title("Java Auth Template API")
+                        .title("Cash Control API")
                         .description("""
-                                Production-ready authentication and authorization REST API built with Spring Boot and stateless JWT.
+                                Production-ready personal finance management REST API built with Spring Boot 4 and Java 25.
 
-                                ## Authentication Flows
+                                ## Core Capabilities
 
-                                **JWT Bearer**: Obtain a token via `POST /api/v1/auth/login`, then include it in the \
-                                `Authorization: Bearer <token>` header on protected requests.
+                                - **Account & Wallet Management** — Multiple account types with balance tracking, archiving, and transfer support
+                                - **Transaction Lifecycle** — Income, expense, transfer, refund, and manual adjustment with full status management
+                                - **Installment Tracking** — Recurring and installment payment series with individual and series-wide editing
+                                - **Category Management** — Hierarchical categories with color, icon, auto-suggestion, and category rules
+                                - **Credit Card Billing** — Card limits, billing cycles, invoice tracking, and partial payment with revolving credit
+                                - **Dashboard & Reporting** — Aggregated views, cash flow charts, and configurable widgets
 
-                                **OAuth2 Google**: Redirect-based flow. Initiate via `/oauth2/authorization/google`. \
-                                After successful authentication, the JWT access token is returned in the redirect URL parameter.
+                                ## Authentication
 
-                                **Token Expiry**: Access tokens are short-lived (5–15 minutes). When a token expires, \
-                                the client receives HTTP 401 and must re-authenticate via `POST /api/v1/auth/login`. \
-                                No refresh token mechanism exists — re-authentication is always explicit.
+                                All financial endpoints require a valid JWT access token. Obtain a token via `POST /api/v1/auth/login`, \
+                                then include it in every request as:
 
-                                ## Authorization Model
+                                ```
+                                Authorization: Bearer <token>
+                                ```
 
-                                The system uses granular RBAC: users hold roles, roles carry permissions. \
-                                All protected endpoints enforce permission checks server-side via Spring Security \
-                                method-level authorization (`@PreAuthorize`). The required authority string must be \
-                                present in the JWT `authorities` claim.
+                                Access tokens are short-lived. When a token expires (HTTP 401), re-authenticate explicitly. \
+                                No refresh token mechanism is provided — this is a stateless, re-authentication-on-expiry architecture.
+
+                                ## User Isolation
+
+                                All financial data is strictly scoped to the authenticated user. \
+                                Every repository query includes a `user_id` predicate derived from the JWT subject claim. \
+                                Cross-user data access is architecturally impossible.
+
+                                ## Monetary Precision
+
+                                All monetary values use `BigDecimal` internally and are serialized as decimal strings in API responses \
+                                (e.g., `"150.75"`) to prevent client-side floating-point loss.
+
+                                ## Error Responses
+
+                                All non-2xx responses return a standardized error envelope:
+                                ```json
+                                {
+                                  "errorCode": "RESOURCE_NOT_FOUND",
+                                  "message": "Account not found.",
+                                  "correlationId": "550e8400-e29b-41d4-a716-446655440000",
+                                  "timestamp": "2026-05-27T10:00:00Z"
+                                }
+                                ```
                                 """)
-                        .version("1.0.0")
+                        .version("v1")
                         .contact(new Contact()
-                                .name("Auth Module Team")
-                                .email("security@example.com"))
+                                .name("Cash Control Team")
+                                .email("api@cashcontrol.io"))
                         .license(new License()
                                 .name("MIT")
                                 .url("https://opensource.org/licenses/MIT")))
@@ -55,6 +80,6 @@ public class OpenApiConfig {
                                 .bearerFormat("JWT")
                                 .name("bearerAuth")
                                 .description("JWT access token. Obtain via `POST /api/v1/auth/login`. "
-                                        + "Include as `Authorization: Bearer <token>` on authenticated requests.")));
+                                        + "Include as `Authorization: Bearer <token>` on all protected requests.")));
     }
 }

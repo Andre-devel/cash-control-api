@@ -1,0 +1,8 @@
+Os testes falharam apos a implementacao anterior. Corrija os erros.
+
+Saida dos testes:
+```
+You've hit your limit · resets 6:30pm (America/Sao_Paulo)
+```
+
+Corrija o codigo para que todos os testes passem. Rode os testes novamente apos cada correcao.

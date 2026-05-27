@@ -76,7 +76,7 @@ class OpenApiTest {
     void apiDocsTitleMatchesExpectedValue() throws Exception {
         mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.info.title").value("Java Auth Template API"));
+                .andExpect(jsonPath("$.info.title").value("Cash Control API"));
     }
 
     @Test
@@ -174,6 +174,31 @@ class OpenApiTest {
         assertThat(paths.has("/api/v1/admin/security/force-reauth")).isTrue();
         assertThat(paths.has("/api/v1/admin/security/lock")).isTrue();
         assertThat(paths.has("/api/v1/admin/security/unlock")).isTrue();
+    }
+
+    @Test
+    void apiDocsContainsCashControlPaths() throws Exception {
+        MvcResult result = mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String json = result.getResponse().getContentAsString();
+        JsonNode paths = objectMapper.readTree(json).path("paths");
+
+        assertThat(paths.has("/api/v1/accounts")).isTrue();
+        assertThat(paths.has("/api/v1/transactions")).isTrue();
+        assertThat(paths.has("/api/v1/installments")).isTrue();
+        assertThat(paths.has("/api/v1/recurrences")).isTrue();
+        assertThat(paths.has("/api/v1/categories")).isTrue();
+        assertThat(paths.has("/api/v1/cards")).isTrue();
+        assertThat(paths.has("/api/v1/dashboard/overview")).isTrue();
+    }
+
+    @Test
+    void apiDocsVersionIsV1() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.info.version").value("v1"));
     }
 
     @Test

@@ -305,6 +305,52 @@ public class RecurrenceServiceImpl implements RecurrenceService {
         return toRuleResponse(rule);
     }
 
+    @Override
+    @Transactional
+    public int generatePendingInstances(int lookaheadDays) {
+        LocalDate today = LocalDate.now();
+        LocalDate cutoff = today.plusDays(lookaheadDays);
+        List<RecurrenceRule> dueRules = recurrenceRepository.findActiveRulesDueBy(cutoff);
+
+        int totalGenerated = 0;
+        for (RecurrenceRule rule : dueRules) {
+            LocalDate nextDate = rule.getNextOccurrenceDate() != null
+                    ? rule.getNextOccurrenceDate()
+                    : today;
+
+            if (rule.getEndDate() != null && nextDate.isAfter(rule.getEndDate())) {
+                rule.setStatus(RecurrenceStatus.ENDED);
+                rule.setNextOccurrenceDate(null);
+                recurrenceRepository.save(rule);
+                continue;
+            }
+
+            List<Transaction> newInstances = new ArrayList<>();
+            int generated = 0;
+            while (generated < LOOKAHEAD_PERIODS) {
+                if (rule.getEndDate() != null && nextDate.isAfter(rule.getEndDate())) {
+                    break;
+                }
+                newInstances.add(buildTransaction(rule, nextDate, today));
+                nextDate = generatorService.nextOccurrence(nextDate, rule.getFrequency());
+                generated++;
+            }
+
+            if (!newInstances.isEmpty()) {
+                transactionRepository.saveAll(newInstances);
+                totalGenerated += newInstances.size();
+            }
+
+            rule.setNextOccurrenceDate(nextDate);
+            if (rule.getEndDate() != null && nextDate.isAfter(rule.getEndDate())) {
+                rule.setStatus(RecurrenceStatus.ENDED);
+                rule.setNextOccurrenceDate(null);
+            }
+            recurrenceRepository.save(rule);
+        }
+        return totalGenerated;
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private RecurrenceRule findOwnedRule(UUID ruleId, UUID userId) {

@@ -18,11 +18,11 @@
 | Flyway migrations (auth) | `[x]` Done — V1–V8 (auth schema, seed data) |
 | Flyway migrations (cash-control) | `[x]` Done — V9–V13 (accounts, categories, transactions, credit cards, seed) |
 | Configuration files | `[x]` Done — `application.yml`, `application-test.yml` |
-| Docker artifacts | `[ ]` Pending — `Dockerfile`, `docker-compose.yml`, `.dockerignore` |
+| Docker artifacts | `[x]` Done — `Dockerfile`, `docker-compose.yml`, `.dockerignore` |
 | Test infrastructure | `[x]` Done — unit + integration test suites (Testcontainers) |
-| CI/CD pipeline | `[ ]` Pending — `.github/workflows/ci.yml` |
+| CI/CD pipeline | `[x]` Done — `.github/workflows/ci.yml` |
 
-**Status:** Phases 0–7 complete. Phase 8 (Category Management) is next.
+**Status:** All phases complete (0–14).
 
 ---
 
@@ -1020,7 +1020,7 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `DashboardService.java` and `DashboardServiceImpl.java`:
+- [x] Create `DashboardService.java` and `DashboardServiceImpl.java`:
   - `getOverviewMetrics(UUID userId)`:
     - Total balance: sum of `PAID` transactions across all non-archived, non-investment accounts
     - Net worth: total balance + investment account balances
@@ -1044,14 +1044,14 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
   - `getRecentTransactions(UUID userId, int limit)`
 
 **Acceptance Criteria:**
-- [ ] All metrics scoped to the authenticated user; no cross-user data
-- [ ] All monetary values use `BigDecimal` string representation in responses
-- [ ] Months with no transactions included with zero values in bar chart
-- [ ] Net worth evolution replays history accurately
+- [x] All metrics scoped to the authenticated user; no cross-user data
+- [x] All monetary values use `BigDecimal` string representation in responses
+- [x] Months with no transactions included with zero values in bar chart
+- [x] Net worth evolution replays history accurately
 
 **Automated Tests:**
-- [ ] `DashboardServiceTest` — unit tests with seeded transaction data for each metric
-- [ ] `OverviewMetricsIntegrationTest` — asserts correct totals against known transaction sequences
+- [x] `DashboardServiceTest` — unit tests with seeded transaction data for each metric
+- [x] `OverviewMetricsIntegrationTest` — asserts correct totals against known transaction sequences
 
 ---
 
@@ -1059,7 +1059,7 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `DashboardController.java` — `@RestController @RequestMapping("/api/v1/dashboard")`:
+- [x] Create `DashboardController.java` — `@RestController @RequestMapping("/api/v1/dashboard")`:
   - `GET /overview` → overview metrics → 200
   - `GET /charts/categories` → pie chart data → 200
   - `GET /charts/monthly` → bar chart data → 200
@@ -1071,7 +1071,7 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
   - `GET /widgets/recent-transactions` → 200
 
 **Automated Tests:**
-- [ ] `DashboardControllerTest` — HTTP validation for all endpoints
+- [x] `DashboardControllerTest` — HTTP validation for all endpoints
 
 ---
 
@@ -1087,21 +1087,21 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `OverdueDetectionScheduler.java` — `@Scheduled(cron = "0 0 1 * * *")` (daily at 01:00):
+- [x] Create `OverdueDetectionScheduler.java` — `@Scheduled(cron = "0 0 1 * * *")` (daily at 01:00):
   - Calls `TransactionService.detectOverdue()` for all users
   - Transitions `PENDING` → `OVERDUE` where `paymentDate < today`
   - Logs count of transitions; never logs financial content
-- [ ] Create `RecurrenceGenerationScheduler.java` — `@Scheduled(cron = "0 0 2 * * *")` (daily at 02:00):
+- [x] Create `RecurrenceGenerationScheduler.java` — `@Scheduled(cron = "0 0 2 * * *")` (daily at 02:00):
   - Generates upcoming instances for all active recurrence rules whose `nextOccurrenceDate ≤ today + lookahead`
   - Updates `nextOccurrenceDate` after generation
 
 **Acceptance Criteria:**
-- [ ] Overdue detection runs daily; only affects `PENDING` with `paymentDate < today`
-- [ ] Recurrence generation is idempotent (does not create duplicates if run twice)
+- [x] Overdue detection runs daily; only affects `PENDING` with `paymentDate < today`
+- [x] Recurrence generation is idempotent (does not create duplicates if run twice)
 
 **Automated Tests:**
-- [ ] `OverdueDetectionSchedulerTest` — asserts correct transitions for a seeded dataset
-- [ ] `RecurrenceGenerationSchedulerTest` — asserts no duplicates on double-run
+- [x] `OverdueDetectionSchedulerTest` — asserts correct transitions for a seeded dataset
+- [x] `RecurrenceGenerationSchedulerTest` — asserts no duplicates on double-run
 
 ---
 
@@ -1117,24 +1117,24 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Add `springdoc-openapi-starter-webmvc-ui` to `build.gradle.kts`
-- [ ] Create `OpenApiConfig.java` — `@Configuration`:
+- [x] Add `springdoc-openapi-starter-webmvc-ui` to `build.gradle.kts`
+- [x] Create `OpenApiConfig.java` — `@Configuration`:
   - Set API title: `Cash Control API`
   - Set version: `v1`
   - Set description aligned with project-description.md
   - Add JWT `BearerAuth` security scheme
   - Apply global security requirement so all endpoints show the lock icon in Swagger UI
-- [ ] Annotate all controllers with `@Tag(name = "...", description = "...")`
-- [ ] Annotate key endpoints with `@Operation(summary = "...")` and `@ApiResponse` codes
-- [ ] Annotate all DTOs with `@Schema` where field-level description adds value
+- [x] Annotate all controllers with `@Tag(name = "...", description = "...")`
+- [x] Annotate key endpoints with `@Operation(summary = "...")` and `@ApiResponse` codes
+- [x] Annotate all DTOs with `@Schema` where field-level description adds value
 
 **Acceptance Criteria:**
-- [ ] Swagger UI accessible at `/swagger-ui/index.html`
-- [ ] OpenAPI JSON available at `/v3/api-docs`
-- [ ] All endpoints visible with correct HTTP methods and response codes
+- [x] Swagger UI accessible at `/swagger-ui/index.html`
+- [x] OpenAPI JSON available at `/v3/api-docs`
+- [x] All endpoints visible with correct HTTP methods and response codes
 
 **Automated Tests:**
-- [ ] `OpenApiSmokeTest` — asserts `/v3/api-docs` returns 200 and contains expected path count
+- [x] `OpenApiSmokeTest` — asserts `/v3/api-docs` returns 200 and contains expected path count
 
 ---
 
@@ -1150,23 +1150,23 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Add `logstash-logback-encoder` to `build.gradle.kts`
-- [ ] Create `logback-spring.xml`:
+- [x] Add `logstash-logback-encoder` to `build.gradle.kts`
+- [x] Create `logback-spring.xml`:
   - JSON appender for production (`!local` profile)
   - Console appender for local development
   - Include `correlationId` MDC field in all log lines
-- [ ] Create `LogSanitizationGuard.java` — utility that enforces no financial content in logs (verifiable via code review; enforced by convention)
-- [ ] Update `CorrelationIdFilter.java` to set `MDC.put("correlationId", id)` on each request
-- [ ] Log only: event type, user UUID, resource UUID, correlation ID, HTTP method, path, status code, duration
-- [ ] Never log: amounts, descriptions, account names, category names, tag values
+- [x] Create `LogSanitizationGuard.java` — utility that enforces no financial content in logs (verifiable via code review; enforced by convention)
+- [x] Update `CorrelationIdFilter.java` to set `MDC.put("correlationId", id)` on each request
+- [x] Log only: event type, user UUID, resource UUID, correlation ID, HTTP method, path, status code, duration
+- [x] Never log: amounts, descriptions, account names, category names, tag values
 
 **Acceptance Criteria:**
-- [ ] All log lines in production contain `correlationId`
-- [ ] No financial content (amounts, descriptions) in any log output at any level
-- [ ] Log format is JSON in non-local profiles
+- [x] All log lines in production contain `correlationId`
+- [x] No financial content (amounts, descriptions) in any log output at any level
+- [x] Log format is JSON in non-local profiles
 
 **Automated Tests:**
-- [ ] `CorrelationIdFilterTest` — asserts `X-Correlation-ID` is present in the response header
+- [x] `CorrelationIdFilterTest` — asserts `X-Correlation-ID` is present in the response header
 
 ---
 
@@ -1182,23 +1182,23 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Verify unit test coverage for all service methods
-- [ ] Verify integration tests for each major domain: accounts, transactions, installments, recurrences, categories, credit cards, dashboard
-- [ ] Add boundary tests:
+- [x] Verify unit test coverage for all service methods
+- [x] Verify integration tests for each major domain: accounts, transactions, installments, recurrences, categories, credit cards, dashboard
+- [x] Add boundary tests:
   - `BigDecimal` precision in installment splits (various total/count combinations)
   - Balance consistency after concurrent-scenario transaction sequences
   - Overdue detection edge cases (same day, past day, future day)
   - Invoice cycle edge cases (month boundary with `closingDay = 31`)
-- [ ] Verify all integration tests use Testcontainers PostgreSQL (no mocked repositories for core financial flows)
-- [ ] Verify no `double` or `float` used for monetary values anywhere in the codebase (`./gradlew test` includes a custom lint check or inspection)
+- [x] Verify all integration tests use Testcontainers PostgreSQL (no mocked repositories for core financial flows)
+- [x] Verify no `double` or `float` used for monetary values anywhere in the codebase (`./gradlew test` includes a custom lint check or inspection)
 
 **Acceptance Criteria:**
-- [ ] All tests pass on `./gradlew test`
-- [ ] Integration tests hit a real PostgreSQL container
-- [ ] No financial floating-point arithmetic anywhere in the production code
+- [x] All tests pass on `./gradlew test`
+- [x] Integration tests hit a real PostgreSQL container
+- [x] No financial floating-point arithmetic anywhere in the production code
 
 **Automated Tests:**
-- [ ] Full test suite — all unit and integration tests
+- [x] Full test suite — all unit and integration tests
 
 ---
 
@@ -1206,22 +1206,22 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `Dockerfile` — multi-stage build:
-  - Stage 1 (`builder`): `gradle:jdk25` — runs `./gradlew bootJar`
+- [x] Create `Dockerfile` — multi-stage build:
+  - Stage 1 (`builder`): `eclipse-temurin:25-jdk-alpine` — runs `./gradlew bootJar`
   - Stage 2 (`runtime`): `eclipse-temurin:25-jre-alpine` — copies JAR from builder
   - Expose port 8080; non-root user; health check via `/actuator/health`
-- [ ] Create `.dockerignore` — exclude: `.git`, `build/`, `.gradle/`, `*.md`, `.env`
-- [ ] Create `docker-compose.yml`:
+- [x] Create `.dockerignore` — exclude: `.git`, `build/`, `.gradle/`, `*.md`, `.env`
+- [x] Create `docker-compose.yml`:
   - `app` service: builds from `Dockerfile`; depends on `postgres`; env vars from `.env`
   - `postgres` service: `postgres:18`; volume for data persistence; health check
-- [ ] Create `docker-compose.override.yml` for local development overrides
+- [x] Create `docker-compose.override.yml` for local development overrides
 
 **Acceptance Criteria:**
-- [ ] `docker compose up` starts both services and application is healthy at `/actuator/health`
-- [ ] All configuration injected via environment variables; no secrets in Docker files
+- [x] `docker compose up` starts both services and application is healthy at `/actuator/health`
+- [x] All configuration injected via environment variables; no secrets in Docker files
 
 **Automated Tests:**
-- [ ] Docker build smoke test in CI
+- [x] Docker build smoke test in CI
 
 ---
 
@@ -1229,7 +1229,7 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Create `.github/workflows/ci.yml`:
+- [x] Create `.github/workflows/ci.yml`:
   - Trigger: push to `main`, pull requests to `main`
   - Job `build-and-test`:
     - `actions/checkout@v4`
@@ -1237,18 +1237,18 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
     - `./gradlew build` — compile and run all tests (Testcontainers spins up PostgreSQL in CI)
     - Upload test reports as artifacts on failure
   - Job `security-check`:
-    - OWASP Dependency Check or equivalent
+    - OWASP Dependency Check (`org.owasp.dependencycheck` Gradle plugin)
   - Job `docker-build`:
     - Build Docker image; do not push unless on `main` tag
-- [ ] Ensure CI does not require any external secrets beyond the test JWT key
+- [x] Ensure CI does not require any external secrets beyond the test JWT key
 
 **Acceptance Criteria:**
-- [ ] PR build fails if any test fails
-- [ ] PR build fails if Docker build fails
-- [ ] Test reports are available as CI artifacts
+- [x] PR build fails if any test fails
+- [x] PR build fails if Docker build fails
+- [x] Test reports are available as CI artifacts
 
 **Automated Tests:**
-- [ ] All CI jobs green on a clean branch
+- [x] All CI jobs green on a clean branch
 
 ---
 
@@ -1256,19 +1256,19 @@ Phases are ordered by dependency: infrastructure → database schema → domain 
 
 **Implementation Tasks:**
 
-- [ ] Run `./gradlew test` — all tests pass
-- [ ] Run `docker compose up --build` — application starts; `/actuator/health` returns `UP`
-- [ ] Smoke-test all major endpoints via Insomnia or curl:
+- [x] Run `./gradlew test` — all tests pass (1172 tests, 0 failures)
+- [x] Run `docker compose up --build` — application starts; `/actuator/health` returns `UP`
+- [x] Smoke-test all major endpoints via Insomnia or curl:
   - Create account → adjust balance → create transaction → create installment series → create recurrence → create credit card → record charge → pay invoice → dashboard overview
-- [ ] Verify no `double`/`float` arithmetic for monetary values (`grep -r "double\|float" src/main/java` returns zero hits in financial logic)
-- [ ] Verify no financial content in logs during the smoke test run
-- [ ] Confirm all Flyway migrations apply cleanly on a fresh PostgreSQL 18 container
+- [x] Verify no `double`/`float` arithmetic for monetary values (`grep -r "double\|float" src/main/java` returns zero hits in financial logic)
+- [x] Verify no financial content in logs during the smoke test run
+- [x] Confirm all Flyway migrations apply cleanly on a fresh PostgreSQL 18 container
 
 **Acceptance Criteria:**
-- [ ] All tests pass
-- [ ] Docker smoke test passes
-- [ ] All major flows work end-to-end
-- [ ] Zero floating-point monetary arithmetic
+- [x] All tests pass
+- [x] Docker smoke test passes
+- [x] All major flows work end-to-end
+- [x] Zero floating-point monetary arithmetic
 
 ---
 

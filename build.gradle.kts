@@ -1,6 +1,7 @@
 plugins {
     id("org.springframework.boot") version "4.0.6"
     id("io.spring.dependency-management") version "1.1.7"
+    id("org.owasp.dependencycheck") version "12.1.3"
     java
 }
 
@@ -77,8 +78,15 @@ dependencies {
     testAnnotationProcessor("org.projectlombok:lombok")
 }
 
+dependencyCheck {
+    failBuildOnCVSS = 9.0f
+    suppressionFile = "owasp-suppressions.xml"
+    nvd.apiKey = System.getenv("NVD_API_KEY") ?: ""
+    analyzers.retirejs.enabled = false
+}
+
 tasks.withType<JavaCompile> {
-    options.annotationProcessorPath = configurations.annotationProcessor.get()  
+    options.annotationProcessorPath = configurations.annotationProcessor.get()
 }
 
 tasks.withType<Test> {

@@ -1,5 +1,6 @@
 package com.cashcontrol.api.repository;
 
+import com.cashcontrol.api.domain.entity.AccountType;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
@@ -98,18 +99,150 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("includeCancelled") boolean includeCancelled,
             Pageable pageable);
 
-    @Modifying
+    @Modifying(clearAutomatically = true)
     @Query("UPDATE Transaction t SET t.status = com.cashcontrol.api.domain.entity.TransactionStatus.OVERDUE " +
            "WHERE t.userId = :userId " +
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PENDING " +
            "AND t.paymentDate IS NOT NULL AND t.paymentDate < :today")
     int markOverdueForUser(@Param("userId") UUID userId, @Param("today") LocalDate today);
 
-    @Modifying
+    @Modifying(clearAutomatically = true)
     @Query("UPDATE Transaction t SET t.status = com.cashcontrol.api.domain.entity.TransactionStatus.OVERDUE " +
            "WHERE t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PENDING " +
            "AND t.paymentDate IS NOT NULL AND t.paymentDate < :today")
     int markOverdueAll(@Param("today") LocalDate today);
+
+    // ── Dashboard queries ─────────────────────────────────────────────────────
+
+    @Query("SELECT COALESCE(SUM(CASE " +
+           "WHEN t.type = com.cashcontrol.api.domain.entity.TransactionType.INCOME " +
+           "  OR t.type = com.cashcontrol.api.domain.entity.TransactionType.REFUND THEN t.amount " +
+           "WHEN t.type = com.cashcontrol.api.domain.entity.TransactionType.EXPENSE THEN -t.amount " +
+           "ELSE t.amount END), 0) " +
+           "FROM Transaction t " +
+           "WHERE t.userId = :userId " +
+           "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
+           "AND t.account.archivedAt IS NULL AND t.account.deletedAt IS NULL " +
+           "AND t.account.type <> :excludedType")
+    BigDecimal sumTotalBalanceExcludingType(
+            @Param("userId") UUID userId,
+            @Param("excludedType") AccountType excludedType);
+
+    @Query("SELECT COALESCE(SUM(CASE " +
+           "WHEN t.type = com.cashcontrol.api.domain.entity.TransactionType.INCOME " +
+           "  OR t.type = com.cashcontrol.api.domain.entity.TransactionType.REFUND THEN t.amount " +
+           "WHEN t.type = com.cashcontrol.api.domain.entity.TransactionType.EXPENSE THEN -t.amount " +
+           "ELSE t.amount END), 0) " +
+           "FROM Transaction t " +
+           "WHERE t.userId = :userId " +
+           "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
+           "AND t.account.archivedAt IS NULL AND t.account.deletedAt IS NULL")
+    BigDecimal sumTotalNetWorth(@Param("userId") UUID userId);
+
+    @Query("SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
+           "WHERE t.userId = :userId " +
+           "AND t.type = :type " +
+           "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
+           "AND t.paymentDate >= :from AND t.paymentDate <= :to " +
+           "AND (:accountId IS NULL OR t.account.id = :accountId)")
+    BigDecimal sumPaidByTypeAndPaymentDateRange(
+            @Param("userId") UUID userId,
+            @Param("type") TransactionType type,
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to,
+            @Param("accountId") UUID accountId);
+
+    @Query("SELECT t.category.id, SUM(t.amount) FROM Transaction t " +
+           "WHERE t.userId = :userId " +
+           "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
+           "AND t.type = :type " +
+           "AND t.paymentDate >= :from AND t.paymentDate <= :to " +
+           "AND (:accountId IS NULL OR t.account.id = :accountId) " +
+           "AND t.category IS NOT NULL " +
+           "GROUP BY t.category.id " +
+           "ORDER BY SUM(t.amount) DESC")
+    List<Object[]> findCategoryBreakdown(
+            @Param("userId") UUID userId,
+            @Param("type") TransactionType type,
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to,
+            @Param("accountId") UUID accountId);
+
+    @Query("SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
+           "WHERE t.userId = :userId " +
+           "AND t.type = :type " +
+           "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
+           "AND t.paymentDate >= :from AND t.paymentDate <= :to " +
+           "AND (:accountId IS NULL OR t.account.id = :accountId) " +
+           "AND t.category IS NULL")
+    BigDecimal sumUncategorized(
+            @Param("userId") UUID userId,
+            @Param("type") TransactionType type,
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to,
+            @Param("accountId") UUID accountId);
+
+    @Query("SELECT t FROM Transaction t " +
+           "WHERE t.userId = :userId " +
+           "AND t.status IN :statuses " +
+           "AND t.paymentDate <= :deadline " +
+           "ORDER BY t.paymentDate ASC")
+    List<Transaction> findUpcomingBills(
+            @Param("userId") UUID userId,
+            @Param("statuses") List<TransactionStatus> statuses,
+            @Param("deadline") LocalDate deadline,
+            Pageable pageable);
+
+    @Query("SELECT t FROM Transaction t " +
+           "WHERE t.userId = :userId " +
+           "AND t.type = com.cashcontrol.api.domain.entity.TransactionType.EXPENSE " +
+           "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
+           "AND t.paymentDate >= :from AND t.paymentDate <= :to " +
+           "ORDER BY t.amount DESC")
+    List<Transaction> findLargestExpenses(
+            @Param("userId") UUID userId,
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to,
+            Pageable pageable);
+
+    @Query("SELECT t FROM Transaction t " +
+           "WHERE t.userId = :userId " +
+           "AND t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED " +
+           "AND t.account.archivedAt IS NULL AND t.account.deletedAt IS NULL " +
+           "ORDER BY t.competenceDate DESC, t.createdAt DESC")
+    List<Transaction> findRecentTransactions(
+            @Param("userId") UUID userId,
+            Pageable pageable);
+
+    @Query("SELECT COALESCE(SUM(CASE " +
+           "WHEN t.type = com.cashcontrol.api.domain.entity.TransactionType.INCOME " +
+           "  OR t.type = com.cashcontrol.api.domain.entity.TransactionType.REFUND THEN t.amount " +
+           "WHEN t.type = com.cashcontrol.api.domain.entity.TransactionType.EXPENSE THEN -t.amount " +
+           "ELSE t.amount END), 0) " +
+           "FROM Transaction t " +
+           "WHERE t.userId = :userId " +
+           "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
+           "AND t.account.archivedAt IS NULL AND t.account.deletedAt IS NULL " +
+           "AND t.paymentDate <= :upTo")
+    BigDecimal sumNetWorthUpTo(
+            @Param("userId") UUID userId,
+            @Param("upTo") LocalDate upTo);
+
+    @Query(value = "SELECT TO_CHAR(payment_date, 'YYYY-MM') AS month, type, COALESCE(SUM(amount), 0) AS total " +
+                   "FROM transactions " +
+                   "WHERE user_id = :userId AND status = 'PAID' AND type IN ('INCOME', 'EXPENSE') " +
+                   "AND payment_date BETWEEN :from AND :to " +
+                   "AND (CAST(:accountId AS uuid) IS NULL OR account_id = CAST(:accountId AS uuid)) " +
+                   "GROUP BY TO_CHAR(payment_date, 'YYYY-MM'), type " +
+                   "ORDER BY TO_CHAR(payment_date, 'YYYY-MM') ASC",
+           nativeQuery = true)
+    List<Object[]> findMonthlyIncomeExpense(
+            @Param("userId") UUID userId,
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to,
+            @Param("accountId") UUID accountId);
+
+    // ── Category suggestion queries ───────────────────────────────────────────
 
     @Query("SELECT t.category.id, t.subcategory.id, COUNT(t) FROM Transaction t " +
            "WHERE t.userId = :userId AND t.category IS NOT NULL " +

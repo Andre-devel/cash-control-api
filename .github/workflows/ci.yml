@@ -34,8 +34,8 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Run tests
-        run: ./gradlew test --no-daemon
+      - name: Build and run all tests
+        run: ./gradlew build --no-daemon
         env:
           TESTCONTAINERS_RYUK_DISABLED: false
 
@@ -46,6 +46,16 @@ jobs:
           name: JUnit Test Results
           path: build/test-results/test/*.xml
           reporter: java-junit
+
+      - name: Upload test reports on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-reports
+          path: |
+            build/reports/tests/
+            build/test-results/
+          retention-days: 7
 
   security-check:
     name: Dependency Security Check
@@ -75,11 +85,19 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Run dependency check
+      - name: Run OWASP dependency check
         run: ./gradlew dependencyCheckAnalyze --no-daemon
         continue-on-error: true
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+
+      - name: Upload dependency check report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-check-report
+          path: build/reports/dependency-check-report.html
+          retention-days: 30
 
   docker-build:
     name: Docker Build
@@ -100,7 +118,7 @@ jobs:
           context: .
           push: false
           tags: |
-            java-auth-template:${{ github.sha }}
-            java-auth-template:latest
+            cash-control-api:${{ github.sha }}
+            cash-control-api:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max

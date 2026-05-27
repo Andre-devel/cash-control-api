@@ -27,4 +27,6 @@ public interface RecurrenceService {
     List<RecurrenceRuleResponse> listRecurrences(UUID userId);
 
     RecurrenceRuleResponse getRecurrence(UUID ruleId, UUID userId);
+
+    int generatePendingInstances(int lookaheadDays);
 }

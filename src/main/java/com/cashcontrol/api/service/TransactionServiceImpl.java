@@ -220,6 +220,12 @@ public class TransactionServiceImpl implements TransactionService {
         return transactionRepository.markOverdueForUser(userId, LocalDate.now());
     }
 
+    @Override
+    @Transactional
+    public int detectOverdueAll() {
+        return transactionRepository.markOverdueAll(LocalDate.now());
+    }
+
     private Transaction findOwnedTransaction(UUID id, UUID userId) {
         return transactionRepository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Transaction not found: " + id));
