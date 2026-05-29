@@ -287,40 +287,40 @@ Each phase is independent; IT-2 does not require IT-1 to be complete first, but 
 
 **Implementation Tasks:**
 
-- [ ] Create `TransactionServiceIntegrationTest` extending `BaseRepositoryTest`
-- [ ] Inject `TransactionService`, `AccountRepository`, seed user/account helpers
-- [ ] Test `listTransactions` with `searchText` filter:
+- [x] Create `TransactionServiceIntegrationTest` extending `BaseRepositoryTest`
+- [x] Inject `TransactionService`, `AccountRepository`, seed user/account helpers
+- [x] Test `listTransactions` with `searchText` filter:
   - Create two transactions with distinct descriptions
   - Call `listTransactions` with a search term matching only one
   - Assert one result returned — **this is the service-level regression test for the `lower(bytea)` bug**
-- [ ] Test `listTransactions` — pagination works correctly:
+- [x] Test `listTransactions` — pagination works correctly:
   - Seed 15 transactions
   - Assert page 0 / size 10 returns 10 items
   - Assert page 1 / size 10 returns 5 items
-- [ ] Test `listTransactions` — `includeCancelled = false` by default:
+- [x] Test `listTransactions` — `includeCancelled = false` by default:
   - Seed 3 PAID and 2 CANCELLED transactions
   - Assert 3 returned; with `includeCancelled = true` assert 5 returned
-- [ ] Test `createTransaction` — category rule auto-applied:
+- [x] Test `createTransaction` — category rule auto-applied:
   - Seed a category rule matching `"farmácia"` → category `"Saúde"`
   - Create an EXPENSE with description `"Farmácia Popular"`
   - Load the saved transaction; assert `category = "Saúde"`
-- [ ] Test `detectOverdue`:
+- [x] Test `detectOverdue`:
   - Seed PENDING transaction with `paymentDate = yesterday` and `paymentDate = tomorrow`
   - Call `detectOverdue(userId)`
   - Assert yesterday's transaction is now OVERDUE; tomorrow's is still PENDING
-- [ ] Test `markAsPaid` — full persistence:
+- [x] Test `markAsPaid` — full persistence:
   - Create PENDING transaction; call `markAsPaid`; reload from DB
   - Assert status = PAID and paymentDate is set
-- [ ] Test `cancelTransaction` — full persistence:
+- [x] Test `cancelTransaction` — full persistence:
   - Create PAID transaction; call `cancelTransaction`; reload from DB
   - Assert status = CANCELLED and `cancelledAt` is not null
 
 **Acceptance Criteria:**
-- [ ] `listTransactions` with `searchText` passes against real PostgreSQL
-- [ ] All DB state changes are reloaded from DB (not from in-memory entity cache)
+- [x] `listTransactions` with `searchText` passes against real PostgreSQL
+- [x] All DB state changes are reloaded from DB (not from in-memory entity cache)
 
 **Automated Tests:**
-- [ ] `TransactionServiceIntegrationTest` — 7 test cases
+- [x] `TransactionServiceIntegrationTest` — 7 test cases
 
 ---
 
@@ -330,33 +330,33 @@ Each phase is independent; IT-2 does not require IT-1 to be complete first, but 
 
 **Implementation Tasks:**
 
-- [ ] Create `InstallmentServiceIntegrationTest` extending `BaseRepositoryTest`
-- [ ] Test `createInstallmentSeries` — full persistence:
+- [x] Create `InstallmentServiceIntegrationTest` extending `BaseRepositoryTest`
+- [x] Test `createInstallmentSeries` — full persistence:
   - Create series with total = 1200, count = 3
   - Reload all 3 installment transactions from DB
   - Assert amounts are [400, 400, 400] (or [399, 400, 401] per remainder rule)
   - Assert `installmentSeries_id` is set on all three
   - Assert `installment_number` sequence is 1, 2, 3
-- [ ] Test `createInstallmentSeries` — amount remainder on last installment:
+- [x] Test `createInstallmentSeries` — amount remainder on last installment:
   - Create series with total = 100, count = 3
-  - Assert amounts are [33, 33, 34] — remainder on last
-- [ ] Test `earlySettlement` — full atomicity:
+  - Assert amounts are [33.33, 33.33, 33.34] — remainder on last (scale=2, DOWN rounding)
+- [x] Test `earlySettlement` — full atomicity:
   - Create series with 3 installments (2 PENDING, 1 PAID)
   - Call `earlySettlement`
   - Reload from DB: assert the 2 PENDING are now CANCELLED, the PAID is unchanged
   - Assert a new PAID settlement transaction was created
   - Assert `installmentSeries.settled = true`
-- [ ] Test `editSeries` — detached installment not updated:
+- [x] Test `editSeries` — detached installment not updated:
   - Create series with 3 installments; mark installment 2 as detached
   - Call `editSeries` with a new category
   - Assert installment 2 (detached) retains its original category
   - Assert installments 1 and 3 have the new category
 
 **Acceptance Criteria:**
-- [ ] `earlySettlement` atomicity verified by checking all entities after the transaction commits
+- [x] `earlySettlement` atomicity verified by checking all entities after the transaction commits
 
 **Automated Tests:**
-- [ ] `InstallmentServiceIntegrationTest` — 4 test cases
+- [x] `InstallmentServiceIntegrationTest` — 4 test cases
 
 ---
 
@@ -366,32 +366,32 @@ Each phase is independent; IT-2 does not require IT-1 to be complete first, but 
 
 **Implementation Tasks:**
 
-- [ ] Create `CategoryServiceIntegrationTest` extending `BaseRepositoryTest`
-- [ ] Test `listCategories` — system + user categories merged:
+- [x] Create `CategoryServiceIntegrationTest` extending `BaseRepositoryTest`
+- [x] Test `listCategories` — system + user categories merged:
   - Assert the seeded system categories are present in the result
   - Create 2 user-defined categories; assert they also appear
-- [ ] Test `createCategory` — name uniqueness enforced per user:
+- [x] Test `createCategory` — name uniqueness enforced per user:
   - Create category `"Pets"` for user A
   - Assert creating `"Pets"` again for user A throws `ConflictException`
   - Assert creating `"Pets"` for user B succeeds (user scoping)
-- [ ] Test `archiveCategory` — cascades to all subcategories:
+- [x] Test `archiveCategory` — cascades to all subcategories:
   - Create parent category with 3 subcategories
   - Call `archiveCategory` on the parent
   - Reload all from DB; assert parent and all 3 subs have `archivedAt` set
-- [ ] Test `archiveCategory` — system category rejected:
+- [x] Test `archiveCategory` — system category rejected:
   - Attempt to archive a system category (seeded by Flyway)
-  - Assert `BusinessRuleException` is thrown
-- [ ] Test `suggestCategory` — frequency-based result:
+  - Assert `ResourceNotFoundException` is thrown (system categories have user_id=null, unreachable via findByIdAndUserId)
+- [x] Test `suggestCategory` — frequency-based result:
   - Seed 5 transactions with category A and description `"mercado"`
   - Seed 1 transaction with category B and description `"mercado extra"`
   - Call `suggestCategory("mercado", userId)`
   - Assert category A is the top suggestion
 
 **Acceptance Criteria:**
-- [ ] `archiveCategory` cascade verified by reloading each subcategory individually from DB
+- [x] `archiveCategory` cascade verified by reloading each subcategory individually from DB
 
 **Automated Tests:**
-- [ ] `CategoryServiceIntegrationTest` — 5 test cases
+- [x] `CategoryServiceIntegrationTest` — 5 test cases
 
 ---
 
@@ -402,31 +402,31 @@ Each phase is independent; IT-2 does not require IT-1 to be complete first, but 
 
 **Implementation Tasks:**
 
-- [ ] Create `DashboardServiceIntegrationTest` extending `BaseRepositoryTest`
-- [ ] Test `getCategoryPieChart`:
+- [x] Create `DashboardServiceIntegrationTest` extending `BaseRepositoryTest`
+- [x] Test `getCategoryPieChart`:
   - Seed 3 EXPENSE transactions: 500 in "Moradia", 300 in "Alimentação", 200 in "Saúde"
   - Assert 3 slices; percentages sum to 100; "Moradia" is the largest slice
-- [ ] Test `getMonthlyBarChart` — months with no transactions filled with zeroes:
+- [x] Test `getMonthlyBarChart` — months with no transactions filled with zeroes:
   - Seed transactions only in Jan and Mar (skip Feb)
   - Call with range Jan–Mar
   - Assert 3 month entries; Feb has `income = 0` and `expenses = 0`
-- [ ] Test `getNetWorthEvolution`:
+- [x] Test `getNetWorthEvolution`:
   - Seed INCOME 1000 on 2026-01-01, EXPENSE 200 on 2026-02-01
-  - Assert net worth at 2026-01-31 = 1000; at 2026-02-28 = 800
-- [ ] Test `getLargestExpenses`:
+  - Assert net worth at 2026-01-01 = 1000; at 2026-02-28 = 800
+- [x] Test `getLargestExpenses`:
   - Seed 5 PAID EXPENSE transactions with distinct amounts
   - Assert top 3 returned, ordered by amount descending
-- [ ] Test `getUpcomingBills`:
+- [x] Test `getUpcomingBills`:
   - Seed PENDING transactions at today+1, today+3, today+8
   - Call with `daysAhead = 7`
   - Assert only 2 bills returned
 
 **Acceptance Criteria:**
-- [ ] Monthly bar chart zero-fill verified with a month gap in seed data
-- [ ] Net worth evolution snapshot dates produce correct cumulative sums
+- [x] Monthly bar chart zero-fill verified with a month gap in seed data
+- [x] Net worth evolution snapshot dates produce correct cumulative sums
 
 **Automated Tests:**
-- [ ] `DashboardServiceIntegrationTest` — 5 test cases
+- [x] `DashboardServiceIntegrationTest` — 5 test cases
 
 ---
 
