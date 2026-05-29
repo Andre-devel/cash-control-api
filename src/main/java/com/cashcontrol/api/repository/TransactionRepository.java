@@ -59,14 +59,14 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
                    "AND (:type IS NULL OR t.type = :type) " +
                    "AND (:status IS NULL OR t.status = :status) " +
                    "AND (:categoryId IS NULL OR t.category.id = :categoryId) " +
-                   "AND (:competenceDateFrom IS NULL OR t.competenceDate >= :competenceDateFrom) " +
-                   "AND (:competenceDateTo IS NULL OR t.competenceDate <= :competenceDateTo) " +
-                   "AND (:paymentDateFrom IS NULL OR t.paymentDate >= :paymentDateFrom) " +
-                   "AND (:paymentDateTo IS NULL OR t.paymentDate <= :paymentDateTo) " +
+                   "AND (CAST(:competenceDateFrom AS LocalDate) IS NULL OR t.competenceDate >= :competenceDateFrom) " +
+                   "AND (CAST(:competenceDateTo AS LocalDate) IS NULL OR t.competenceDate <= :competenceDateTo) " +
+                   "AND (CAST(:paymentDateFrom AS LocalDate) IS NULL OR t.paymentDate >= :paymentDateFrom) " +
+                   "AND (CAST(:paymentDateTo AS LocalDate) IS NULL OR t.paymentDate <= :paymentDateTo) " +
                    "AND (:amountMin IS NULL OR t.amount >= :amountMin) " +
                    "AND (:amountMax IS NULL OR t.amount <= :amountMax) " +
-                   "AND (:searchText IS NULL OR LOWER(t.description) LIKE LOWER(CONCAT('%', :searchText, '%')) " +
-                   "     OR LOWER(COALESCE(t.notes, '')) LIKE LOWER(CONCAT('%', :searchText, '%'))) " +
+                   "AND (COALESCE(:searchText, '') = '' OR LOWER(t.description) LIKE LOWER(CONCAT('%', CAST(:searchText AS String), '%')) " +
+                   "     OR LOWER(COALESCE(t.notes, '')) LIKE LOWER(CONCAT('%', CAST(:searchText AS String), '%'))) " +
                    "AND (:includeCancelled = TRUE OR t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED)",
            countQuery = "SELECT COUNT(t) FROM Transaction t " +
                         "WHERE t.userId = :userId " +
@@ -74,14 +74,14 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
                         "AND (:type IS NULL OR t.type = :type) " +
                         "AND (:status IS NULL OR t.status = :status) " +
                         "AND (:categoryId IS NULL OR t.category.id = :categoryId) " +
-                        "AND (:competenceDateFrom IS NULL OR t.competenceDate >= :competenceDateFrom) " +
-                        "AND (:competenceDateTo IS NULL OR t.competenceDate <= :competenceDateTo) " +
-                        "AND (:paymentDateFrom IS NULL OR t.paymentDate >= :paymentDateFrom) " +
-                        "AND (:paymentDateTo IS NULL OR t.paymentDate <= :paymentDateTo) " +
+                        "AND (CAST(:competenceDateFrom AS LocalDate) IS NULL OR t.competenceDate >= :competenceDateFrom) " +
+                        "AND (CAST(:competenceDateTo AS LocalDate) IS NULL OR t.competenceDate <= :competenceDateTo) " +
+                        "AND (CAST(:paymentDateFrom AS LocalDate) IS NULL OR t.paymentDate >= :paymentDateFrom) " +
+                        "AND (CAST(:paymentDateTo AS LocalDate) IS NULL OR t.paymentDate <= :paymentDateTo) " +
                         "AND (:amountMin IS NULL OR t.amount >= :amountMin) " +
                         "AND (:amountMax IS NULL OR t.amount <= :amountMax) " +
-                        "AND (:searchText IS NULL OR LOWER(t.description) LIKE LOWER(CONCAT('%', :searchText, '%')) " +
-                        "     OR LOWER(COALESCE(t.notes, '')) LIKE LOWER(CONCAT('%', :searchText, '%'))) " +
+                        "AND (COALESCE(:searchText, '') = '' OR LOWER(t.description) LIKE LOWER(CONCAT('%', CAST(:searchText AS String), '%')) " +
+                        "     OR LOWER(COALESCE(t.notes, '')) LIKE LOWER(CONCAT('%', CAST(:searchText AS String), '%'))) " +
                         "AND (:includeCancelled = TRUE OR t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED)")
     Page<Transaction> findWithFilters(
             @Param("userId") UUID userId,
