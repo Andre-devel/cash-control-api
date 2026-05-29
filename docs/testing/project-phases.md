@@ -448,32 +448,32 @@ Each phase is independent; IT-2 does not require IT-1 to be complete first, but 
 
 **Implementation Tasks:**
 
-- [ ] Create `TransactionApiIntegrationTest` extending `BaseIntegrationTest`
-- [ ] Set up: seed a user + JWT via `AuthIntegrationTest` pattern; seed an account
-- [ ] Test `POST /api/v1/transactions` — create INCOME, assert 201 and response body
-- [ ] Test `GET /api/v1/transactions` — list with no filters, assert 200 and correct total
-- [ ] Test `GET /api/v1/transactions?searchText=supermercado` — assert text search works end-to-end (HTTP → PostgreSQL):
+- [x] Create `TransactionApiIntegrationTest` extending `BaseIntegrationTest`
+- [x] Set up: seed a user + JWT via `AuthIntegrationTest` pattern; seed an account
+- [x] Test `POST /api/v1/transactions` — create INCOME, assert 201 and response body
+- [x] Test `GET /api/v1/transactions` — list with no filters, assert 200 and correct total
+- [x] Test `GET /api/v1/transactions?searchText=supermercado` — assert text search works end-to-end (HTTP → PostgreSQL):
   - Create two transactions with distinct descriptions
   - GET with `searchText` matching one
   - Assert `content` has exactly 1 item with the expected description
   - **This is the full-stack regression test for the `lower(bytea)` bug**
-- [ ] Test `GET /api/v1/transactions?type=INCOME` — type filter
-- [ ] Test `GET /api/v1/transactions?competenceDateFrom=2026-01-01&competenceDateTo=2026-01-31` — date range filter
-- [ ] Test `GET /api/v1/transactions/{id}` — get detail
-- [ ] Test `PUT /api/v1/transactions/{id}` — edit
-- [ ] Test `POST /api/v1/transactions/{id}/pay` — mark as paid, assert status transitions
-- [ ] Test `POST /api/v1/transactions/{id}/cancel` — cancel, assert response
-- [ ] Test `DELETE /api/v1/transactions/{id}` — assert 204
-- [ ] Test `GET /api/v1/transactions` with invalid JWT — assert 401
-- [ ] Test `GET /api/v1/transactions/{id}` for another user's transaction — assert 404 (user scoping, not 403)
+- [x] Test `GET /api/v1/transactions?type=INCOME` — type filter
+- [x] Test `GET /api/v1/transactions?competenceDateFrom=2026-01-01&competenceDateTo=2026-01-31` — date range filter
+- [x] Test `GET /api/v1/transactions/{id}` — get detail
+- [x] Test `PUT /api/v1/transactions/{id}` — edit
+- [x] Test `POST /api/v1/transactions/{id}/pay` — mark as paid, assert status transitions
+- [x] Test `POST /api/v1/transactions/{id}/cancel` — cancel, assert response
+- [x] Test `DELETE /api/v1/transactions/{id}` — assert 204
+- [x] Test `GET /api/v1/transactions` with invalid JWT — assert 401
+- [x] Test `GET /api/v1/transactions/{id}` for another user's transaction — assert 404 (user scoping, not 403)
 
 **Acceptance Criteria:**
-- [ ] `searchText` filter works through the full HTTP → DB stack
-- [ ] Cross-user access returns 404, not 403 (anti-enumeration)
-- [ ] All requests without JWT return 401
+- [x] `searchText` filter works through the full HTTP → DB stack
+- [x] Cross-user access returns 404, not 403 (anti-enumeration)
+- [x] All requests without JWT return 401
 
 **Automated Tests:**
-- [ ] `TransactionApiIntegrationTest` — 12 test cases
+- [x] `TransactionApiIntegrationTest` — 12 test cases
 
 ---
 
@@ -484,21 +484,21 @@ Each phase is independent; IT-2 does not require IT-1 to be complete first, but 
 
 **Implementation Tasks:**
 
-- [ ] Create `AccountApiIntegrationTest` extending `BaseIntegrationTest`
-- [ ] Test `POST /api/v1/accounts` — create, assert 201 and `id` in response
-- [ ] Test `POST /api/v1/accounts` — duplicate name, assert 409
-- [ ] Test `GET /api/v1/accounts` — list excludes archived by default
-- [ ] Test `GET /api/v1/accounts?includeArchived=true` — archived accounts included
-- [ ] Test `POST /api/v1/accounts/{id}/archive` → `POST /api/v1/accounts/{id}/unarchive` cycle
-- [ ] Test `DELETE /api/v1/accounts/{id}` — account with non-seed transactions, assert 422
-- [ ] Test `POST /api/v1/accounts/{id}/adjust` — manual balance adjustment, assert balance changes
-- [ ] Test `GET /api/v1/accounts/{id}` for another user's account — assert 404
+- [x] Create `AccountApiIntegrationTest` extending `BaseIntegrationTest`
+- [x] Test `POST /api/v1/accounts` — create, assert 201 and `id` in response
+- [x] Test `POST /api/v1/accounts` — duplicate name, assert 409
+- [x] Test `GET /api/v1/accounts` — list excludes archived by default
+- [x] Test `GET /api/v1/accounts?includeArchived=true` — archived accounts included
+- [x] Test `POST /api/v1/accounts/{id}/archive` → `POST /api/v1/accounts/{id}/unarchive` cycle
+- [x] Test `DELETE /api/v1/accounts/{id}` — account with non-seed transactions, assert 422
+- [x] Test `POST /api/v1/accounts/{id}/adjust` — manual balance adjustment, assert balance changes
+- [x] Test `GET /api/v1/accounts/{id}` for another user's account — assert 404
 
 **Acceptance Criteria:**
-- [ ] Balance in `GET /api/v1/accounts/{id}` reflects real computed sum from DB
+- [x] Balance in `GET /api/v1/accounts/{id}` reflects real computed sum from DB
 
 **Automated Tests:**
-- [ ] `AccountApiIntegrationTest` — 8 test cases
+- [x] `AccountApiIntegrationTest` — 8 test cases
 
 ---
 
@@ -508,18 +508,18 @@ Each phase is independent; IT-2 does not require IT-1 to be complete first, but 
 
 **Implementation Tasks:**
 
-- [ ] Create `InstallmentApiIntegrationTest` extending `BaseIntegrationTest`
-- [ ] Test `POST /api/v1/installments` — create series, assert 201, assert N transactions created
-- [ ] Test `GET /api/v1/transactions?installmentSeriesId={id}` — verify series transactions are listable
-- [ ] Test `PUT /api/v1/installments/series/{id}` — series edit, assert PENDING installments updated
-- [ ] Test `PUT /api/v1/installments/{transactionId}` — individual edit, assert detach flag set
-- [ ] Test `POST /api/v1/installments/series/{id}/settle` — early settlement, assert CANCELLED + settlement transaction created
+- [x] Create `InstallmentApiIntegrationTest` extending `BaseIntegrationTest`
+- [x] Test `POST /api/v1/installments` — create series, assert 201, assert N transactions created
+- [x] Test `GET /api/v1/transactions?installmentSeriesId={id}` — verify series transactions are listable
+- [x] Test `PUT /api/v1/installments/series/{id}` — series edit, assert PENDING installments updated
+- [x] Test `PUT /api/v1/installments/{transactionId}` — individual edit, assert detach flag set
+- [x] Test `POST /api/v1/installments/series/{id}/settle` — early settlement, assert CANCELLED + settlement transaction created
 
 **Acceptance Criteria:**
-- [ ] Series creation creates exactly `totalInstallments` transactions in DB
+- [x] Series creation creates exactly `totalInstallments` transactions in DB
 
 **Automated Tests:**
-- [ ] `InstallmentApiIntegrationTest` — 5 test cases
+- [x] `InstallmentApiIntegrationTest` — 5 test cases
 
 ---
 
@@ -529,18 +529,18 @@ Each phase is independent; IT-2 does not require IT-1 to be complete first, but 
 
 **Implementation Tasks:**
 
-- [ ] Create `RecurrenceApiIntegrationTest` extending `BaseIntegrationTest`
-- [ ] Test `POST /api/v1/recurrences` — create, assert first instance generated in `transactions`
-- [ ] Test `POST /api/v1/recurrences/{id}/pause` — assert status = PAUSED
-- [ ] Test `POST /api/v1/recurrences/{id}/resume` — assert status = ACTIVE
-- [ ] Test `DELETE /api/v1/recurrences/{id}?strategy=FUTURE_ONLY` — assert PENDING cancelled, PAID untouched
-- [ ] Test `DELETE /api/v1/recurrences/{id}?strategy=ALL` — assert all PENDING cancelled
+- [x] Create `RecurrenceApiIntegrationTest` extending `BaseIntegrationTest`
+- [x] Test `POST /api/v1/recurrences` — create, assert first instance generated in `transactions`
+- [x] Test `POST /api/v1/recurrences/{id}/pause` — assert status = PAUSED
+- [x] Test `POST /api/v1/recurrences/{id}/resume` — assert status = ACTIVE
+- [x] Test `DELETE /api/v1/recurrences/{id}?strategy=FUTURE_ONLY` — assert PENDING cancelled, PAID untouched
+- [x] Test `DELETE /api/v1/recurrences/{id}?strategy=ALL` — assert all PENDING cancelled
 
 **Acceptance Criteria:**
-- [ ] First transaction instance created synchronously on recurrence creation
+- [x] First transaction instance created synchronously on recurrence creation
 
 **Automated Tests:**
-- [ ] `RecurrenceApiIntegrationTest` — 5 test cases
+- [x] `RecurrenceApiIntegrationTest` — 5 test cases
 
 ---
 
@@ -550,20 +550,20 @@ Each phase is independent; IT-2 does not require IT-1 to be complete first, but 
 
 **Implementation Tasks:**
 
-- [ ] Create `CategoryApiIntegrationTest` extending `BaseIntegrationTest`
-- [ ] Test `GET /api/v1/categories` — system categories present in response
-- [ ] Test `POST /api/v1/categories` — create user category, assert 201
-- [ ] Test `POST /api/v1/categories` — third-level nesting rejected, assert 422
-- [ ] Test `POST /api/v1/categories/{id}/archive` — assert cascade to subcategories via follow-up GET
-- [ ] Test `GET /api/v1/categories/suggest?description=mercado` — assert non-empty suggestion list
-- [ ] Test `POST /api/v1/categories/rules` + `GET /api/v1/categories/rules` — rule lifecycle
-- [ ] Test `DELETE /api/v1/categories/rules/{id}` — assert 204 and rule removed from list
+- [x] Create `CategoryApiIntegrationTest` extending `BaseIntegrationTest`
+- [x] Test `GET /api/v1/categories` — system categories present in response
+- [x] Test `POST /api/v1/categories` — create user category, assert 201
+- [x] Test `POST /api/v1/categories` — third-level nesting rejected, assert 422
+- [x] Test `POST /api/v1/categories/{id}/archive` — assert cascade to subcategories via follow-up GET
+- [x] Test `GET /api/v1/categories/suggest?description=mercado` — assert non-empty suggestion list
+- [x] Test `POST /api/v1/categories/rules` + `GET /api/v1/categories/rules` — rule lifecycle
+- [x] Test `DELETE /api/v1/categories/rules/{id}` — assert 204 and rule removed from list
 
 **Acceptance Criteria:**
-- [ ] System categories always present regardless of user
+- [x] System categories always present regardless of user
 
 **Automated Tests:**
-- [ ] `CategoryApiIntegrationTest` — 7 test cases
+- [x] `CategoryApiIntegrationTest` — 7 test cases
 
 ---
 
@@ -574,20 +574,20 @@ Each phase is independent; IT-2 does not require IT-1 to be complete first, but 
 
 **Implementation Tasks:**
 
-- [ ] Create `CreditCardApiIntegrationTest` extending `BaseIntegrationTest`
-- [ ] Test `POST /api/v1/cards` — create card, assert first invoice opened
-- [ ] Test `POST /api/v1/cards/{id}/charges` — record charge, assert invoice total updated
-- [ ] Test `GET /api/v1/cards/{id}/invoices/{referenceMonth}` — assert invoice detail returned
-- [ ] Test `POST /api/v1/invoices/{id}/pay` — full payment, assert invoice status = PAID and debit transaction created on source account
-- [ ] Test `GET /api/v1/cards/{id}/limit` — assert `usedLimit` reflects charges
-- [ ] Test `POST /api/v1/cards/{id}/charges` — charge exceeding limit, assert 422
+- [x] Create `CreditCardApiIntegrationTest` extending `BaseIntegrationTest`
+- [x] Test `POST /api/v1/cards` — create card, assert first invoice opened
+- [x] Test `POST /api/v1/cards/{id}/charges` — record charge, assert invoice total updated
+- [x] Test `GET /api/v1/cards/{id}/invoices/{referenceMonth}` — assert invoice detail returned
+- [x] Test `POST /api/v1/invoices/{id}/pay` — full payment, assert invoice status = PAID and debit transaction created on source account
+- [x] Test `GET /api/v1/cards/{id}/limit` — assert `usedLimit` reflects charges
+- [x] Test `POST /api/v1/cards/{id}/charges` — archived card rejected, assert 422
 
 **Acceptance Criteria:**
-- [ ] Invoice total updated in real time after each charge (not from cache)
-- [ ] Full payment creates a debit transaction linked to the source account
+- [x] Invoice total updated in real time after each charge (not from cache)
+- [x] Full payment creates a debit transaction linked to the source account
 
 **Automated Tests:**
-- [ ] `CreditCardApiIntegrationTest` — 6 test cases
+- [x] `CreditCardApiIntegrationTest` — 6 test cases
 
 ---
 
@@ -597,21 +597,21 @@ Each phase is independent; IT-2 does not require IT-1 to be complete first, but 
 
 **Implementation Tasks:**
 
-- [ ] Create `DashboardApiIntegrationTest` extending `BaseIntegrationTest`
-- [ ] Test `GET /api/v1/dashboard/overview` — assert all fields present and correct types
-- [ ] Test `GET /api/v1/dashboard/charts/categories?type=EXPENSE` — assert non-empty slices after seeding
-- [ ] Test `GET /api/v1/dashboard/charts/monthly?months=3` — assert 3 month entries returned
-- [ ] Test `GET /api/v1/dashboard/charts/net-worth` — assert response has date-keyed entries
-- [ ] Test `GET /api/v1/dashboard/widgets/upcoming-bills` — assert only within-window bills returned
-- [ ] Test `GET /api/v1/dashboard/widgets/largest-expenses` — assert sorted by amount desc
-- [ ] Test `GET /api/v1/dashboard/widgets/recent-transactions` — assert ordered by competence date desc
+- [x] Create `DashboardApiIntegrationTest` extending `BaseIntegrationTest`
+- [x] Test `GET /api/v1/dashboard/overview` — assert all fields present and correct types
+- [x] Test `GET /api/v1/dashboard/charts/categories?type=EXPENSE` — assert non-empty slices after seeding
+- [x] Test `GET /api/v1/dashboard/charts/monthly?months=3` — assert 3 month entries returned
+- [x] Test `GET /api/v1/dashboard/charts/net-worth` — assert response has date-keyed entries
+- [x] Test `GET /api/v1/dashboard/widgets/upcoming-bills` — assert only within-window bills returned
+- [x] Test `GET /api/v1/dashboard/widgets/largest-expenses` — assert sorted by amount desc
+- [x] Test `GET /api/v1/dashboard/widgets/recent-transactions` — assert ordered by competence date desc
 
 **Acceptance Criteria:**
-- [ ] Overview endpoint returns correct `monthlyIncome`, `monthlyExpenses`, `savings` after seeded transactions
-- [ ] All responses return 200 even when the user has no transactions (empty but valid response)
+- [x] Overview endpoint returns correct `monthlyIncome`, `monthlyExpenses`, `savings` after seeded transactions
+- [x] All responses return 200 even when the user has no transactions (empty but valid response)
 
 **Automated Tests:**
-- [ ] `DashboardApiIntegrationTest` — 7 test cases
+- [x] `DashboardApiIntegrationTest` — 7 test cases
 
 ---
 
