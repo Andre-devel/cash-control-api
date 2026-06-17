@@ -170,7 +170,7 @@ class CategoryApiIntegrationTest {
         for (int i = 0; i < 3; i++) {
             transactionService.createTransaction(new CreateTransactionRequest(
                     accountId, TransactionType.EXPENSE, new BigDecimal("50.00"), "Supermercado compras",
-                    LocalDate.now(), LocalDate.now(), null, category.id(), null, null, null, TransactionStatus.PAID),
+                    LocalDate.now(), LocalDate.now(), null, category.id(), null, null, null, TransactionStatus.PAID, null, null),
                     userId);
         }
 

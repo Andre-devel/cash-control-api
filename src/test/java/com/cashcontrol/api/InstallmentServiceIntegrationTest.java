@@ -73,7 +73,7 @@ class InstallmentServiceIntegrationTest {
         LocalDate firstPayment = LocalDate.now().plusDays(1);
         InstallmentSeriesDetailResponse result = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("1200.00"), 3,
-                        firstPayment, "Laptop purchase", null, null, null),
+                        firstPayment, "Laptop purchase", null, null, null, null, null),
                 userId);
 
         assertThat(result.series().id()).isNotNull();
@@ -105,7 +105,7 @@ class InstallmentServiceIntegrationTest {
         LocalDate firstPayment = LocalDate.now().plusDays(1);
         InstallmentSeriesDetailResponse result = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("100.00"), 3,
-                        firstPayment, "Remainder test", null, null, null),
+                        firstPayment, "Remainder test", null, null, null, null, null),
                 userId);
 
         entityManager.flush();
@@ -126,7 +126,7 @@ class InstallmentServiceIntegrationTest {
         LocalDate yesterday = LocalDate.now().minusDays(1);
         InstallmentSeriesDetailResponse created = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3,
-                        yesterday, "Early settlement series", null, null, null),
+                        yesterday, "Early settlement series", null, null, null, null, null),
                 userId);
 
         UUID seriesId = created.series().id();
@@ -165,7 +165,7 @@ class InstallmentServiceIntegrationTest {
         LocalDate firstPayment = LocalDate.now().plusDays(1);
         InstallmentSeriesDetailResponse created = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3,
-                        firstPayment, "Series for detach test", null, null, null),
+                        firstPayment, "Series for detach test", null, null, null, null, null),
                 userId);
 
         UUID seriesId = created.series().id();
@@ -184,7 +184,7 @@ class InstallmentServiceIntegrationTest {
 
         // Edit series with the series category — only non-detached PENDING installments should update
         installmentService.editSeries(seriesId,
-                new EditSeriesRequest(null, null, seriesCategory.id(), null, null),
+                new EditSeriesRequest(null, null, seriesCategory.id(), null, null, null, null),
                 userId);
 
         entityManager.flush();

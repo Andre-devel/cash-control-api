@@ -175,7 +175,7 @@ class CategoryServiceIntegrationTest {
         transactionService.createTransaction(
                 new CreateTransactionRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("100.00"), description,
-                        today, today, null, categoryId, null, null, null, TransactionStatus.PAID),
+                        today, today, null, categoryId, null, null, null, TransactionStatus.PAID, null, null),
                 userId);
     }
 }

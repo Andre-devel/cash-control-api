@@ -12,6 +12,6 @@ public record UserProfileResponse(
         String authOrigin,
         Instant lastLoginAt,
         List<String> roles,
-        List<String> directPermissions,
+        List<String> permissions,
         Instant createdAt
 ) {}

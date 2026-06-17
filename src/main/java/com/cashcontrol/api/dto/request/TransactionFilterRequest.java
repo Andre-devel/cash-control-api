@@ -1,5 +1,6 @@
 package com.cashcontrol.api.dto.request;
 
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
 
@@ -19,10 +20,11 @@ public record TransactionFilterRequest(
         BigDecimal amountMin,
         BigDecimal amountMax,
         String searchText,
-        boolean includeCancelled
+        boolean includeCancelled,
+        PaymentMethodSlug paymentMethod
 ) {
     public static TransactionFilterRequest empty() {
         return new TransactionFilterRequest(null, null, null, null,
-                null, null, null, null, null, null, null, false);
+                null, null, null, null, null, null, null, false, null);
     }
 }

@@ -1,5 +1,6 @@
 package com.cashcontrol.api.dto.request;
 
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -50,5 +51,11 @@ public record CreateTransactionRequest(
         @Size(max = 255) String location,
 
         @Schema(description = "Transaction status. Defaults to PAID. Use PENDING for future obligations.", example = "PAID")
-        TransactionStatus status
+        TransactionStatus status,
+
+        @Schema(description = "Payment method slug. Defaults to OTHER when not provided.")
+        PaymentMethodSlug paymentMethod,
+
+        @Schema(description = "Credit card UUID. Required when paymentMethod is CREDIT_CARD; must be absent otherwise.")
+        UUID creditCardId
 ) {}

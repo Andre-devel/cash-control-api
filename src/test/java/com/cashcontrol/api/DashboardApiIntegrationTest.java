@@ -91,12 +91,12 @@ class DashboardApiIntegrationTest {
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, TransactionType.EXPENSE, new BigDecimal("200.00"), "Rent",
                 LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 1),
-                null, null, null, null, null, TransactionStatus.PAID), userId);
+                null, null, null, null, null, TransactionStatus.PAID, null, null), userId);
 
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, TransactionType.EXPENSE, new BigDecimal("100.00"), "Groceries",
                 LocalDate.of(2026, 5, 10), LocalDate.of(2026, 5, 10),
-                null, null, null, null, null, TransactionStatus.PAID), userId);
+                null, null, null, null, null, TransactionStatus.PAID, null, null), userId);
 
         mockMvc.perform(get("/api/v1/dashboard/charts/categories")
                         .header("Authorization", bearer())
@@ -122,7 +122,7 @@ class DashboardApiIntegrationTest {
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, TransactionType.INCOME, new BigDecimal("1000.00"), "January Salary",
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 1),
-                null, null, null, null, null, TransactionStatus.PAID), userId);
+                null, null, null, null, null, TransactionStatus.PAID, null, null), userId);
 
         mockMvc.perform(get("/api/v1/dashboard/charts/net-worth")
                         .header("Authorization", bearer())
@@ -138,12 +138,12 @@ class DashboardApiIntegrationTest {
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, TransactionType.EXPENSE, new BigDecimal("200.00"), "Bill In Window",
                 LocalDate.now().plusDays(3), LocalDate.now().plusDays(3),
-                null, null, null, null, null, TransactionStatus.PENDING), userId);
+                null, null, null, null, null, TransactionStatus.PENDING, null, null), userId);
 
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, TransactionType.EXPENSE, new BigDecimal("300.00"), "Bill Out Of Window",
                 LocalDate.now().plusDays(20), LocalDate.now().plusDays(20),
-                null, null, null, null, null, TransactionStatus.PENDING), userId);
+                null, null, null, null, null, TransactionStatus.PENDING, null, null), userId);
 
         mockMvc.perform(get("/api/v1/dashboard/widgets/upcoming-bills")
                         .header("Authorization", bearer())
@@ -158,13 +158,13 @@ class DashboardApiIntegrationTest {
     void getLargestExpenses_returnsSortedByAmountDescending() throws Exception {
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, TransactionType.EXPENSE, new BigDecimal("1000.00"), "Largest",
-                LocalDate.now(), LocalDate.now(), null, null, null, null, null, TransactionStatus.PAID), userId);
+                LocalDate.now(), LocalDate.now(), null, null, null, null, null, TransactionStatus.PAID, null, null), userId);
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, TransactionType.EXPENSE, new BigDecimal("500.00"), "Middle",
-                LocalDate.now(), LocalDate.now(), null, null, null, null, null, TransactionStatus.PAID), userId);
+                LocalDate.now(), LocalDate.now(), null, null, null, null, null, TransactionStatus.PAID, null, null), userId);
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, TransactionType.EXPENSE, new BigDecimal("200.00"), "Smallest",
-                LocalDate.now(), LocalDate.now(), null, null, null, null, null, TransactionStatus.PAID), userId);
+                LocalDate.now(), LocalDate.now(), null, null, null, null, null, TransactionStatus.PAID, null, null), userId);
 
         mockMvc.perform(get("/api/v1/dashboard/widgets/largest-expenses")
                         .header("Authorization", bearer())
@@ -182,11 +182,11 @@ class DashboardApiIntegrationTest {
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, TransactionType.INCOME, new BigDecimal("100.00"), "January Income",
                 LocalDate.of(2026, 1, 15), LocalDate.of(2026, 1, 15),
-                null, null, null, null, null, TransactionStatus.PAID), userId);
+                null, null, null, null, null, TransactionStatus.PAID, null, null), userId);
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, TransactionType.INCOME, new BigDecimal("200.00"), "March Income",
                 LocalDate.of(2026, 3, 15), LocalDate.of(2026, 3, 15),
-                null, null, null, null, null, TransactionStatus.PAID), userId);
+                null, null, null, null, null, TransactionStatus.PAID, null, null), userId);
 
         mockMvc.perform(get("/api/v1/dashboard/widgets/recent-transactions")
                         .header("Authorization", bearer())

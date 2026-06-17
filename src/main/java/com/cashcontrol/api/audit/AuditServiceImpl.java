@@ -9,18 +9,22 @@ import com.cashcontrol.api.repository.LookupCache;
 import com.cashcontrol.api.repository.UserRepository;
 import com.cashcontrol.api.security.CorrelationIdHolder;
 import com.cashcontrol.api.util.DataMasker;
+import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -109,10 +113,31 @@ public class AuditServiceImpl implements AuditService {
                 return Page.empty(pageable);
             }
         }
-        return auditLogRepository.findWithFilters(
-                eventTypeId, filter.actorId(), filter.targetId(),
-                filter.from(), filter.to(), outcomeId, pageable)
-            .map(this::toResponse);
+        UUID finalEventTypeId = eventTypeId;
+        UUID finalOutcomeId = outcomeId;
+        Specification<AuditLog> spec = (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (finalEventTypeId != null) {
+                predicates.add(cb.equal(root.get("eventType").get("id"), finalEventTypeId));
+            }
+            if (filter.actorId() != null) {
+                predicates.add(cb.equal(root.get("actorUser").get("id"), filter.actorId()));
+            }
+            if (filter.targetId() != null) {
+                predicates.add(cb.equal(root.get("targetUser").get("id"), filter.targetId()));
+            }
+            if (filter.from() != null) {
+                predicates.add(cb.greaterThanOrEqualTo(root.get("createdAt"), filter.from()));
+            }
+            if (filter.to() != null) {
+                predicates.add(cb.lessThanOrEqualTo(root.get("createdAt"), filter.to()));
+            }
+            if (finalOutcomeId != null) {
+                predicates.add(cb.equal(root.get("outcome").get("id"), finalOutcomeId));
+            }
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
+        return auditLogRepository.findAll(spec, pageable).map(this::toResponse);
     }
 
     @Override

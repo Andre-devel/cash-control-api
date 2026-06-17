@@ -22,6 +22,7 @@ import com.cashcontrol.api.repository.RoleRepository;
 import com.cashcontrol.api.repository.UserPermissionRepository;
 import com.cashcontrol.api.repository.UserRepository;
 import com.cashcontrol.api.repository.UserRoleRepository;
+import com.cashcontrol.api.security.PermissionResolver;
 import com.cashcontrol.api.util.DataMasker;
 import com.cashcontrol.api.util.TokenHasher;
 import lombok.RequiredArgsConstructor;
@@ -57,6 +58,7 @@ public class UserServiceImpl implements UserService {
     private final PasswordEncoder passwordEncoder;
     private final AppProperties appProperties;
     private final DataMasker dataMasker;
+    private final PermissionResolver permissionResolver;
 
     @Override
     @Transactional(readOnly = true)
@@ -210,7 +212,7 @@ public class UserServiceImpl implements UserService {
                 user.getAuthOrigin().getSlug(),
                 user.getLastLoginAt(),
                 roleNames(user.getId()),
-                directPermissionNames(user.getId()),
+                permissionResolver.resolveEffectivePermissions(user.getId()),
                 user.getCreatedAt()
         );
     }

@@ -469,7 +469,8 @@ class TransactionControllerTest {
                 null, null, null, null,
                 Set.of(), null, null,
                 null, null, null,
-                false, null, Instant.now(), Instant.now());
+                false, null, Instant.now(), Instant.now(),
+                null, null);
     }
 
     private TransactionSummaryResponse buildSummary(UUID id) {
@@ -478,6 +479,6 @@ class TransactionControllerTest {
                 TransactionType.INCOME, TransactionStatus.PAID,
                 new BigDecimal("100.00"), "Test Transaction",
                 LocalDate.now(), LocalDate.now(),
-                null, null, Instant.now());
+                null, null, Instant.now(), null);
     }
 }

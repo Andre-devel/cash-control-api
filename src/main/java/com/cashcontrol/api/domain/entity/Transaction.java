@@ -111,6 +111,14 @@ public class Transaction {
     @Column(name = "location", length = 255)
     private String location;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "payment_method_id", nullable = false)
+    private PaymentMethod paymentMethod;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "credit_card_id")
+    private CreditCard creditCard;
+
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
             name = "transaction_tags",

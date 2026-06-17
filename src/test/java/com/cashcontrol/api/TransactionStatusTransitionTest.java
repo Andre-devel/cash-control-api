@@ -151,7 +151,7 @@ class TransactionStatusTransitionTest {
                         accountId, TransactionType.EXPENSE,
                         new BigDecimal("50.00"), "Pending Rent",
                         LocalDate.now(), null, null, null, null, null, null,
-                        TransactionStatus.PENDING),
+                        TransactionStatus.PENDING, null, null),
                 userId);
     }
 
@@ -161,7 +161,7 @@ class TransactionStatusTransitionTest {
                         accountId, TransactionType.INCOME,
                         new BigDecimal("100.00"), "Salary",
                         LocalDate.now(), null, null, null, null, null, null,
-                        null),
+                        null, null, null),
                 userId);
     }
 }

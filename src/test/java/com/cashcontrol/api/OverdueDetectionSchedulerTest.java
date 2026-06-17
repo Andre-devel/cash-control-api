@@ -152,7 +152,7 @@ class OverdueDetectionSchedulerTest {
                 new CreateTransactionRequest(
                         accountId, TransactionType.EXPENSE, new BigDecimal("50.00"),
                         "Test expense", LocalDate.now(), paymentDate,
-                        null, null, null, null, null, TransactionStatus.PENDING),
+                        null, null, null, null, null, TransactionStatus.PENDING, null, null),
                 userId);
     }
 
@@ -161,7 +161,7 @@ class OverdueDetectionSchedulerTest {
                 new CreateTransactionRequest(
                         accountId, TransactionType.EXPENSE, new BigDecimal("100.00"),
                         "Paid expense", paymentDate, paymentDate,
-                        null, null, null, null, null, TransactionStatus.PAID),
+                        null, null, null, null, null, TransactionStatus.PAID, null, null),
                 userId);
     }
 
@@ -170,7 +170,7 @@ class OverdueDetectionSchedulerTest {
                 new CreateTransactionRequest(
                         accountId, TransactionType.EXPENSE, new BigDecimal("75.00"),
                         "No due date", LocalDate.now(), null,
-                        null, null, null, null, null, TransactionStatus.PENDING),
+                        null, null, null, null, null, TransactionStatus.PENDING, null, null),
                 userId);
     }
 }

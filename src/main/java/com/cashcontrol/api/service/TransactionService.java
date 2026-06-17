@@ -1,5 +1,9 @@
 package com.cashcontrol.api.service;
 
+import com.cashcontrol.api.domain.entity.CreditCard;
+import com.cashcontrol.api.domain.entity.PaymentMethod;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
+import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.dto.request.CreateTransactionRequest;
 import com.cashcontrol.api.dto.request.EditTransactionRequest;
 import com.cashcontrol.api.dto.request.MarkAsPaidRequest;
@@ -30,4 +34,12 @@ public interface TransactionService {
     int detectOverdue(UUID userId);
 
     int detectOverdueAll();
+
+    PaymentMethod resolvePaymentMethod(PaymentMethodSlug slug);
+
+    CreditCard validateAndResolveCreditCard(UUID creditCardId, PaymentMethodSlug slug, UUID userId);
+
+    TransactionDetailResponse toDetail(Transaction tx);
+
+    TransactionSummaryResponse toSummary(Transaction tx);
 }

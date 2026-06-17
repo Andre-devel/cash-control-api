@@ -35,5 +35,7 @@ public record TransactionDetailResponse(
         @Schema(description = "True when this installment was individually edited and is no longer managed by series-wide operations.") boolean detached,
         @Schema(description = "Timestamp when the transaction was cancelled. Null if not cancelled.") Instant cancelledAt,
         @Schema(description = "Record creation timestamp") Instant createdAt,
-        @Schema(description = "Last update timestamp") Instant updatedAt
+        @Schema(description = "Last update timestamp") Instant updatedAt,
+        @Schema(description = "Payment method used for this transaction") PaymentMethodResponse paymentMethod,
+        @Schema(description = "Credit card linked to this transaction. Non-null only when paymentMethod is CREDIT_CARD.") CreditCardRefResponse creditCard
 ) {}

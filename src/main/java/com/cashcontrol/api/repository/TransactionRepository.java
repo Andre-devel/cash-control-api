@@ -1,6 +1,7 @@
 package com.cashcontrol.api.repository;
 
 import com.cashcontrol.api.domain.entity.AccountType;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
@@ -67,7 +68,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
                    "AND (:amountMax IS NULL OR t.amount <= :amountMax) " +
                    "AND (COALESCE(:searchText, '') = '' OR LOWER(t.description) LIKE LOWER(CONCAT('%', CAST(:searchText AS String), '%')) " +
                    "     OR LOWER(COALESCE(t.notes, '')) LIKE LOWER(CONCAT('%', CAST(:searchText AS String), '%'))) " +
-                   "AND (:includeCancelled = TRUE OR t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED)",
+                   "AND (:includeCancelled = TRUE OR t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED) " +
+                   "AND (:paymentMethod IS NULL OR t.paymentMethod.slug = :paymentMethod)",
            countQuery = "SELECT COUNT(t) FROM Transaction t " +
                         "WHERE t.userId = :userId " +
                         "AND (:accountId IS NULL OR t.account.id = :accountId) " +
@@ -82,7 +84,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
                         "AND (:amountMax IS NULL OR t.amount <= :amountMax) " +
                         "AND (COALESCE(:searchText, '') = '' OR LOWER(t.description) LIKE LOWER(CONCAT('%', CAST(:searchText AS String), '%')) " +
                         "     OR LOWER(COALESCE(t.notes, '')) LIKE LOWER(CONCAT('%', CAST(:searchText AS String), '%'))) " +
-                        "AND (:includeCancelled = TRUE OR t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED)")
+                        "AND (:includeCancelled = TRUE OR t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED) " +
+                        "AND (:paymentMethod IS NULL OR t.paymentMethod.slug = :paymentMethod)")
     Page<Transaction> findWithFilters(
             @Param("userId") UUID userId,
             @Param("accountId") UUID accountId,
@@ -97,6 +100,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("amountMax") BigDecimal amountMax,
             @Param("searchText") String searchText,
             @Param("includeCancelled") boolean includeCancelled,
+            @Param("paymentMethod") PaymentMethodSlug paymentMethod,
             Pageable pageable);
 
     @Modifying(clearAutomatically = true)

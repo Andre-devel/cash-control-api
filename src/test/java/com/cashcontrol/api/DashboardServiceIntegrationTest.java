@@ -196,7 +196,7 @@ class DashboardServiceIntegrationTest {
                 new CreateTransactionRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal(amount), description,
                         paymentDate, paymentDate, null, categoryId, null, null, null,
-                        TransactionStatus.PAID),
+                        TransactionStatus.PAID, null, null),
                 userId);
     }
 
@@ -205,7 +205,7 @@ class DashboardServiceIntegrationTest {
                 new CreateTransactionRequest(accountId, TransactionType.INCOME,
                         new BigDecimal(amount), description,
                         paymentDate, paymentDate, null, null, null, null, null,
-                        TransactionStatus.PAID),
+                        TransactionStatus.PAID, null, null),
                 userId);
     }
 
@@ -214,7 +214,7 @@ class DashboardServiceIntegrationTest {
                 new CreateTransactionRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal(amount), description,
                         paymentDate, paymentDate, null, null, null, null, null,
-                        TransactionStatus.PENDING),
+                        TransactionStatus.PENDING, null, null),
                 userId);
     }
 }

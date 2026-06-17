@@ -1,5 +1,6 @@
 package com.cashcontrol.api.dto.request;
 
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
@@ -20,5 +21,7 @@ public record EditTransactionRequest(
         UUID categoryId,
         UUID subcategoryId,
         List<UUID> tagIds,
-        @Size(max = 255) String location
+        @Size(max = 255) String location,
+        PaymentMethodSlug paymentMethod,
+        UUID creditCardId
 ) {}

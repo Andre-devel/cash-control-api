@@ -433,7 +433,8 @@ class RecurrenceControllerTest {
                 null, LocalDate.of(2026, 6, 1), null,
                 null, null, null, null,
                 Set.of(), null, null, null, null, null,
-                false, null, Instant.now(), Instant.now()
+                false, null, Instant.now(), Instant.now(),
+                null, null
         );
     }
 }

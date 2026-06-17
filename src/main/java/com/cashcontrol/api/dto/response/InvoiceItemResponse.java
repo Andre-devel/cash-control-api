@@ -16,6 +16,9 @@ public record InvoiceItemResponse(
         String subcategoryName,
         String notes,
         boolean isRevolving,
+        Integer installmentNumber,
+        Integer totalInstallments,
+        UUID transactionId,
         Instant cancelledAt,
         Instant createdAt,
         Instant updatedAt

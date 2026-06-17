@@ -64,7 +64,7 @@ class BalanceConsistencyTest {
                 new CreateTransactionRequest(
                         accountId, TransactionType.INCOME,
                         new BigDecimal("500.00"), "Salary",
-                        LocalDate.now(), null, null, null, null, null, null, null),
+                        LocalDate.now(), null, null, null, null, null, null, null, null, null),
                 userId);
 
         BigDecimal after = accountService.computeBalance(accountId, userId);
@@ -77,7 +77,7 @@ class BalanceConsistencyTest {
                 new CreateTransactionRequest(
                         accountId, TransactionType.INCOME,
                         new BigDecimal("1000.00"), "Income",
-                        LocalDate.now(), null, null, null, null, null, null, null),
+                        LocalDate.now(), null, null, null, null, null, null, null, null, null),
                 userId);
 
         BigDecimal afterIncome = accountService.computeBalance(accountId, userId);
@@ -86,7 +86,7 @@ class BalanceConsistencyTest {
                 new CreateTransactionRequest(
                         accountId, TransactionType.EXPENSE,
                         new BigDecimal("200.00"), "Rent",
-                        LocalDate.now(), null, null, null, null, null, null, null),
+                        LocalDate.now(), null, null, null, null, null, null, null, null, null),
                 userId);
 
         BigDecimal afterExpense = accountService.computeBalance(accountId, userId);
@@ -99,13 +99,13 @@ class BalanceConsistencyTest {
                 new CreateTransactionRequest(
                         accountId, TransactionType.INCOME,
                         new BigDecimal("1000.00"), "Income",
-                        LocalDate.now(), null, null, null, null, null, null, null),
+                        LocalDate.now(), null, null, null, null, null, null, null, null, null),
                 userId);
         transactionService.createTransaction(
                 new CreateTransactionRequest(
                         accountId, TransactionType.EXPENSE,
                         new BigDecimal("200.00"), "Purchase",
-                        LocalDate.now(), null, null, null, null, null, null, null),
+                        LocalDate.now(), null, null, null, null, null, null, null, null, null),
                 userId);
 
         BigDecimal before = accountService.computeBalance(accountId, userId);
@@ -114,7 +114,7 @@ class BalanceConsistencyTest {
                 new CreateTransactionRequest(
                         accountId, TransactionType.REFUND,
                         new BigDecimal("50.00"), "Partial refund",
-                        LocalDate.now(), null, null, null, null, null, null, null),
+                        LocalDate.now(), null, null, null, null, null, null, null, null, null),
                 userId);
 
         BigDecimal after = accountService.computeBalance(accountId, userId);
@@ -127,7 +127,7 @@ class BalanceConsistencyTest {
                 new CreateTransactionRequest(
                         accountId, TransactionType.INCOME,
                         new BigDecimal("1000.00"), "Income",
-                        LocalDate.now(), null, null, null, null, null, null, null),
+                        LocalDate.now(), null, null, null, null, null, null, null, null, null),
                 userId);
 
         BigDecimal afterIncome = accountService.computeBalance(accountId, userId);
@@ -137,7 +137,7 @@ class BalanceConsistencyTest {
                         accountId, TransactionType.EXPENSE,
                         new BigDecimal("200.00"), "Pending Rent",
                         LocalDate.now(), null, null, null, null, null, null,
-                        TransactionStatus.PENDING),
+                        TransactionStatus.PENDING, null, null),
                 userId);
 
         BigDecimal afterPending = accountService.computeBalance(accountId, userId);
@@ -150,7 +150,7 @@ class BalanceConsistencyTest {
                 new CreateTransactionRequest(
                         accountId, TransactionType.INCOME,
                         new BigDecimal("1000.00"), "Income",
-                        LocalDate.now(), null, null, null, null, null, null, null),
+                        LocalDate.now(), null, null, null, null, null, null, null, null, null),
                 userId);
 
         BigDecimal afterIncome = accountService.computeBalance(accountId, userId);
@@ -159,7 +159,7 @@ class BalanceConsistencyTest {
                 new CreateTransactionRequest(
                         accountId, TransactionType.EXPENSE,
                         new BigDecimal("300.00"), "Expense",
-                        LocalDate.now(), null, null, null, null, null, null, null),
+                        LocalDate.now(), null, null, null, null, null, null, null, null, null),
                 userId);
 
         transactionService.cancelTransaction(expense.id(), userId);
@@ -172,19 +172,19 @@ class BalanceConsistencyTest {
     void multipleTransactions_balanceIsCorrect() {
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, TransactionType.INCOME, new BigDecimal("2000.00"), "Salary",
-                LocalDate.now(), null, null, null, null, null, null, null), userId);
+                LocalDate.now(), null, null, null, null, null, null, null, null, null), userId);
 
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, TransactionType.EXPENSE, new BigDecimal("500.00"), "Rent",
-                LocalDate.now(), null, null, null, null, null, null, null), userId);
+                LocalDate.now(), null, null, null, null, null, null, null, null, null), userId);
 
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, TransactionType.EXPENSE, new BigDecimal("100.00"), "Groceries",
-                LocalDate.now(), null, null, null, null, null, null, null), userId);
+                LocalDate.now(), null, null, null, null, null, null, null, null, null), userId);
 
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, TransactionType.REFUND, new BigDecimal("25.00"), "Refund",
-                LocalDate.now(), null, null, null, null, null, null, null), userId);
+                LocalDate.now(), null, null, null, null, null, null, null, null, null), userId);
 
         BigDecimal balance = accountService.computeBalance(accountId, userId);
         // 2000 - 500 - 100 + 25 = 1425

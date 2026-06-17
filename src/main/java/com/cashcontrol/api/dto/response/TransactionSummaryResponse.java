@@ -22,5 +22,6 @@ public record TransactionSummaryResponse(
         @Schema(description = "Settlement date — when payment was actually made. Null for PENDING transactions.", example = "2026-05-15") LocalDate paymentDate,
         @Schema(description = "Primary category UUID") UUID categoryId,
         @Schema(description = "Primary category name") String categoryName,
-        @Schema(description = "Record creation timestamp") Instant createdAt
+        @Schema(description = "Record creation timestamp") Instant createdAt,
+        @Schema(description = "Payment method used for this transaction") PaymentMethodResponse paymentMethod
 ) {}

@@ -4,10 +4,15 @@ import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.AccountType;
 import com.cashcontrol.api.domain.entity.Category;
 import com.cashcontrol.api.domain.entity.CategoryRule;
+import com.cashcontrol.api.domain.entity.CreditCard;
+import com.cashcontrol.api.domain.entity.CardBrand;
+import com.cashcontrol.api.domain.entity.PaymentMethod;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.domain.exception.BusinessRuleException;
+import com.cashcontrol.api.domain.exception.ForbiddenAccessException;
 import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
 import com.cashcontrol.api.dto.request.CreateTransactionRequest;
 import com.cashcontrol.api.dto.request.EditTransactionRequest;
@@ -18,6 +23,8 @@ import com.cashcontrol.api.dto.response.TransactionSummaryResponse;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CategoryRuleRepository;
+import com.cashcontrol.api.repository.CreditCardRepository;
+import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TagRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.TransactionServiceImpl;
@@ -57,22 +64,31 @@ class TransactionServiceTest {
     @Mock private CategoryRepository categoryRepository;
     @Mock private CategoryRuleRepository categoryRuleRepository;
     @Mock private TagRepository tagRepository;
+    @Mock private PaymentMethodRepository paymentMethodRepository;
+    @Mock private CreditCardRepository creditCardRepository;
     @InjectMocks private TransactionServiceImpl transactionService;
 
     private UUID userId;
     private UUID accountId;
     private Account account;
+    private PaymentMethod otherMethod;
 
     @BeforeEach
     void setUp() {
         userId = UUID.randomUUID();
         accountId = UUID.randomUUID();
+
         account = new Account();
         ReflectionTestUtils.setField(account, "id", accountId);
         account.setUserId(userId);
         account.setName("Checking");
         account.setType(AccountType.CHECKING);
         account.setCurrencyCode("BRL");
+
+        otherMethod = new PaymentMethod();
+        ReflectionTestUtils.setField(otherMethod, "id", UUID.randomUUID());
+        otherMethod.setName("Other");
+        otherMethod.setSlug(PaymentMethodSlug.OTHER);
     }
 
     // ── createTransaction ─────────────────────────────────────────────────────
@@ -81,6 +97,8 @@ class TransactionServiceTest {
     void createTransaction_income_success() {
         when(accountRepository.findByIdAndUserIdAndDeletedAtIsNull(accountId, userId))
                 .thenReturn(Optional.of(account));
+        when(paymentMethodRepository.findBySlug(PaymentMethodSlug.OTHER))
+                .thenReturn(Optional.of(otherMethod));
         when(categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId))
                 .thenReturn(Collections.emptyList());
         when(transactionRepository.save(any())).thenAnswer(inv -> {
@@ -93,7 +111,8 @@ class TransactionServiceTest {
 
         CreateTransactionRequest request = new CreateTransactionRequest(
                 accountId, TransactionType.INCOME, new BigDecimal("1500.00"),
-                "Salary", LocalDate.now(), null, null, null, null, null, null, null);
+                "Salary", LocalDate.now(), null, null, null, null, null, null, null,
+                null, null);
 
         TransactionDetailResponse response = transactionService.createTransaction(request, userId);
 
@@ -101,12 +120,16 @@ class TransactionServiceTest {
         assertThat(response.amount()).isEqualByComparingTo(new BigDecimal("1500.00"));
         assertThat(response.status()).isEqualTo(TransactionStatus.PAID);
         assertThat(response.paymentDate()).isEqualTo(LocalDate.now());
+        assertThat(response.paymentMethod()).isNotNull();
+        assertThat(response.paymentMethod().slug()).isEqualTo(PaymentMethodSlug.OTHER);
     }
 
     @Test
     void createTransaction_pendingStatus_noPaymentDate() {
         when(accountRepository.findByIdAndUserIdAndDeletedAtIsNull(accountId, userId))
                 .thenReturn(Optional.of(account));
+        when(paymentMethodRepository.findBySlug(PaymentMethodSlug.OTHER))
+                .thenReturn(Optional.of(otherMethod));
         when(categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId))
                 .thenReturn(Collections.emptyList());
         when(transactionRepository.save(any())).thenAnswer(inv -> {
@@ -119,7 +142,8 @@ class TransactionServiceTest {
 
         CreateTransactionRequest request = new CreateTransactionRequest(
                 accountId, TransactionType.EXPENSE, new BigDecimal("200.00"),
-                "Rent", LocalDate.now(), null, null, null, null, null, null, TransactionStatus.PENDING);
+                "Rent", LocalDate.now(), null, null, null, null, null, null, TransactionStatus.PENDING,
+                null, null);
 
         TransactionDetailResponse response = transactionService.createTransaction(request, userId);
 
@@ -131,7 +155,8 @@ class TransactionServiceTest {
     void createTransaction_transferType_rejected() {
         CreateTransactionRequest request = new CreateTransactionRequest(
                 accountId, TransactionType.TRANSFER, new BigDecimal("100.00"),
-                "Transfer", LocalDate.now(), null, null, null, null, null, null, null);
+                "Transfer", LocalDate.now(), null, null, null, null, null, null, null,
+                null, null);
 
         assertThatThrownBy(() -> transactionService.createTransaction(request, userId))
                 .isInstanceOf(BusinessRuleException.class);
@@ -141,7 +166,8 @@ class TransactionServiceTest {
     void createTransaction_manualAdjustmentType_rejected() {
         CreateTransactionRequest request = new CreateTransactionRequest(
                 accountId, TransactionType.MANUAL_ADJUSTMENT, new BigDecimal("100.00"),
-                "Adjust", LocalDate.now(), null, null, null, null, null, null, null);
+                "Adjust", LocalDate.now(), null, null, null, null, null, null, null,
+                null, null);
 
         assertThatThrownBy(() -> transactionService.createTransaction(request, userId))
                 .isInstanceOf(BusinessRuleException.class);
@@ -155,7 +181,8 @@ class TransactionServiceTest {
 
         CreateTransactionRequest request = new CreateTransactionRequest(
                 accountId, TransactionType.EXPENSE, new BigDecimal("50.00"),
-                "Coffee", LocalDate.now(), null, null, null, null, null, null, null);
+                "Coffee", LocalDate.now(), null, null, null, null, null, null, null,
+                null, null);
 
         assertThatThrownBy(() -> transactionService.createTransaction(request, userId))
                 .isInstanceOf(BusinessRuleException.class);
@@ -168,7 +195,8 @@ class TransactionServiceTest {
 
         CreateTransactionRequest request = new CreateTransactionRequest(
                 accountId, TransactionType.INCOME, new BigDecimal("100.00"),
-                "Test", LocalDate.now(), null, null, null, null, null, null, null);
+                "Test", LocalDate.now(), null, null, null, null, null, null, null,
+                null, null);
 
         assertThatThrownBy(() -> transactionService.createTransaction(request, userId))
                 .isInstanceOf(ResourceNotFoundException.class);
@@ -188,6 +216,8 @@ class TransactionServiceTest {
 
         when(accountRepository.findByIdAndUserIdAndDeletedAtIsNull(accountId, userId))
                 .thenReturn(Optional.of(account));
+        when(paymentMethodRepository.findBySlug(PaymentMethodSlug.OTHER))
+                .thenReturn(Optional.of(otherMethod));
         when(categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId))
                 .thenReturn(List.of(rule));
         when(transactionRepository.save(any())).thenAnswer(inv -> {
@@ -200,7 +230,8 @@ class TransactionServiceTest {
 
         CreateTransactionRequest request = new CreateTransactionRequest(
                 accountId, TransactionType.EXPENSE, new BigDecimal("45.00"),
-                "Italian Restaurant", LocalDate.now(), null, null, null, null, null, null, null);
+                "Italian Restaurant", LocalDate.now(), null, null, null, null, null, null, null,
+                null, null);
 
         transactionService.createTransaction(request, userId);
 
@@ -208,6 +239,130 @@ class TransactionServiceTest {
         verify(transactionRepository).save(captor.capture());
         assertThat(captor.getValue().getCategory()).isNotNull();
         assertThat(captor.getValue().getCategory().getName()).isEqualTo("Food");
+    }
+
+    // ── paymentMethod validation ──────────────────────────────────────────────
+
+    @Test
+    void createTransaction_creditCard_withoutCreditCardId_throws() {
+        when(accountRepository.findByIdAndUserIdAndDeletedAtIsNull(accountId, userId))
+                .thenReturn(Optional.of(account));
+
+        PaymentMethod creditCardMethod = new PaymentMethod();
+        ReflectionTestUtils.setField(creditCardMethod, "id", UUID.randomUUID());
+        creditCardMethod.setSlug(PaymentMethodSlug.CREDIT_CARD);
+        creditCardMethod.setName("Credit Card");
+        when(paymentMethodRepository.findBySlug(PaymentMethodSlug.CREDIT_CARD))
+                .thenReturn(Optional.of(creditCardMethod));
+
+        CreateTransactionRequest request = new CreateTransactionRequest(
+                accountId, TransactionType.EXPENSE, new BigDecimal("100.00"),
+                "Purchase", LocalDate.now(), null, null, null, null, null, null, null,
+                PaymentMethodSlug.CREDIT_CARD, null);
+
+        assertThatThrownBy(() -> transactionService.createTransaction(request, userId))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("creditCardId is required");
+    }
+
+    @Test
+    void createTransaction_nonCreditCard_withCreditCardId_throws() {
+        when(accountRepository.findByIdAndUserIdAndDeletedAtIsNull(accountId, userId))
+                .thenReturn(Optional.of(account));
+        when(paymentMethodRepository.findBySlug(PaymentMethodSlug.PIX))
+                .thenReturn(Optional.of(buildMethod(PaymentMethodSlug.PIX, "Pix")));
+
+        CreateTransactionRequest request = new CreateTransactionRequest(
+                accountId, TransactionType.EXPENSE, new BigDecimal("100.00"),
+                "Purchase", LocalDate.now(), null, null, null, null, null, null, null,
+                PaymentMethodSlug.PIX, UUID.randomUUID());
+
+        assertThatThrownBy(() -> transactionService.createTransaction(request, userId))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("must not be provided");
+    }
+
+    @Test
+    void createTransaction_creditCardId_wrongUser_throws() {
+        when(accountRepository.findByIdAndUserIdAndDeletedAtIsNull(accountId, userId))
+                .thenReturn(Optional.of(account));
+
+        PaymentMethod creditCardMethod = buildMethod(PaymentMethodSlug.CREDIT_CARD, "Credit Card");
+        when(paymentMethodRepository.findBySlug(PaymentMethodSlug.CREDIT_CARD))
+                .thenReturn(Optional.of(creditCardMethod));
+
+        UUID wrongCardId = UUID.randomUUID();
+        when(creditCardRepository.findByIdAndUserIdAndDeletedAtIsNull(wrongCardId, userId))
+                .thenReturn(Optional.empty());
+
+        CreateTransactionRequest request = new CreateTransactionRequest(
+                accountId, TransactionType.EXPENSE, new BigDecimal("100.00"),
+                "Purchase", LocalDate.now(), null, null, null, null, null, null, null,
+                PaymentMethodSlug.CREDIT_CARD, wrongCardId);
+
+        assertThatThrownBy(() -> transactionService.createTransaction(request, userId))
+                .isInstanceOf(ForbiddenAccessException.class);
+    }
+
+    @Test
+    void createTransaction_archivedCreditCard_throws() {
+        when(accountRepository.findByIdAndUserIdAndDeletedAtIsNull(accountId, userId))
+                .thenReturn(Optional.of(account));
+
+        PaymentMethod creditCardMethod = buildMethod(PaymentMethodSlug.CREDIT_CARD, "Credit Card");
+        when(paymentMethodRepository.findBySlug(PaymentMethodSlug.CREDIT_CARD))
+                .thenReturn(Optional.of(creditCardMethod));
+
+        UUID cardId = UUID.randomUUID();
+        CreditCard archivedCard = buildCreditCard(cardId, userId);
+        archivedCard.setArchivedAt(Instant.now());
+        when(creditCardRepository.findByIdAndUserIdAndDeletedAtIsNull(cardId, userId))
+                .thenReturn(Optional.of(archivedCard));
+
+        CreateTransactionRequest request = new CreateTransactionRequest(
+                accountId, TransactionType.EXPENSE, new BigDecimal("100.00"),
+                "Purchase", LocalDate.now(), null, null, null, null, null, null, null,
+                PaymentMethodSlug.CREDIT_CARD, cardId);
+
+        assertThatThrownBy(() -> transactionService.createTransaction(request, userId))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("archived credit card");
+    }
+
+    @Test
+    void createTransaction_creditCard_withValidCard_success() {
+        when(accountRepository.findByIdAndUserIdAndDeletedAtIsNull(accountId, userId))
+                .thenReturn(Optional.of(account));
+        when(categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId))
+                .thenReturn(Collections.emptyList());
+
+        PaymentMethod creditCardMethod = buildMethod(PaymentMethodSlug.CREDIT_CARD, "Credit Card");
+        when(paymentMethodRepository.findBySlug(PaymentMethodSlug.CREDIT_CARD))
+                .thenReturn(Optional.of(creditCardMethod));
+
+        UUID cardId = UUID.randomUUID();
+        CreditCard card = buildCreditCard(cardId, userId);
+        when(creditCardRepository.findByIdAndUserIdAndDeletedAtIsNull(cardId, userId))
+                .thenReturn(Optional.of(card));
+
+        when(transactionRepository.save(any())).thenAnswer(inv -> {
+            Transaction t = inv.getArgument(0);
+            ReflectionTestUtils.setField(t, "id", UUID.randomUUID());
+            ReflectionTestUtils.setField(t, "createdAt", Instant.now());
+            ReflectionTestUtils.setField(t, "updatedAt", Instant.now());
+            return t;
+        });
+
+        CreateTransactionRequest request = new CreateTransactionRequest(
+                accountId, TransactionType.EXPENSE, new BigDecimal("100.00"),
+                "Purchase", LocalDate.now(), null, null, null, null, null, null, null,
+                PaymentMethodSlug.CREDIT_CARD, cardId);
+
+        TransactionDetailResponse response = transactionService.createTransaction(request, userId);
+
+        assertThat(response.paymentMethod().slug()).isEqualTo(PaymentMethodSlug.CREDIT_CARD);
+        assertThat(response.creditCard()).isNotNull();
+        assertThat(response.creditCard().id()).isEqualTo(cardId);
     }
 
     // ── markAsPaid ────────────────────────────────────────────────────────────
@@ -294,7 +449,7 @@ class TransactionServiceTest {
 
         when(transactionRepository.findWithFilters(
                 eq(userId), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), eq(false),
-                any())).thenReturn(page);
+                any(), any())).thenReturn(page);
 
         Page<TransactionSummaryResponse> result = transactionService.listTransactions(
                 TransactionFilterRequest.empty(), userId, PageRequest.of(0, 10));
@@ -330,6 +485,7 @@ class TransactionServiceTest {
         tx.setDescription("Test");
         tx.setCompetenceDate(LocalDate.now());
         tx.setPaymentDate(LocalDate.now());
+        tx.setPaymentMethod(otherMethod);
         return tx;
     }
 
@@ -338,5 +494,25 @@ class TransactionServiceTest {
         tx.setStatus(TransactionStatus.PENDING);
         tx.setPaymentDate(null);
         return tx;
+    }
+
+    private PaymentMethod buildMethod(PaymentMethodSlug slug, String name) {
+        PaymentMethod pm = new PaymentMethod();
+        ReflectionTestUtils.setField(pm, "id", UUID.randomUUID());
+        pm.setSlug(slug);
+        pm.setName(name);
+        return pm;
+    }
+
+    private CreditCard buildCreditCard(UUID id, UUID ownerId) {
+        CreditCard card = new CreditCard();
+        ReflectionTestUtils.setField(card, "id", id);
+        card.setUserId(ownerId);
+        card.setName("My Card");
+        card.setBrand(CardBrand.VISA);
+        card.setCreditLimit(new BigDecimal("5000.00"));
+        card.setClosingDay(15);
+        card.setDueDay(20);
+        return card;
     }
 }

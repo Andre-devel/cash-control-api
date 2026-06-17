@@ -1,3 +1,6 @@
+server:
+  port: 8081
+
 spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/testdb
@@ -40,14 +43,14 @@ logging:
     com.cashcontrol.api: DEBUG
 
 app:
-  base-url: http://localhost:8080
+  base-url: http://localhost:8081
   oauth2-success-redirect-url: http://localhost:3000/auth/oauth2/callback
   oauth2-failure-redirect-url: http://localhost:3000/auth/oauth2/error
   jwt:
     secret: test-jwt-secret-key-for-testing-purposes-only-must-be-long-enough-for-hs512
     expiration-minutes: 15
   cors:
-    allowed-origins: http://localhost:3000,http://localhost:8080
+    allowed-origins: http://localhost:3000,http://localhost:8081
   security:
     max-failed-attempts: 5
     lockout-duration-minutes: 15

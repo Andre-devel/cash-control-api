@@ -381,7 +381,7 @@ class CreditCardControllerTest {
     private InvoiceItemResponse buildItemResponse(UUID id) {
         return new InvoiceItemResponse(id, "Supermarket", new BigDecimal("150.00"),
                 LocalDate.of(2025, 5, 10), null, null, null, null, null,
-                false, null, Instant.now(), Instant.now());
+                false, null, null, null, null, Instant.now(), Instant.now());
     }
 
     private InvoiceResponse buildInvoiceResponse(UUID invoiceId, UUID cardId) {

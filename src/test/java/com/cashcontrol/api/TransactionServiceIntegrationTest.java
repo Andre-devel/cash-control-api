@@ -76,7 +76,7 @@ class TransactionServiceIntegrationTest {
         TransactionFilterRequest filter = new TransactionFilterRequest(
                 null, null, null, null,
                 null, null, null, null, null, null,
-                "supermercado", false);
+                "supermercado", false, null);
 
         Page<TransactionSummaryResponse> result = transactionService.listTransactions(
                 filter, userId, PageRequest.of(0, 10));
@@ -114,7 +114,7 @@ class TransactionServiceIntegrationTest {
         assertThat(withoutCancelled.getTotalElements()).isEqualTo(3);
 
         TransactionFilterRequest includeAll = new TransactionFilterRequest(
-                null, null, null, null, null, null, null, null, null, null, null, true);
+                null, null, null, null, null, null, null, null, null, null, null, true, null);
         Page<TransactionSummaryResponse> withCancelled = transactionService.listTransactions(
                 includeAll, userId, PageRequest.of(0, 20));
         assertThat(withCancelled.getTotalElements()).isEqualTo(5);
@@ -131,7 +131,7 @@ class TransactionServiceIntegrationTest {
                 new CreateTransactionRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("50.00"), "Farmácia Popular",
                         LocalDate.now(), LocalDate.now(), null, null, null, null, null,
-                        TransactionStatus.PAID),
+                        TransactionStatus.PAID, null, null),
                 userId);
 
         assertThat(tx.categoryId()).isEqualTo(healthCategory.id());
@@ -147,14 +147,14 @@ class TransactionServiceIntegrationTest {
                 new CreateTransactionRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("100.00"), "Overdue Bill",
                         yesterday, yesterday, null, null, null, null, null,
-                        TransactionStatus.PENDING),
+                        TransactionStatus.PENDING, null, null),
                 userId);
 
         TransactionDetailResponse futureBill = transactionService.createTransaction(
                 new CreateTransactionRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("200.00"), "Future Bill",
                         tomorrow, tomorrow, null, null, null, null, null,
-                        TransactionStatus.PENDING),
+                        TransactionStatus.PENDING, null, null),
                 userId);
 
         int marked = transactionService.detectOverdue(userId);
@@ -174,7 +174,7 @@ class TransactionServiceIntegrationTest {
                 new CreateTransactionRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("150.00"), "Pending Bill",
                         LocalDate.now(), null, null, null, null, null, null,
-                        TransactionStatus.PENDING),
+                        TransactionStatus.PENDING, null, null),
                 userId);
 
         LocalDate paymentDate = LocalDate.now();
@@ -194,7 +194,7 @@ class TransactionServiceIntegrationTest {
                 new CreateTransactionRequest(accountId, TransactionType.INCOME,
                         new BigDecimal("300.00"), "Income to Cancel",
                         LocalDate.now(), LocalDate.now(), null, null, null, null, null,
-                        TransactionStatus.PAID),
+                        TransactionStatus.PAID, null, null),
                 userId);
 
         transactionService.cancelTransaction(tx.id(), userId);
@@ -214,7 +214,7 @@ class TransactionServiceIntegrationTest {
         transactionService.createTransaction(
                 new CreateTransactionRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal(amount), description,
-                        today, today, null, null, null, null, null, TransactionStatus.PAID),
+                        today, today, null, null, null, null, null, TransactionStatus.PAID, null, null),
                 userId);
     }
 
@@ -223,7 +223,7 @@ class TransactionServiceIntegrationTest {
         transactionService.createTransaction(
                 new CreateTransactionRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("100.00"), description,
-                        today, null, null, null, null, null, null, TransactionStatus.CANCELLED),
+                        today, null, null, null, null, null, null, TransactionStatus.CANCELLED, null, null),
                 userId);
     }
 }

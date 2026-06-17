@@ -70,14 +70,14 @@ class CategorySuggestionTest {
                 new CreateTransactionRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("49.90"), "Netflix monthly subscription",
                         LocalDate.now(), LocalDate.now(), null,
-                        subscriptionsCatId, null, null, null, null),
+                        subscriptionsCatId, null, null, null, null, null, null),
                 userId);
 
         transactionService.createTransaction(
                 new CreateTransactionRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("39.90"), "Netflix annual plan",
                         LocalDate.now(), LocalDate.now(), null,
-                        subscriptionsCatId, null, null, null, null),
+                        subscriptionsCatId, null, null, null, null, null, null),
                 userId);
 
         List<CategorySuggestionResponse> suggestions = categoryService.suggestCategory("Netflix", userId);
@@ -99,7 +99,7 @@ class CategorySuggestionTest {
                     new CreateTransactionRequest(accountId, TransactionType.EXPENSE,
                             new BigDecimal("25.00"), "Supermarket purchase " + i,
                             LocalDate.now(), LocalDate.now(), null,
-                            foodCatId, null, null, null, null),
+                            foodCatId, null, null, null, null, null, null),
                     userId);
         }
 
@@ -120,7 +120,7 @@ class CategorySuggestionTest {
                     new CreateTransactionRequest(accountId, TransactionType.EXPENSE,
                             new BigDecimal("150.00"), "Doctor appointment " + i,
                             LocalDate.now(), LocalDate.now(), null,
-                            healthCatId, null, null, null, null),
+                            healthCatId, null, null, null, null, null, null),
                     userId);
         }
 
@@ -141,7 +141,7 @@ class CategorySuggestionTest {
                     new CreateTransactionRequest(accountId, TransactionType.EXPENSE,
                             new BigDecimal("10.00"), "Transaction for cat " + catId,
                             LocalDate.now(), LocalDate.now(), null,
-                            catId, null, null, null, null),
+                            catId, null, null, null, null, null, null),
                     userId);
         }
 
@@ -171,7 +171,7 @@ class CategorySuggestionTest {
                     new CreateTransactionRequest(accountId, TransactionType.EXPENSE,
                             new BigDecimal("20.00"), "restaurant food " + i,
                             LocalDate.now(), LocalDate.now(), null,
-                            foodCatId, null, null, null, null),
+                            foodCatId, null, null, null, null, null, null),
                     userId);
         }
 
@@ -179,7 +179,7 @@ class CategorySuggestionTest {
                 new CreateTransactionRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("5.00"), "bus transport fare",
                         LocalDate.now(), LocalDate.now(), null,
-                        transportCatId, null, null, null, null),
+                        transportCatId, null, null, null, null, null, null),
                 userId);
 
         List<CategorySuggestionResponse> suggestions = categoryService.suggestCategory(null, userId);
@@ -205,7 +205,7 @@ class CategorySuggestionTest {
                     new CreateTransactionRequest(accountId, TransactionType.EXPENSE,
                             new BigDecimal("1200.00"), "Monthly rent payment " + i,
                             LocalDate.now(), LocalDate.now(), null,
-                            housingCatId, rentSubcatId, null, null, null),
+                            housingCatId, rentSubcatId, null, null, null, null, null),
                     userId);
         }
 

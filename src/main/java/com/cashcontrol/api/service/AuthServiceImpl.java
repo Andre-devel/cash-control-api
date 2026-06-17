@@ -61,8 +61,12 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public MessageResponse register(RegisterRequest request) {
         if (userRepository.existsByEmailAndDeletedAtIsNull(request.email())) {
-            // Anti-enumeration: dispatch "account exists" email but return same success response
-            emailService.sendAccountAlreadyExistsEmail(request.email());
+            // Anti-enumeration: best-effort email, always return same success response
+            try {
+                emailService.sendAccountAlreadyExistsEmail(request.email());
+            } catch (Exception e) {
+                log.warn("Failed to send account-exists email to {}: {}", dataMasker.maskEmail(request.email()), e.getMessage());
+            }
             return MessageResponse.of("Registration successful. Please check your inbox for an email verification link.");
         }
 
@@ -92,7 +96,11 @@ public class AuthServiceImpl implements AuthService {
                 appProperties.getSecurity().getEmailVerificationExpiryHours(), ChronoUnit.HOURS));
         emailVerificationTokenRepository.save(token);
 
-        emailService.sendEmailVerification(saved.getEmail(), rawToken, saved.getDisplayName());
+        try {
+            emailService.sendEmailVerification(saved.getEmail(), rawToken, saved.getDisplayName());
+        } catch (Exception e) {
+            log.warn("Failed to send verification email to {}: {}", dataMasker.maskEmail(saved.getEmail()), e.getMessage());
+        }
 
         auditService.record(AuditEventSlug.CONSENT_ACCEPTED, AuditOutcomeSlug.SUCCESS, null, saved.getId(),
                 Map.of("consentVersion", CONSENT_VERSION));

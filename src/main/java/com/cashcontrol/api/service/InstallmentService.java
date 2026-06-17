@@ -8,12 +8,17 @@ import com.cashcontrol.api.dto.request.EditSeriesRequest;
 import com.cashcontrol.api.dto.response.EarlySettlementResponse;
 import com.cashcontrol.api.dto.response.EditSeriesResult;
 import com.cashcontrol.api.dto.response.InstallmentSeriesDetailResponse;
+import com.cashcontrol.api.dto.response.InstallmentSeriesResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 
 import java.util.List;
 import java.util.UUID;
 
 public interface InstallmentService {
+
+    List<InstallmentSeriesResponse> listInstallmentSeries(UUID userId);
+
+    InstallmentSeriesDetailResponse getInstallmentSeriesDetail(UUID seriesId, UUID userId);
 
     InstallmentSeriesDetailResponse createInstallmentSeries(CreateInstallmentRequest request, UUID userId);
 

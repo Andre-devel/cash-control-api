@@ -14,4 +14,6 @@ public interface InstallmentSeriesRepository extends JpaRepository<InstallmentSe
     Optional<InstallmentSeries> findByIdAndUserId(UUID id, UUID userId);
 
     List<InstallmentSeries> findAllByUserIdAndIsSettledFalse(UUID userId);
+
+    List<InstallmentSeries> findAllByUserId(UUID userId);
 }

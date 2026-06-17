@@ -141,12 +141,12 @@ class TransactionApiIntegrationTest {
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, TransactionType.EXPENSE, new BigDecimal("100.00"), "January Bill",
                 LocalDate.of(2026, 1, 15), LocalDate.of(2026, 1, 15),
-                null, null, null, null, null, TransactionStatus.PAID), userId);
+                null, null, null, null, null, TransactionStatus.PAID, null, null), userId);
 
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, TransactionType.EXPENSE, new BigDecimal("100.00"), "February Bill",
                 LocalDate.of(2026, 2, 15), LocalDate.of(2026, 2, 15),
-                null, null, null, null, null, TransactionStatus.PAID), userId);
+                null, null, null, null, null, TransactionStatus.PAID, null, null), userId);
 
         mockMvc.perform(get("/api/v1/transactions")
                         .header("Authorization", bearer())
@@ -254,7 +254,7 @@ class TransactionApiIntegrationTest {
 
         UUID otherTxId = transactionService.createTransaction(new CreateTransactionRequest(
                 otherAccountId, TransactionType.INCOME, new BigDecimal("100.00"), "Other User Income",
-                LocalDate.now(), LocalDate.now(), null, null, null, null, null, TransactionStatus.PAID),
+                LocalDate.now(), LocalDate.now(), null, null, null, null, null, TransactionStatus.PAID, null, null),
                 otherUserId).id();
 
         mockMvc.perform(get("/api/v1/transactions/{id}", otherTxId)
@@ -267,7 +267,7 @@ class TransactionApiIntegrationTest {
     private UUID createTransaction(String description, TransactionType type, String amount, TransactionStatus status) {
         return transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, type, new BigDecimal(amount), description,
-                LocalDate.now(), LocalDate.now(), null, null, null, null, null, status),
+                LocalDate.now(), LocalDate.now(), null, null, null, null, null, status, null, null),
                 userId).id();
     }
 

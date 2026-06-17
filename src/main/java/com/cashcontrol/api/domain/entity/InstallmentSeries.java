@@ -49,6 +49,10 @@ public class InstallmentSeries {
     @JoinColumn(name = "credit_card_id")
     private CreditCard creditCard;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "payment_method_id", nullable = false)
+    private PaymentMethod paymentMethod;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "type", nullable = false, length = 30)
     private TransactionType type;

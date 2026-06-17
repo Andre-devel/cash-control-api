@@ -3,22 +3,30 @@ package com.cashcontrol.api.service;
 import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.Category;
 import com.cashcontrol.api.domain.entity.CategoryRule;
+import com.cashcontrol.api.domain.entity.CreditCard;
+import com.cashcontrol.api.domain.entity.PaymentMethod;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.Tag;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.domain.exception.BusinessRuleException;
+import com.cashcontrol.api.domain.exception.ForbiddenAccessException;
 import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
 import com.cashcontrol.api.dto.request.CreateTransactionRequest;
 import com.cashcontrol.api.dto.request.EditTransactionRequest;
 import com.cashcontrol.api.dto.request.MarkAsPaidRequest;
 import com.cashcontrol.api.dto.request.TransactionFilterRequest;
+import com.cashcontrol.api.dto.response.CreditCardRefResponse;
+import com.cashcontrol.api.dto.response.PaymentMethodResponse;
 import com.cashcontrol.api.dto.response.TagResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.dto.response.TransactionSummaryResponse;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CategoryRuleRepository;
+import com.cashcontrol.api.repository.CreditCardRepository;
+import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TagRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
@@ -44,6 +52,9 @@ public class TransactionServiceImpl implements TransactionService {
     private final CategoryRepository categoryRepository;
     private final CategoryRuleRepository categoryRuleRepository;
     private final TagRepository tagRepository;
+    private final PaymentMethodRepository paymentMethodRepository;
+    private final CreditCardRepository creditCardRepository;
+    private final CreditCardService creditCardService;
 
     @Override
     @Transactional
@@ -62,6 +73,10 @@ public class TransactionServiceImpl implements TransactionService {
             throw new BusinessRuleException("Cannot create a transaction on an archived account.");
         }
 
+        PaymentMethod paymentMethod = resolvePaymentMethod(request.paymentMethod());
+        CreditCard creditCard = validateAndResolveCreditCard(
+                request.creditCardId(), paymentMethod.getSlug(), userId);
+
         Transaction tx = new Transaction();
         tx.setUserId(userId);
         tx.setAccount(account);
@@ -71,6 +86,8 @@ public class TransactionServiceImpl implements TransactionService {
         tx.setNotes(request.notes());
         tx.setCompetenceDate(request.competenceDate());
         tx.setLocation(request.location());
+        tx.setPaymentMethod(paymentMethod);
+        tx.setCreditCard(creditCard);
 
         TransactionStatus status = request.status() != null ? request.status() : TransactionStatus.PAID;
         tx.setStatus(status);
@@ -85,6 +102,7 @@ public class TransactionServiceImpl implements TransactionService {
         applyTags(tx, request.tagIds(), userId);
 
         tx = transactionRepository.save(tx);
+        creditCardService.createInvoiceItemForTransaction(tx);
         return toDetail(tx);
     }
 
@@ -130,12 +148,29 @@ public class TransactionServiceImpl implements TransactionService {
             tx.setLocation(request.location());
         }
 
+        if (request.paymentMethod() != null || request.creditCardId() != null) {
+            PaymentMethodSlug targetSlug = request.paymentMethod() != null
+                    ? request.paymentMethod()
+                    : tx.getPaymentMethod().getSlug();
+            PaymentMethod paymentMethod = resolvePaymentMethod(request.paymentMethod() != null
+                    ? request.paymentMethod() : tx.getPaymentMethod().getSlug());
+            UUID targetCreditCardId = request.creditCardId() != null
+                    ? request.creditCardId()
+                    : (targetSlug == PaymentMethodSlug.CREDIT_CARD
+                            ? (tx.getCreditCard() != null ? tx.getCreditCard().getId() : null)
+                            : null);
+            CreditCard creditCard = validateAndResolveCreditCard(targetCreditCardId, paymentMethod.getSlug(), userId);
+            tx.setPaymentMethod(paymentMethod);
+            tx.setCreditCard(creditCard);
+        }
+
         applyCategory(tx, request.categoryId(), request.subcategoryId(), userId, null);
         if (request.tagIds() != null) {
             applyTags(tx, request.tagIds(), userId);
         }
 
         tx = transactionRepository.save(tx);
+        creditCardService.syncInvoiceItemForTransaction(tx);
         return toDetail(tx);
     }
 
@@ -149,6 +184,7 @@ public class TransactionServiceImpl implements TransactionService {
                     "Transfer legs must be deleted as a pair via DELETE /api/v1/accounts/transfers/{groupId}.");
         }
 
+        creditCardService.detachInvoiceItemForTransaction(tx.getId());
         transactionRepository.delete(tx);
     }
 
@@ -166,6 +202,7 @@ public class TransactionServiceImpl implements TransactionService {
         tx.setPaymentDate(request.paymentDate() != null ? request.paymentDate() : LocalDate.now());
 
         tx = transactionRepository.save(tx);
+        creditCardService.syncInvoiceItemForTransaction(tx);
         return toDetail(tx);
     }
 
@@ -182,6 +219,7 @@ public class TransactionServiceImpl implements TransactionService {
         tx.setCancelledAt(Instant.now());
 
         tx = transactionRepository.save(tx);
+        creditCardService.syncInvoiceItemForTransaction(tx);
         return toDetail(tx);
     }
 
@@ -202,6 +240,7 @@ public class TransactionServiceImpl implements TransactionService {
                 filter.amountMax(),
                 filter.searchText(),
                 filter.includeCancelled(),
+                filter.paymentMethod(),
                 pageable
         );
         return page.map(this::toSummary);
@@ -224,6 +263,36 @@ public class TransactionServiceImpl implements TransactionService {
     @Transactional
     public int detectOverdueAll() {
         return transactionRepository.markOverdueAll(LocalDate.now());
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    @Override
+    public PaymentMethod resolvePaymentMethod(PaymentMethodSlug slug) {
+        PaymentMethodSlug target = slug != null ? slug : PaymentMethodSlug.OTHER;
+        return paymentMethodRepository.findBySlug(target)
+                .orElseThrow(() -> new ResourceNotFoundException("Payment method not found: " + target));
+    }
+
+    @Override
+    public CreditCard validateAndResolveCreditCard(UUID creditCardId, PaymentMethodSlug slug, UUID userId) {
+        if (slug == PaymentMethodSlug.CREDIT_CARD) {
+            if (creditCardId == null) {
+                throw new BusinessRuleException("creditCardId is required when paymentMethod is CREDIT_CARD.");
+            }
+            CreditCard card = creditCardRepository.findByIdAndUserIdAndDeletedAtIsNull(creditCardId, userId)
+                    .orElseThrow(() -> new ForbiddenAccessException(
+                            "Credit card not found or does not belong to the current user."));
+            if (card.getArchivedAt() != null) {
+                throw new BusinessRuleException("Cannot use an archived credit card for this transaction.");
+            }
+            return card;
+        }
+        if (creditCardId != null) {
+            throw new BusinessRuleException(
+                    "creditCardId must not be provided when paymentMethod is not CREDIT_CARD.");
+        }
+        return null;
     }
 
     private Transaction findOwnedTransaction(UUID id, UUID userId) {
@@ -286,7 +355,8 @@ public class TransactionServiceImpl implements TransactionService {
         tx.getTags().addAll(tags);
     }
 
-    private TransactionSummaryResponse toSummary(Transaction tx) {
+    @Override
+    public TransactionSummaryResponse toSummary(Transaction tx) {
         return new TransactionSummaryResponse(
                 tx.getId(),
                 tx.getAccount().getId(),
@@ -299,14 +369,35 @@ public class TransactionServiceImpl implements TransactionService {
                 tx.getPaymentDate(),
                 tx.getCategory() != null ? tx.getCategory().getId() : null,
                 tx.getCategory() != null ? tx.getCategory().getName() : null,
-                tx.getCreatedAt()
+                tx.getCreatedAt(),
+                tx.getPaymentMethod() != null
+                        ? new PaymentMethodResponse(
+                                tx.getPaymentMethod().getId(),
+                                tx.getPaymentMethod().getSlug(),
+                                tx.getPaymentMethod().getName())
+                        : null
         );
     }
 
-    private TransactionDetailResponse toDetail(Transaction tx) {
+    @Override
+    public TransactionDetailResponse toDetail(Transaction tx) {
         Set<TagResponse> tagResponses = tx.getTags().stream()
                 .map(t -> new TagResponse(t.getId(), t.getName(), t.getColor()))
                 .collect(Collectors.toSet());
+
+        PaymentMethodResponse pmResponse = tx.getPaymentMethod() != null
+                ? new PaymentMethodResponse(
+                        tx.getPaymentMethod().getId(),
+                        tx.getPaymentMethod().getSlug(),
+                        tx.getPaymentMethod().getName())
+                : null;
+
+        CreditCardRefResponse cardResponse = tx.getCreditCard() != null
+                ? new CreditCardRefResponse(
+                        tx.getCreditCard().getId(),
+                        tx.getCreditCard().getName(),
+                        tx.getCreditCard().getBrand())
+                : null;
 
         return new TransactionDetailResponse(
                 tx.getId(),
@@ -332,7 +423,9 @@ public class TransactionServiceImpl implements TransactionService {
                 tx.isDetached(),
                 tx.getCancelledAt(),
                 tx.getCreatedAt(),
-                tx.getUpdatedAt()
+                tx.getUpdatedAt(),
+                pmResponse,
+                cardResponse
         );
     }
 }

@@ -1,5 +1,6 @@
 package com.cashcontrol.api.dto.request;
 
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
@@ -37,5 +38,11 @@ public record CreateInstallmentRequest(
         UUID categoryId,
 
         @Schema(description = "Subcategory UUID. Must be a child of categoryId when provided.")
-        UUID subcategoryId
+        UUID subcategoryId,
+
+        @Schema(description = "Payment method slug. Defaults to OTHER when not provided.")
+        PaymentMethodSlug paymentMethod,
+
+        @Schema(description = "Credit card UUID. Required when paymentMethod is CREDIT_CARD; must be absent otherwise.")
+        UUID creditCardId
 ) {}

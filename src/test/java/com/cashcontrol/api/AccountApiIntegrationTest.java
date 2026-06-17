@@ -165,7 +165,7 @@ class AccountApiIntegrationTest {
 
         transactionService.createTransaction(new CreateTransactionRequest(
                 account.id(), TransactionType.EXPENSE, new BigDecimal("100.00"), "Extra expense",
-                LocalDate.now(), LocalDate.now(), null, null, null, null, null, TransactionStatus.PAID),
+                LocalDate.now(), LocalDate.now(), null, null, null, null, null, TransactionStatus.PAID, null, null),
                 userId);
 
         mockMvc.perform(delete("/api/v1/accounts/{id}", account.id())

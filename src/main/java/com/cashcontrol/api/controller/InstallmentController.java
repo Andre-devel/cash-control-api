@@ -9,6 +9,7 @@ import com.cashcontrol.api.dto.response.EarlySettlementResponse;
 import com.cashcontrol.api.dto.response.EditSeriesResult;
 import com.cashcontrol.api.dto.response.ErrorResponse;
 import com.cashcontrol.api.dto.response.InstallmentSeriesDetailResponse;
+import com.cashcontrol.api.dto.response.InstallmentSeriesResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.security.AuthenticatedUser;
 import com.cashcontrol.api.service.InstallmentService;
@@ -25,6 +26,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -44,6 +46,37 @@ import java.util.UUID;
 public class InstallmentController {
 
     private final InstallmentService installmentService;
+
+    @Operation(summary = "List installment series",
+            description = "Returns all installment series belonging to the authenticated user.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Series list returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @GetMapping("/series")
+    @PreAuthorize("isAuthenticated()")
+    public List<InstallmentSeriesResponse> listInstallmentSeries(
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return installmentService.listInstallmentSeries(principal.getUser().getId());
+    }
+
+    @Operation(summary = "Get installment series detail",
+            description = "Returns the series metadata together with all its installment transactions.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Series detail returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Installment series not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @GetMapping("/series/{seriesId}")
+    @PreAuthorize("isAuthenticated()")
+    public InstallmentSeriesDetailResponse getInstallmentSeriesDetail(
+            @Parameter(description = "Installment series UUID", required = true) @PathVariable UUID seriesId,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return installmentService.getInstallmentSeriesDetail(seriesId, principal.getUser().getId());
+    }
 
     @Operation(summary = "Create installment series",
             description = "Creates an installment series with individual transaction records for each installment. The per-installment amount is split evenly; the remainder goes to the last installment.")

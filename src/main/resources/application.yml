@@ -58,7 +58,7 @@ app:
     secret: ${JWT_SECRET}
     expiration-minutes: ${JWT_EXPIRATION_MINUTES:15}
   cors:
-    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:3000,http://localhost:8080}
+    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:3000,http://localhost:8080,http://localhost:5174}
   security:
     max-failed-attempts: ${MAX_FAILED_ATTEMPTS:5}
     lockout-duration-minutes: ${LOCKOUT_DURATION_MINUTES:15}

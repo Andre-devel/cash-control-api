@@ -7,7 +7,10 @@ import com.cashcontrol.api.domain.entity.Tag;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
+import com.cashcontrol.api.domain.entity.PaymentMethod;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.repository.AccountRepository;
+import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TagRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,10 +46,14 @@ class TransactionEntityTest {
     private TagRepository tagRepository;
 
     @Autowired
+    private PaymentMethodRepository paymentMethodRepository;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     private UUID testUserId;
     private Account testAccount;
+    private PaymentMethod otherMethod;
 
     @BeforeEach
     void setUp() {
@@ -65,6 +72,8 @@ class TransactionEntityTest {
         testAccount.setName("Test Account");
         testAccount.setType(AccountType.CHECKING);
         testAccount = accountRepository.save(testAccount);
+
+        otherMethod = paymentMethodRepository.findBySlug(PaymentMethodSlug.OTHER).orElseThrow();
     }
 
     @Test
@@ -189,6 +198,7 @@ class TransactionEntityTest {
         tx.setAmount(new BigDecimal(amount));
         tx.setDescription("Test Transaction");
         tx.setCompetenceDate(LocalDate.now());
+        tx.setPaymentMethod(otherMethod);
         if (status == TransactionStatus.PAID) {
             tx.setPaymentDate(LocalDate.now());
         }

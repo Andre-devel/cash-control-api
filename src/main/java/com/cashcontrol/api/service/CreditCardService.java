@@ -1,5 +1,6 @@
 package com.cashcontrol.api.service;
 
+import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.dto.request.CreateCardRequest;
 import com.cashcontrol.api.dto.request.EditCardRequest;
 import com.cashcontrol.api.dto.request.PayInvoiceRequest;
@@ -33,4 +34,10 @@ public interface CreditCardService {
     LimitUsageResponse getLimitUsage(UUID cardId, UUID userId);
 
     List<SpendingByCategoryResponse> getSpendingByCategory(UUID cardId, LocalDate from, LocalDate to, UUID userId);
+
+    void createInvoiceItemForTransaction(Transaction tx);
+
+    void syncInvoiceItemForTransaction(Transaction tx);
+
+    void detachInvoiceItemForTransaction(UUID transactionId);
 }

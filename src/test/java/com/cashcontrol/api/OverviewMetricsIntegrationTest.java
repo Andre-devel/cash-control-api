@@ -214,6 +214,6 @@ class OverviewMetricsIntegrationTest {
         LocalDate today = LocalDate.now();
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, type, new BigDecimal(amount), "Test transaction",
-                today, today, null, null, null, null, null, TransactionStatus.PAID), userId);
+                today, today, null, null, null, null, null, TransactionStatus.PAID, null, null), userId);
     }
 }

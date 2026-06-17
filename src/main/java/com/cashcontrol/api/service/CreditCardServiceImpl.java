@@ -375,6 +375,125 @@ public class CreditCardServiceImpl implements CreditCardService {
         }).toList();
     }
 
+    @Override
+    public void createInvoiceItemForTransaction(Transaction tx) {
+        if (tx.getCreditCard() == null) return;
+        CreditCard card = tx.getCreditCard();
+        InvoiceCycleInfo cycle = cycleCalculator.calculateForCharge(
+                tx.getCompetenceDate(), card.getClosingDay(), card.getDueDay());
+        Invoice invoice = getOrCreateInvoice(card, cycle);
+
+        InvoiceItem item = new InvoiceItem();
+        item.setUserId(tx.getUserId());
+        item.setInvoice(invoice);
+        item.setTransaction(tx);
+        item.setDescription(tx.getDescription());
+        item.setAmount(tx.getAmount());
+        item.setCompetenceDate(tx.getCompetenceDate());
+        item.setCategory(tx.getCategory());
+        item.setSubcategory(tx.getSubcategory());
+        item.setNotes(tx.getNotes());
+        if (tx.getInstallmentSeries() != null) {
+            item.setInstallmentSeries(tx.getInstallmentSeries());
+            item.setInstallmentNumber(tx.getInstallmentNumber());
+            item.setTotalInstallments(tx.getTotalInstallments());
+        }
+        invoiceItemRepository.save(item);
+        invoice.setTotalAmount(invoice.getTotalAmount().add(tx.getAmount()));
+        invoiceRepository.save(invoice);
+    }
+
+    @Override
+    public void syncInvoiceItemForTransaction(Transaction tx) {
+        if (tx.getStatus() == TransactionStatus.CANCELLED) {
+            cancelLinkedInvoiceItem(tx.getId());
+            return;
+        }
+
+        java.util.Optional<InvoiceItem> itemOpt = invoiceItemRepository.findByTransaction_Id(tx.getId());
+
+        if (tx.getCreditCard() == null) {
+            itemOpt.ifPresent(item -> {
+                if (item.getCancelledAt() != null) return;
+                subtractFromInvoice(item);
+                item.setCancelledAt(Instant.now());
+                invoiceItemRepository.save(item);
+            });
+            return;
+        }
+
+        CreditCard card = tx.getCreditCard();
+
+        if (itemOpt.isEmpty()) {
+            createInvoiceItemForTransaction(tx);
+            return;
+        }
+
+        InvoiceItem item = itemOpt.get();
+        if (item.getCancelledAt() != null) {
+            item.setTransaction(null);
+            invoiceItemRepository.save(item);
+            createInvoiceItemForTransaction(tx);
+            return;
+        }
+
+        Invoice currentInvoice = item.getInvoice();
+        InvoiceCycleInfo newCycle = cycleCalculator.calculateForCharge(
+                tx.getCompetenceDate(), card.getClosingDay(), card.getDueDay());
+
+        boolean sameCycle = currentInvoice.getCreditCard().getId().equals(card.getId())
+                && currentInvoice.getReferenceMonth().equals(newCycle.referenceMonth());
+
+        if (!sameCycle) {
+            subtractFromInvoice(item);
+            Invoice newInvoice = getOrCreateInvoice(card, newCycle);
+            item.setInvoice(newInvoice);
+            newInvoice.setTotalAmount(newInvoice.getTotalAmount().add(tx.getAmount()));
+            invoiceRepository.save(newInvoice);
+        } else {
+            BigDecimal delta = tx.getAmount().subtract(item.getAmount());
+            if (delta.compareTo(BigDecimal.ZERO) != 0) {
+                currentInvoice.setTotalAmount(currentInvoice.getTotalAmount().add(delta));
+                invoiceRepository.save(currentInvoice);
+            }
+        }
+
+        item.setAmount(tx.getAmount());
+        item.setDescription(tx.getDescription());
+        item.setNotes(tx.getNotes());
+        item.setCompetenceDate(tx.getCompetenceDate());
+        item.setCategory(tx.getCategory());
+        item.setSubcategory(tx.getSubcategory());
+        invoiceItemRepository.save(item);
+    }
+
+    @Override
+    public void detachInvoiceItemForTransaction(UUID transactionId) {
+        invoiceItemRepository.findByTransaction_Id(transactionId).ifPresent(item -> {
+            if (item.getCancelledAt() == null) {
+                subtractFromInvoice(item);
+                item.setCancelledAt(Instant.now());
+            }
+            item.setTransaction(null);
+            invoiceItemRepository.save(item);
+        });
+    }
+
+    private void cancelLinkedInvoiceItem(UUID transactionId) {
+        invoiceItemRepository.findByTransaction_Id(transactionId).ifPresent(item -> {
+            if (item.getCancelledAt() != null) return;
+            subtractFromInvoice(item);
+            item.setCancelledAt(Instant.now());
+            invoiceItemRepository.save(item);
+        });
+    }
+
+    private void subtractFromInvoice(InvoiceItem item) {
+        Invoice invoice = item.getInvoice();
+        invoice.setTotalAmount(invoice.getTotalAmount().subtract(item.getAmount()));
+        invoiceRepository.save(invoice);
+    }
+
     private CreditCard findActiveCard(UUID id, UUID userId) {
         return creditCardRepository.findByIdAndUserIdAndDeletedAtIsNull(id, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Credit card not found: " + id));
@@ -408,6 +527,9 @@ public class CreditCardServiceImpl implements CreditCardService {
                 item.getSubcategory() != null ? item.getSubcategory().getName() : null,
                 item.getNotes(),
                 item.isRevolving(),
+                item.getInstallmentNumber(),
+                item.getTotalInstallments(),
+                item.getTransaction() != null ? item.getTransaction().getId() : null,
                 item.getCancelledAt(),
                 item.getCreatedAt(),
                 item.getUpdatedAt()

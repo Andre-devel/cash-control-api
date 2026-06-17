@@ -8,6 +8,7 @@ import com.cashcontrol.api.dto.response.AttachmentResponse;
 import com.cashcontrol.api.dto.response.ErrorResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.dto.response.TransactionSummaryResponse;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.security.AuthenticatedUser;
@@ -101,6 +102,7 @@ public class TransactionController {
             @Parameter(description = "Maximum amount") @RequestParam(required = false) BigDecimal amountMax,
             @Parameter(description = "Full-text search on description and notes") @RequestParam(required = false) String searchText,
             @Parameter(description = "Include cancelled transactions") @RequestParam(defaultValue = "false") boolean includeCancelled,
+            @Parameter(description = "Filter by payment method slug") @RequestParam(required = false) PaymentMethodSlug paymentMethod,
             @PageableDefault(sort = "competenceDate", direction = Sort.Direction.DESC) Pageable pageable,
             @AuthenticationPrincipal AuthenticatedUser principal) {
 
@@ -108,7 +110,7 @@ public class TransactionController {
                 accountId, type, status, categoryId,
                 competenceDateFrom, competenceDateTo,
                 paymentDateFrom, paymentDateTo,
-                amountMin, amountMax, searchText, includeCancelled);
+                amountMin, amountMax, searchText, includeCancelled, paymentMethod);
 
         return transactionService.listTransactions(filter, principal.getUser().getId(), pageable);
     }

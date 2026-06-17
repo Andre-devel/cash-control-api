@@ -73,7 +73,7 @@ class EarlySettlementIntegrationTest {
 
         InstallmentSeriesDetailResponse result = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("100.00"), 3, firstDate,
-                        "Test purchase", null, null, null),
+                        "Test purchase", null, null, null, null, null),
                 userId);
 
         assertThat(result.series().id()).isNotNull();
@@ -94,7 +94,7 @@ class EarlySettlementIntegrationTest {
 
         InstallmentSeriesDetailResponse result = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3, yesterday,
-                        "Past purchase", null, null, null),
+                        "Past purchase", null, null, null, null, null),
                 userId);
 
         assertThat(result.installments().get(0).status()).isEqualTo(TransactionStatus.PAID);
@@ -108,7 +108,7 @@ class EarlySettlementIntegrationTest {
 
         InstallmentSeriesDetailResponse result = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3, nextMonth,
-                        "Future purchase", null, null, null),
+                        "Future purchase", null, null, null, null, null),
                 userId);
 
         assertThat(result.installments()).allMatch(t -> t.status() == TransactionStatus.PENDING);
@@ -120,7 +120,7 @@ class EarlySettlementIntegrationTest {
 
         InstallmentSeriesDetailResponse result = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3, firstDate,
-                        "Monthly purchase", null, null, null),
+                        "Monthly purchase", null, null, null, null, null),
                 userId);
 
         assertThat(result.installments().get(0).competenceDate()).isEqualTo(LocalDate.of(2026, 6, 1));
@@ -132,7 +132,7 @@ class EarlySettlementIntegrationTest {
     void createInstallmentSeries_remainderOnLastInstallment() {
         InstallmentSeriesDetailResponse result = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("100.00"), 3,
-                        LocalDate.now().plusMonths(1), "Uneven split", null, null, null),
+                        LocalDate.now().plusMonths(1), "Uneven split", null, null, null, null, null),
                 userId);
 
         BigDecimal first = result.installments().get(0).amount();
@@ -152,7 +152,7 @@ class EarlySettlementIntegrationTest {
 
         InstallmentSeriesDetailResponse created = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3, nextMonth,
-                        "Purchase", null, null, null),
+                        "Purchase", null, null, null, null, null),
                 userId);
 
         UUID seriesId = created.series().id();
@@ -182,7 +182,7 @@ class EarlySettlementIntegrationTest {
 
         InstallmentSeriesDetailResponse created = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3, yesterday,
-                        "Purchase", null, null, null),
+                        "Purchase", null, null, null, null, null),
                 userId);
 
         UUID seriesId = created.series().id();
@@ -200,7 +200,7 @@ class EarlySettlementIntegrationTest {
     void earlySettlement_alreadySettled_throwsBusinessRuleException() {
         UUID seriesId = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3,
-                        LocalDate.now().plusMonths(1), "Purchase", null, null, null),
+                        LocalDate.now().plusMonths(1), "Purchase", null, null, null, null, null),
                 userId).series().id();
 
         installmentService.earlySettlement(seriesId,
@@ -218,11 +218,11 @@ class EarlySettlementIntegrationTest {
     void editSeries_updatesDescriptionOnPendingInstallments() {
         UUID seriesId = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3,
-                        LocalDate.now().plusMonths(1), "Original", null, null, null),
+                        LocalDate.now().plusMonths(1), "Original", null, null, null, null, null),
                 userId).series().id();
 
         EditSeriesResult result = installmentService.editSeries(
-                seriesId, new EditSeriesRequest("Updated", null, null, null, null), userId);
+                seriesId, new EditSeriesRequest("Updated", null, null, null, null, null, null), userId);
 
         assertThat(result.series().description()).isEqualTo("Updated");
         assertThat(result.affectedInstallments()).isEqualTo(3);
@@ -232,14 +232,14 @@ class EarlySettlementIntegrationTest {
     void editSeries_settledSeries_throwsBusinessRuleException() {
         UUID seriesId = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3,
-                        LocalDate.now().plusMonths(1), "Purchase", null, null, null),
+                        LocalDate.now().plusMonths(1), "Purchase", null, null, null, null, null),
                 userId).series().id();
 
         installmentService.earlySettlement(seriesId,
                 new EarlySettlementRequest(new BigDecimal("280.00"), LocalDate.now()), userId);
 
         assertThatThrownBy(() -> installmentService.editSeries(
-                seriesId, new EditSeriesRequest("Updated", null, null, null, null), userId))
+                seriesId, new EditSeriesRequest("Updated", null, null, null, null, null, null), userId))
                 .isInstanceOf(BusinessRuleException.class)
                 .hasMessageContaining("settled");
     }
@@ -250,7 +250,7 @@ class EarlySettlementIntegrationTest {
     void editInstallment_detachesFromSeries() {
         InstallmentSeriesDetailResponse created = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3,
-                        LocalDate.now().plusMonths(1), "Purchase", null, null, null),
+                        LocalDate.now().plusMonths(1), "Purchase", null, null, null, null, null),
                 userId);
 
         UUID installmentId = created.installments().get(0).id();
@@ -283,7 +283,7 @@ class EarlySettlementIntegrationTest {
     void editSeries_excludesDetachedInstallments() {
         InstallmentSeriesDetailResponse created = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3,
-                        LocalDate.now().plusMonths(1), "Purchase", null, null, null),
+                        LocalDate.now().plusMonths(1), "Purchase", null, null, null, null, null),
                 userId);
 
         UUID seriesId = created.series().id();
@@ -295,7 +295,7 @@ class EarlySettlementIntegrationTest {
 
         // Edit the series — should only affect 2 non-detached installments
         EditSeriesResult result = installmentService.editSeries(
-                seriesId, new EditSeriesRequest("Updated", null, null, null, null), userId);
+                seriesId, new EditSeriesRequest("Updated", null, null, null, null, null, null), userId);
 
         assertThat(result.affectedInstallments()).isEqualTo(2);
     }
@@ -306,7 +306,7 @@ class EarlySettlementIntegrationTest {
     void advanceInstallments_movesPaymentDateAndTransitionsToPaid() {
         InstallmentSeriesDetailResponse created = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3,
-                        LocalDate.now().plusMonths(3), "Future purchase", null, null, null),
+                        LocalDate.now().plusMonths(3), "Future purchase", null, null, null, null, null),
                 userId);
 
         UUID installmentId = created.installments().get(0).id();
@@ -324,7 +324,7 @@ class EarlySettlementIntegrationTest {
     void advanceInstallments_withAdjustedAmount() {
         InstallmentSeriesDetailResponse created = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3,
-                        LocalDate.now().plusMonths(3), "Future purchase", null, null, null),
+                        LocalDate.now().plusMonths(3), "Future purchase", null, null, null, null, null),
                 userId);
 
         UUID installmentId = created.installments().get(0).id();
@@ -345,7 +345,7 @@ class EarlySettlementIntegrationTest {
 
         InstallmentSeriesDetailResponse created = installmentService.createInstallmentSeries(
                 new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3, yesterday,
-                        "Past purchase", null, null, null),
+                        "Past purchase", null, null, null, null, null),
                 userId);
 
         // First installment is PAID (first date is yesterday)

@@ -32,7 +32,7 @@ import java.util.UUID;
 @Setter
 @NoArgsConstructor
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
-@ToString(exclude = {"invoice", "category", "subcategory", "installmentSeries", "tags"})
+@ToString(exclude = {"invoice", "category", "subcategory", "installmentSeries", "transaction", "tags"})
 public class InvoiceItem {
 
     @Id
@@ -68,6 +68,10 @@ public class InvoiceItem {
 
     @Column(name = "notes", columnDefinition = "TEXT")
     private String notes;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "transaction_id")
+    private Transaction transaction;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "installment_series_id")

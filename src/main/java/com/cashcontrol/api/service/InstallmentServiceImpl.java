@@ -2,7 +2,10 @@ package com.cashcontrol.api.service;
 
 import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.Category;
+import com.cashcontrol.api.domain.entity.CreditCard;
 import com.cashcontrol.api.domain.entity.InstallmentSeries;
+import com.cashcontrol.api.domain.entity.PaymentMethod;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
@@ -13,10 +16,12 @@ import com.cashcontrol.api.dto.request.CreateInstallmentRequest;
 import com.cashcontrol.api.dto.request.EarlySettlementRequest;
 import com.cashcontrol.api.dto.request.EditInstallmentRequest;
 import com.cashcontrol.api.dto.request.EditSeriesRequest;
+import com.cashcontrol.api.dto.response.CreditCardRefResponse;
 import com.cashcontrol.api.dto.response.EarlySettlementResponse;
 import com.cashcontrol.api.dto.response.EditSeriesResult;
 import com.cashcontrol.api.dto.response.InstallmentSeriesDetailResponse;
 import com.cashcontrol.api.dto.response.InstallmentSeriesResponse;
+import com.cashcontrol.api.dto.response.PaymentMethodResponse;
 import com.cashcontrol.api.dto.response.TagResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.dto.response.TransactionSummaryResponse;
@@ -46,6 +51,29 @@ public class InstallmentServiceImpl implements InstallmentService {
     private final TransactionRepository transactionRepository;
     private final AccountRepository accountRepository;
     private final CategoryRepository categoryRepository;
+    private final TransactionService transactionService;
+    private final CreditCardService creditCardService;
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<InstallmentSeriesResponse> listInstallmentSeries(UUID userId) {
+        return installmentSeriesRepository.findAllByUserId(userId)
+                .stream()
+                .map(this::toSeriesResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public InstallmentSeriesDetailResponse getInstallmentSeriesDetail(UUID seriesId, UUID userId) {
+        InstallmentSeries series = findOwnedSeries(seriesId, userId);
+        List<TransactionSummaryResponse> installments = transactionRepository
+                .findAllByInstallmentSeries_Id(seriesId)
+                .stream()
+                .map(transactionService::toSummary)
+                .toList();
+        return new InstallmentSeriesDetailResponse(toSeriesResponse(series), installments);
+    }
 
     @Override
     @Transactional
@@ -60,6 +88,10 @@ public class InstallmentServiceImpl implements InstallmentService {
         Category category = resolveCategory(request.categoryId());
         Category subcategory = resolveSubcategory(request.subcategoryId(), category);
 
+        PaymentMethod paymentMethod = transactionService.resolvePaymentMethod(request.paymentMethod());
+        CreditCard creditCard = transactionService.validateAndResolveCreditCard(
+                request.creditCardId(), paymentMethod.getSlug(), userId);
+
         InstallmentSeries series = new InstallmentSeries();
         series.setUserId(userId);
         series.setAccount(account);
@@ -70,6 +102,8 @@ public class InstallmentServiceImpl implements InstallmentService {
         series.setFirstPaymentDate(request.firstPaymentDate());
         series.setCategory(category);
         series.setSubcategory(subcategory);
+        series.setPaymentMethod(paymentMethod);
+        series.setCreditCard(creditCard);
         series = installmentSeriesRepository.save(series);
 
         int n = request.totalInstallments();
@@ -102,14 +136,17 @@ public class InstallmentServiceImpl implements InstallmentService {
             tx.setTotalInstallments(n);
             tx.setCategory(category);
             tx.setSubcategory(subcategory);
+            tx.setPaymentMethod(paymentMethod);
+            tx.setCreditCard(creditCard);
             installments.add(tx);
         }
 
         installments = transactionRepository.saveAll(installments);
+        installments.forEach(creditCardService::createInvoiceItemForTransaction);
 
         return new InstallmentSeriesDetailResponse(
                 toSeriesResponse(series),
-                installments.stream().map(this::toSummary).toList()
+                installments.stream().map(transactionService::toSummary).toList()
         );
     }
 
@@ -133,6 +170,23 @@ public class InstallmentServiceImpl implements InstallmentService {
             throw new BusinessRuleException("Cannot move installments to an archived account.");
         }
 
+        PaymentMethod paymentMethod = null;
+        CreditCard creditCard = null;
+        boolean updatePaymentMethod = request.paymentMethod() != null || request.creditCardId() != null;
+        if (updatePaymentMethod) {
+            PaymentMethodSlug targetSlug = request.paymentMethod() != null
+                    ? request.paymentMethod()
+                    : series.getPaymentMethod().getSlug();
+            paymentMethod = transactionService.resolvePaymentMethod(targetSlug);
+            UUID targetCreditCardId = request.creditCardId() != null
+                    ? request.creditCardId()
+                    : (targetSlug == PaymentMethodSlug.CREDIT_CARD
+                            ? (series.getCreditCard() != null ? series.getCreditCard().getId() : null)
+                            : null);
+            creditCard = transactionService.validateAndResolveCreditCard(
+                    targetCreditCardId, paymentMethod.getSlug(), userId);
+        }
+
         // Update series master record
         if (request.description() != null) {
             series.setDescription(request.description());
@@ -140,6 +194,10 @@ public class InstallmentServiceImpl implements InstallmentService {
         if (request.categoryId() != null) {
             series.setCategory(category);
             series.setSubcategory(subcategory);
+        }
+        if (updatePaymentMethod) {
+            series.setPaymentMethod(paymentMethod);
+            series.setCreditCard(creditCard);
         }
         series = installmentSeriesRepository.save(series);
 
@@ -164,9 +222,14 @@ public class InstallmentServiceImpl implements InstallmentService {
             if (account != null) {
                 tx.setAccount(account);
             }
+            if (updatePaymentMethod) {
+                tx.setPaymentMethod(paymentMethod);
+                tx.setCreditCard(creditCard);
+            }
         }
 
         transactionRepository.saveAll(pending);
+        pending.forEach(creditCardService::syncInvoiceItemForTransaction);
 
         return new EditSeriesResult(toSeriesResponse(series), pending.size());
     }
@@ -215,7 +278,8 @@ public class InstallmentServiceImpl implements InstallmentService {
         }
 
         tx = transactionRepository.save(tx);
-        return toDetail(tx);
+        creditCardService.syncInvoiceItemForTransaction(tx);
+        return transactionService.toDetail(tx);
     }
 
     @Override
@@ -238,6 +302,7 @@ public class InstallmentServiceImpl implements InstallmentService {
             tx.setCancelledAt(now);
         }
         transactionRepository.saveAll(remaining);
+        remaining.forEach(creditCardService::syncInvoiceItemForTransaction);
 
         Transaction settlement = new Transaction();
         settlement.setUserId(userId);
@@ -252,13 +317,16 @@ public class InstallmentServiceImpl implements InstallmentService {
         settlement.setEarlySettlement(true);
         settlement.setCategory(series.getCategory());
         settlement.setSubcategory(series.getSubcategory());
+        settlement.setPaymentMethod(series.getPaymentMethod());
+        settlement.setCreditCard(series.getCreditCard());
         settlement = transactionRepository.save(settlement);
+        creditCardService.createInvoiceItemForTransaction(settlement);
 
         series.setSettled(true);
         series.setSettledAt(now);
         installmentSeriesRepository.save(series);
 
-        return new EarlySettlementResponse(toDetail(settlement), remaining.size());
+        return new EarlySettlementResponse(transactionService.toDetail(settlement), remaining.size());
     }
 
     @Override
@@ -291,7 +359,7 @@ public class InstallmentServiceImpl implements InstallmentService {
         }
 
         updated = transactionRepository.saveAll(updated);
-        return updated.stream().map(this::toDetail).toList();
+        return updated.stream().map(transactionService::toDetail).toList();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -329,56 +397,6 @@ public class InstallmentServiceImpl implements InstallmentService {
                 series.getSettledAt(),
                 series.getCreatedAt(),
                 series.getUpdatedAt()
-        );
-    }
-
-    private TransactionSummaryResponse toSummary(Transaction tx) {
-        return new TransactionSummaryResponse(
-                tx.getId(),
-                tx.getAccount().getId(),
-                tx.getAccount().getName(),
-                tx.getType(),
-                tx.getStatus(),
-                tx.getAmount(),
-                tx.getDescription(),
-                tx.getCompetenceDate(),
-                tx.getPaymentDate(),
-                tx.getCategory() != null ? tx.getCategory().getId() : null,
-                tx.getCategory() != null ? tx.getCategory().getName() : null,
-                tx.getCreatedAt()
-        );
-    }
-
-    private TransactionDetailResponse toDetail(Transaction tx) {
-        Set<TagResponse> tagResponses = tx.getTags().stream()
-                .map(t -> new TagResponse(t.getId(), t.getName(), t.getColor()))
-                .collect(Collectors.toSet());
-
-        return new TransactionDetailResponse(
-                tx.getId(),
-                tx.getAccount().getId(),
-                tx.getAccount().getName(),
-                tx.getType(),
-                tx.getStatus(),
-                tx.getAmount(),
-                tx.getDescription(),
-                tx.getNotes(),
-                tx.getCompetenceDate(),
-                tx.getPaymentDate(),
-                tx.getCategory() != null ? tx.getCategory().getId() : null,
-                tx.getCategory() != null ? tx.getCategory().getName() : null,
-                tx.getSubcategory() != null ? tx.getSubcategory().getId() : null,
-                tx.getSubcategory() != null ? tx.getSubcategory().getName() : null,
-                tagResponses,
-                tx.getLocation(),
-                tx.getTransferGroupId(),
-                tx.getInstallmentSeries() != null ? tx.getInstallmentSeries().getId() : null,
-                tx.getInstallmentNumber(),
-                tx.getTotalInstallments(),
-                tx.isDetached(),
-                tx.getCancelledAt(),
-                tx.getCreatedAt(),
-                tx.getUpdatedAt()
         );
     }
 }

@@ -3,6 +3,8 @@ package com.cashcontrol.api.service;
 import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.Category;
 import com.cashcontrol.api.domain.entity.DeleteRecurrenceStrategy;
+import com.cashcontrol.api.domain.entity.PaymentMethod;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.RecurrenceRule;
 import com.cashcontrol.api.domain.entity.RecurrenceStatus;
 import com.cashcontrol.api.domain.entity.Transaction;
@@ -16,10 +18,10 @@ import com.cashcontrol.api.dto.response.DeleteRecurrenceResult;
 import com.cashcontrol.api.dto.response.EditRecurrenceResult;
 import com.cashcontrol.api.dto.response.RecurrenceCreationResponse;
 import com.cashcontrol.api.dto.response.RecurrenceRuleResponse;
-import com.cashcontrol.api.dto.response.TagResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
+import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.RecurrenceRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
@@ -30,7 +32,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -47,6 +48,8 @@ public class RecurrenceServiceImpl implements RecurrenceService {
     private final AccountRepository accountRepository;
     private final CategoryRepository categoryRepository;
     private final RecurrenceGeneratorService generatorService;
+    private final PaymentMethodRepository paymentMethodRepository;
+    private final TransactionServiceImpl transactionService;
 
     @Override
     @Transactional
@@ -110,7 +113,7 @@ public class RecurrenceServiceImpl implements RecurrenceService {
         }
         rule = recurrenceRepository.save(rule);
 
-        return new RecurrenceCreationResponse(toRuleResponse(rule), toDetail(firstInstance));
+        return new RecurrenceCreationResponse(toRuleResponse(rule), transactionService.toDetail(firstInstance));
     }
 
     @Override
@@ -361,6 +364,9 @@ public class RecurrenceServiceImpl implements RecurrenceService {
     private Transaction buildTransaction(RecurrenceRule rule, LocalDate date, LocalDate today) {
         TransactionStatus status = date.isAfter(today) ? TransactionStatus.PENDING : TransactionStatus.PAID;
 
+        PaymentMethod otherMethod = paymentMethodRepository.findBySlug(PaymentMethodSlug.OTHER)
+                .orElseThrow(() -> new ResourceNotFoundException("Payment method OTHER not found"));
+
         Transaction tx = new Transaction();
         tx.setUserId(rule.getUserId());
         tx.setAccount(rule.getAccount());
@@ -373,6 +379,7 @@ public class RecurrenceServiceImpl implements RecurrenceService {
         tx.setRecurrenceRule(rule);
         tx.setCategory(rule.getCategory());
         tx.setSubcategory(rule.getSubcategory());
+        tx.setPaymentMethod(otherMethod);
         return tx;
     }
 
@@ -412,36 +419,4 @@ public class RecurrenceServiceImpl implements RecurrenceService {
         );
     }
 
-    private TransactionDetailResponse toDetail(Transaction tx) {
-        Set<TagResponse> tagResponses = tx.getTags().stream()
-                .map(t -> new TagResponse(t.getId(), t.getName(), t.getColor()))
-                .collect(Collectors.toSet());
-
-        return new TransactionDetailResponse(
-                tx.getId(),
-                tx.getAccount().getId(),
-                tx.getAccount().getName(),
-                tx.getType(),
-                tx.getStatus(),
-                tx.getAmount(),
-                tx.getDescription(),
-                tx.getNotes(),
-                tx.getCompetenceDate(),
-                tx.getPaymentDate(),
-                tx.getCategory() != null ? tx.getCategory().getId() : null,
-                tx.getCategory() != null ? tx.getCategory().getName() : null,
-                tx.getSubcategory() != null ? tx.getSubcategory().getId() : null,
-                tx.getSubcategory() != null ? tx.getSubcategory().getName() : null,
-                tagResponses,
-                tx.getLocation(),
-                tx.getTransferGroupId(),
-                tx.getInstallmentSeries() != null ? tx.getInstallmentSeries().getId() : null,
-                tx.getInstallmentNumber(),
-                tx.getTotalInstallments(),
-                tx.isDetached(),
-                tx.getCancelledAt(),
-                tx.getCreatedAt(),
-                tx.getUpdatedAt()
-        );
-    }
 }
