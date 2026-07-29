@@ -3,10 +3,12 @@ package com.cashcontrol.api;
 import com.cashcontrol.api.config.PostgresTestContainerConfig;
 import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.AccountType;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.repository.AccountRepository;
+import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,6 +36,7 @@ class AccountRepositoryIntegrationTest {
 
     @Autowired private AccountRepository accountRepository;
     @Autowired private TransactionRepository transactionRepository;
+    @Autowired private PaymentMethodRepository paymentMethodRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
 
     private UUID userId;
@@ -137,6 +140,7 @@ class AccountRepositoryIntegrationTest {
         if (status == TransactionStatus.PAID) {
             tx.setPaymentDate(LocalDate.now());
         }
+        tx.setPaymentMethod(paymentMethodRepository.findBySlug(PaymentMethodSlug.OTHER).orElseThrow());
         transactionRepository.save(tx);
     }
 }

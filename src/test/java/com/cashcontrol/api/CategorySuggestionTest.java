@@ -63,7 +63,7 @@ class CategorySuggestionTest {
     @Test
     void suggestCategory_matchesByDescriptionText() {
         UUID subscriptionsCatId = jdbcTemplate.queryForObject(
-                "SELECT id FROM categories WHERE name = 'Subscriptions' AND user_id IS NULL AND parent_id IS NULL",
+                "SELECT id FROM categories WHERE name = 'Assinaturas' AND user_id IS NULL AND parent_id IS NULL",
                 UUID.class);
 
         transactionService.createTransaction(
@@ -84,14 +84,14 @@ class CategorySuggestionTest {
 
         assertThat(suggestions).isNotEmpty();
         assertThat(suggestions.get(0).categoryId()).isEqualTo(subscriptionsCatId);
-        assertThat(suggestions.get(0).categoryName()).isEqualTo("Subscriptions");
+        assertThat(suggestions.get(0).categoryName()).isEqualTo("Assinaturas");
         assertThat(suggestions.get(0).matchCount()).isEqualTo(2L);
     }
 
     @Test
     void suggestCategory_fallsBackToFrequencyWhenNoMatch() {
         UUID foodCatId = jdbcTemplate.queryForObject(
-                "SELECT id FROM categories WHERE name = 'Food' AND user_id IS NULL AND parent_id IS NULL",
+                "SELECT id FROM categories WHERE name = 'Alimentação' AND user_id IS NULL AND parent_id IS NULL",
                 UUID.class);
 
         for (int i = 1; i <= 5; i++) {
@@ -112,7 +112,7 @@ class CategorySuggestionTest {
     @Test
     void suggestCategory_withNullDescription_fallsBackToFrequency() {
         UUID healthCatId = jdbcTemplate.queryForObject(
-                "SELECT id FROM categories WHERE name = 'Health' AND user_id IS NULL AND parent_id IS NULL",
+                "SELECT id FROM categories WHERE name = 'Saúde' AND user_id IS NULL AND parent_id IS NULL",
                 UUID.class);
 
         for (int i = 1; i <= 3; i++) {
@@ -160,10 +160,10 @@ class CategorySuggestionTest {
     @Test
     void suggestCategory_ranksHigherFrequencyFirst() {
         UUID foodCatId = jdbcTemplate.queryForObject(
-                "SELECT id FROM categories WHERE name = 'Food' AND user_id IS NULL AND parent_id IS NULL",
+                "SELECT id FROM categories WHERE name = 'Alimentação' AND user_id IS NULL AND parent_id IS NULL",
                 UUID.class);
         UUID transportCatId = jdbcTemplate.queryForObject(
-                "SELECT id FROM categories WHERE name = 'Transport' AND user_id IS NULL AND parent_id IS NULL",
+                "SELECT id FROM categories WHERE name = 'Transporte' AND user_id IS NULL AND parent_id IS NULL",
                 UUID.class);
 
         for (int i = 1; i <= 4; i++) {
@@ -192,12 +192,12 @@ class CategorySuggestionTest {
     @Test
     void suggestCategory_withSubcategoryHistory_returnsCategoryAndSubcategory() {
         UUID housingCatId = jdbcTemplate.queryForObject(
-                "SELECT id FROM categories WHERE name = 'Housing' AND user_id IS NULL AND parent_id IS NULL",
+                "SELECT id FROM categories WHERE name = 'Moradia' AND user_id IS NULL AND parent_id IS NULL",
                 UUID.class);
         UUID rentSubcatId = jdbcTemplate.queryForObject(
                 "SELECT c.id FROM categories c " +
                 "JOIN categories p ON c.parent_id = p.id " +
-                "WHERE c.name = 'Rent' AND p.name = 'Housing' AND c.user_id IS NULL",
+                "WHERE c.name = 'Aluguel' AND p.name = 'Moradia' AND c.user_id IS NULL",
                 UUID.class);
 
         for (int i = 1; i <= 3; i++) {
@@ -215,6 +215,6 @@ class CategorySuggestionTest {
         CategorySuggestionResponse top = suggestions.get(0);
         assertThat(top.categoryId()).isEqualTo(housingCatId);
         assertThat(top.subcategoryId()).isEqualTo(rentSubcatId);
-        assertThat(top.subcategoryName()).isEqualTo("Rent");
+        assertThat(top.subcategoryName()).isEqualTo("Aluguel");
     }
 }

@@ -4,11 +4,13 @@ import com.cashcontrol.api.config.PostgresTestContainerConfig;
 import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.AccountType;
 import com.cashcontrol.api.domain.entity.Category;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
+import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +38,7 @@ class DashboardRepositoryIntegrationTest {
     @Autowired private TransactionRepository transactionRepository;
     @Autowired private AccountRepository accountRepository;
     @Autowired private CategoryRepository categoryRepository;
+    @Autowired private PaymentMethodRepository paymentMethodRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
 
     private UUID userId;
@@ -199,6 +202,7 @@ class DashboardRepositoryIntegrationTest {
         tx.setDescription("Test transaction");
         tx.setCompetenceDate(paymentDate);
         tx.setPaymentDate(paymentDate);
+        tx.setPaymentMethod(paymentMethodRepository.findBySlug(PaymentMethodSlug.OTHER).orElseThrow());
         transactionRepository.save(tx);
     }
 
@@ -214,6 +218,7 @@ class DashboardRepositoryIntegrationTest {
         tx.setCompetenceDate(date);
         tx.setPaymentDate(date);
         tx.setCategory(category);
+        tx.setPaymentMethod(paymentMethodRepository.findBySlug(PaymentMethodSlug.OTHER).orElseThrow());
         transactionRepository.save(tx);
     }
 }

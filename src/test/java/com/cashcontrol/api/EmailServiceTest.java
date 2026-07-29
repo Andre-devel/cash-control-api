@@ -27,8 +27,10 @@ class EmailServiceTest {
     void setUp() {
         AppProperties props = new AppProperties();
         props.setBaseUrl("http://app.example.com");
+        props.setFrontendBaseUrl("http://front.example.com");
         props.getSecurity().setEmailVerificationExpiryHours(24);
         props.getSecurity().setPasswordResetExpiryMinutes(60);
+        props.getMail().setFrom("noreply@app.example.com");
         emailService = new SmtpEmailService(mailSender, props, new DataMasker());
     }
 
@@ -41,6 +43,16 @@ class EmailServiceTest {
 
         SimpleMailMessage msg = captor.getValue();
         assertThat(msg.getTo()).containsExactly("user@example.com");
+    }
+
+    @Test
+    void sendEmailVerification_setsConfiguredFromAddress() {
+        emailService.sendEmailVerification("user@example.com", "tok-abc", "Alice");
+
+        ArgumentCaptor<SimpleMailMessage> captor = ArgumentCaptor.forClass(SimpleMailMessage.class);
+        verify(mailSender).send(captor.capture());
+
+        assertThat(captor.getValue().getFrom()).isEqualTo("noreply@app.example.com");
     }
 
     @Test
@@ -61,7 +73,7 @@ class EmailServiceTest {
         verify(mailSender).send(captor.capture());
 
         assertThat(captor.getValue().getText())
-                .contains("http://app.example.com/auth/verify-email?token=tok-abc");
+                .contains("http://front.example.com/verify-email?token=tok-abc");
     }
 
     @Test
@@ -112,7 +124,7 @@ class EmailServiceTest {
         verify(mailSender).send(captor.capture());
 
         assertThat(captor.getValue().getText())
-                .contains("http://app.example.com/auth/reset-password?token=reset-token");
+                .contains("http://front.example.com/reset-password?token=reset-token");
     }
 
     @Test
@@ -164,6 +176,6 @@ class EmailServiceTest {
         verify(mailSender).send(captor.capture());
 
         assertThat(captor.getValue().getText())
-                .contains("http://app.example.com/auth/verify-email?token=change-token");
+                .contains("http://front.example.com/verify-email?token=change-token");
     }
 }

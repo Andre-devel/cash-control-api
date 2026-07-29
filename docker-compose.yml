@@ -39,9 +39,11 @@ services:
       MAIL_PORT: ${MAIL_PORT:-587}
       MAIL_USERNAME: ${MAIL_USERNAME:-noreply@example.com}
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-noreply@example.com}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-placeholder}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-placeholder}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:5173}
       OAUTH2_SUCCESS_REDIRECT_URL: ${OAUTH2_SUCCESS_REDIRECT_URL:-http://localhost:3000/auth/oauth2/callback}
       OAUTH2_FAILURE_REDIRECT_URL: ${OAUTH2_FAILURE_REDIRECT_URL:-http://localhost:3000/auth/oauth2/error}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080}

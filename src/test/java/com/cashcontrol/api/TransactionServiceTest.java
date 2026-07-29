@@ -27,6 +27,7 @@ import com.cashcontrol.api.repository.CreditCardRepository;
 import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TagRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
+import com.cashcontrol.api.service.CreditCardService;
 import com.cashcontrol.api.service.TransactionServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -66,6 +67,7 @@ class TransactionServiceTest {
     @Mock private TagRepository tagRepository;
     @Mock private PaymentMethodRepository paymentMethodRepository;
     @Mock private CreditCardRepository creditCardRepository;
+    @Mock private CreditCardService creditCardService;
     @InjectMocks private TransactionServiceImpl transactionService;
 
     private UUID userId;

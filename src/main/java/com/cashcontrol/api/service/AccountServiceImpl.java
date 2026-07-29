@@ -1,6 +1,8 @@
 package com.cashcontrol.api.service;
 
 import com.cashcontrol.api.domain.entity.Account;
+import com.cashcontrol.api.domain.entity.PaymentMethod;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
@@ -13,6 +15,7 @@ import com.cashcontrol.api.dto.request.ManualAdjustmentRequest;
 import com.cashcontrol.api.dto.request.TransferRequest;
 import com.cashcontrol.api.dto.response.AccountResponse;
 import com.cashcontrol.api.repository.AccountRepository;
+import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -30,6 +33,7 @@ public class AccountServiceImpl implements AccountService {
 
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
+    private final PaymentMethodRepository paymentMethodRepository;
 
     @Override
     @Transactional
@@ -185,6 +189,7 @@ public class AccountServiceImpl implements AccountService {
         String description = request.description() != null && !request.description().isBlank()
                 ? request.description()
                 : "Transfer";
+        PaymentMethod paymentMethod = resolveDefaultPaymentMethod();
 
         // Source leg: negative amount represents debit from the account
         Transaction sourceLeg = new Transaction();
@@ -196,6 +201,7 @@ public class AccountServiceImpl implements AccountService {
         sourceLeg.setDescription(description);
         sourceLeg.setCompetenceDate(date);
         sourceLeg.setPaymentDate(date);
+        sourceLeg.setPaymentMethod(paymentMethod);
         sourceLeg.setTransferGroupId(transferGroupId);
 
         // Destination leg: positive amount represents credit to the account
@@ -208,6 +214,7 @@ public class AccountServiceImpl implements AccountService {
         destinationLeg.setDescription(description);
         destinationLeg.setCompetenceDate(date);
         destinationLeg.setPaymentDate(date);
+        destinationLeg.setPaymentMethod(paymentMethod);
         destinationLeg.setTransferGroupId(transferGroupId);
 
         transactionRepository.save(sourceLeg);
@@ -248,7 +255,13 @@ public class AccountServiceImpl implements AccountService {
         tx.setDescription(description);
         tx.setCompetenceDate(date);
         tx.setPaymentDate(date);
+        tx.setPaymentMethod(resolveDefaultPaymentMethod());
         return tx;
+    }
+
+    private PaymentMethod resolveDefaultPaymentMethod() {
+        return paymentMethodRepository.findBySlug(PaymentMethodSlug.OTHER)
+                .orElseThrow(() -> new ResourceNotFoundException("Payment method not found: " + PaymentMethodSlug.OTHER));
     }
 
     private AccountResponse toResponse(Account account, BigDecimal balance) {

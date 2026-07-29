@@ -21,7 +21,7 @@ public class SmtpEmailService implements EmailService {
 
     @Override
     public void sendEmailVerification(String toEmail, String verificationToken, String displayName) {
-        String link = appProperties.getBaseUrl() + "/auth/verify-email?token=" + verificationToken;
+        String link = appProperties.getFrontendBaseUrl() + "/verify-email?token=" + verificationToken;
         String text = buildVerificationBody(displayName, link,
                 appProperties.getSecurity().getEmailVerificationExpiryHours());
         sendEmail(toEmail, "Verify your email address", text);
@@ -29,7 +29,7 @@ public class SmtpEmailService implements EmailService {
 
     @Override
     public void sendPasswordResetEmail(String toEmail, String resetToken, String displayName) {
-        String link = appProperties.getBaseUrl() + "/auth/reset-password?token=" + resetToken;
+        String link = appProperties.getFrontendBaseUrl() + "/reset-password?token=" + resetToken;
         String text = buildPasswordResetBody(displayName, link,
                 appProperties.getSecurity().getPasswordResetExpiryMinutes());
         sendEmail(toEmail, "Reset your password", text);
@@ -39,13 +39,13 @@ public class SmtpEmailService implements EmailService {
     public void sendAccountAlreadyExistsEmail(String toEmail) {
         String text = "An account with this email address already exists.\n\n" +
                 "If you did not attempt to register, please ignore this email.\n\n" +
-                "To log in, visit: " + appProperties.getBaseUrl() + "/auth/login";
+                "To log in, visit: " + appProperties.getFrontendBaseUrl() + "/login";
         sendEmail(toEmail, "Account already exists", text);
     }
 
     @Override
     public void sendEmailChangeVerification(String newEmail, String verificationToken) {
-        String link = appProperties.getBaseUrl() + "/auth/verify-email?token=" + verificationToken;
+        String link = appProperties.getFrontendBaseUrl() + "/verify-email?token=" + verificationToken;
         String text = "Please verify your new email address by clicking the link below:\n\n" + link +
                 "\n\nThis link will expire in " +
                 appProperties.getSecurity().getEmailVerificationExpiryHours() + " hours.\n\n" +
@@ -56,6 +56,7 @@ public class SmtpEmailService implements EmailService {
     private void sendEmail(String toEmail, String subject, String text) {
         try {
             SimpleMailMessage message = new SimpleMailMessage();
+            message.setFrom(appProperties.getMail().getFrom());
             message.setTo(toEmail);
             message.setSubject(subject);
             message.setText(text);

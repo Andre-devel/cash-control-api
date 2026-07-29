@@ -52,6 +52,9 @@ spring:
 
 app:
   base-url: ${APP_BASE_URL:http://localhost:8080}
+  frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:5173}
+  mail:
+    from: ${MAIL_FROM:noreply@example.com}
   oauth2-success-redirect-url: ${OAUTH2_SUCCESS_REDIRECT_URL:http://localhost:3000/auth/oauth2/callback}
   oauth2-failure-redirect-url: ${OAUTH2_FAILURE_REDIRECT_URL:http://localhost:3000/auth/oauth2/error}
   jwt:

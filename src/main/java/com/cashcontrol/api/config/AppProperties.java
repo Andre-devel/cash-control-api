@@ -20,6 +20,9 @@ public class AppProperties {
     private String baseUrl = "http://localhost:8080";
 
     @NotBlank
+    private String frontendBaseUrl = "http://localhost:5173";
+
+    @NotBlank
     private String oauth2SuccessRedirectUrl = "http://localhost:3000/auth/oauth2/callback";
 
     @NotBlank
@@ -42,6 +45,9 @@ public class AppProperties {
 
     @Valid
     private final Dashboard dashboard = new Dashboard();
+
+    @Valid
+    private final Mail mail = new Mail();
 
     @Getter
     @Setter
@@ -116,5 +122,13 @@ public class AppProperties {
 
         @Positive
         private int upcomingBillsMaxResults = 20;
+    }
+
+    @Getter
+    @Setter
+    public static class Mail {
+
+        @NotBlank
+        private String from = "noreply@example.com";
     }
 }

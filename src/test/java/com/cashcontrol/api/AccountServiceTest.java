@@ -2,6 +2,8 @@ package com.cashcontrol.api;
 
 import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.AccountType;
+import com.cashcontrol.api.domain.entity.PaymentMethod;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
@@ -14,6 +16,7 @@ import com.cashcontrol.api.dto.request.ManualAdjustmentRequest;
 import com.cashcontrol.api.dto.request.TransferRequest;
 import com.cashcontrol.api.dto.response.AccountResponse;
 import com.cashcontrol.api.repository.AccountRepository;
+import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.AccountServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -46,6 +50,7 @@ class AccountServiceTest {
 
     @Mock private AccountRepository accountRepository;
     @Mock private TransactionRepository transactionRepository;
+    @Mock private PaymentMethodRepository paymentMethodRepository;
     @InjectMocks private AccountServiceImpl accountService;
 
     private UUID userId;
@@ -57,6 +62,12 @@ class AccountServiceTest {
         userId = UUID.randomUUID();
         accountId = UUID.randomUUID();
         account = buildAccount(accountId, userId, "Test Account", AccountType.CHECKING);
+
+        PaymentMethod other = new PaymentMethod();
+        other.setSlug(PaymentMethodSlug.OTHER);
+        other.setName("Other");
+        lenient().when(paymentMethodRepository.findBySlug(PaymentMethodSlug.OTHER))
+                .thenReturn(Optional.of(other));
     }
 
     // ── createAccount ─────────────────────────────────────────────────────────

@@ -49,7 +49,7 @@ public class RecurrenceServiceImpl implements RecurrenceService {
     private final CategoryRepository categoryRepository;
     private final RecurrenceGeneratorService generatorService;
     private final PaymentMethodRepository paymentMethodRepository;
-    private final TransactionServiceImpl transactionService;
+    private final TransactionService transactionService;
 
     @Override
     @Transactional

@@ -4,6 +4,7 @@ import com.cashcontrol.api.config.PostgresTestContainerConfig;
 import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.AccountType;
 import com.cashcontrol.api.domain.entity.InstallmentSeries;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.RecurrenceFrequency;
 import com.cashcontrol.api.domain.entity.RecurrenceRule;
 import com.cashcontrol.api.domain.entity.RecurrenceStatus;
@@ -12,6 +13,7 @@ import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.InstallmentSeriesRepository;
+import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.RecurrenceRuleRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,6 +42,7 @@ class RecurrenceRepositoryIntegrationTest {
     @Autowired private TransactionRepository transactionRepository;
     @Autowired private InstallmentSeriesRepository installmentSeriesRepository;
     @Autowired private AccountRepository accountRepository;
+    @Autowired private PaymentMethodRepository paymentMethodRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
 
     private UUID userId;
@@ -134,6 +137,7 @@ class RecurrenceRepositoryIntegrationTest {
         series.setTotalAmount(new BigDecimal("1200.00"));
         series.setTotalInstallments(3);
         series.setFirstPaymentDate(LocalDate.now());
+        series.setPaymentMethod(paymentMethodRepository.findBySlug(PaymentMethodSlug.OTHER).orElseThrow());
         return installmentSeriesRepository.save(series);
     }
 
@@ -158,6 +162,7 @@ class RecurrenceRepositoryIntegrationTest {
         if (series != null) {
             tx.setInstallmentSeries(series);
         }
+        tx.setPaymentMethod(paymentMethodRepository.findBySlug(PaymentMethodSlug.OTHER).orElseThrow());
         return transactionRepository.save(tx);
     }
 }

@@ -6,6 +6,8 @@ import com.cashcontrol.api.domain.entity.CreditCard;
 import com.cashcontrol.api.domain.entity.Invoice;
 import com.cashcontrol.api.domain.entity.InvoiceItem;
 import com.cashcontrol.api.domain.entity.InvoiceStatus;
+import com.cashcontrol.api.domain.entity.PaymentMethod;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.SharedLimitGroup;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
@@ -27,6 +29,7 @@ import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CreditCardRepository;
 import com.cashcontrol.api.repository.InvoiceItemRepository;
 import com.cashcontrol.api.repository.InvoiceRepository;
+import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.SharedLimitGroupRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.InvoiceCycleCalculator.InvoiceCycleInfo;
@@ -58,6 +61,7 @@ public class CreditCardServiceImpl implements CreditCardService {
     private final TransactionRepository transactionRepository;
     private final SharedLimitGroupRepository sharedLimitGroupRepository;
     private final CategoryRepository categoryRepository;
+    private final PaymentMethodRepository paymentMethodRepository;
     private final InvoiceCycleCalculator cycleCalculator;
 
     @Override
@@ -287,6 +291,7 @@ public class CreditCardServiceImpl implements CreditCardService {
                 + " " + invoice.getReferenceMonth());
         tx.setCompetenceDate(paymentDate);
         tx.setPaymentDate(paymentDate);
+        tx.setPaymentMethod(resolveDefaultPaymentMethod());
         transactionRepository.save(tx);
 
         BigDecimal newPaidAmount = invoice.getPaidAmount().add(paymentAmount);
@@ -534,5 +539,10 @@ public class CreditCardServiceImpl implements CreditCardService {
                 item.getCreatedAt(),
                 item.getUpdatedAt()
         );
+    }
+
+    private PaymentMethod resolveDefaultPaymentMethod() {
+        return paymentMethodRepository.findBySlug(PaymentMethodSlug.OTHER)
+                .orElseThrow(() -> new ResourceNotFoundException("Payment method not found: " + PaymentMethodSlug.OTHER));
     }
 }

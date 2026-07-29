@@ -27,9 +27,9 @@ class DefaultCategorySeedTest {
                 String.class);
 
         assertThat(expenseCategories).contains(
-                "Housing", "Food", "Transport", "Health", "Education",
-                "Entertainment", "Clothing", "Personal Care", "Subscriptions",
-                "Travel", "Taxes & Fees", "Other Expenses");
+                "Moradia", "Alimentação", "Transporte", "Saúde", "Educação",
+                "Lazer", "Vestuário", "Cuidados Pessoais", "Assinaturas",
+                "Viagens", "Impostos e Taxas", "Outras Despesas");
     }
 
     @Test
@@ -39,7 +39,7 @@ class DefaultCategorySeedTest {
                 String.class);
 
         assertThat(incomeCategories).contains(
-                "Salary", "Freelance", "Investments", "Gifts", "Other Income");
+                "Salário", "Freelance", "Investimentos", "Presentes", "Outras Receitas");
     }
 
     @Test
@@ -47,10 +47,10 @@ class DefaultCategorySeedTest {
         List<String> subcategories = jdbcTemplate.queryForList(
                 "SELECT c.name FROM categories c "
                         + "JOIN categories p ON c.parent_id = p.id "
-                        + "WHERE p.name = 'Housing' AND p.user_id IS NULL AND c.user_id IS NULL",
+                        + "WHERE p.name = 'Moradia' AND p.user_id IS NULL AND c.user_id IS NULL",
                 String.class);
 
-        assertThat(subcategories).contains("Rent", "Condominium", "Electricity", "Water", "Internet");
+        assertThat(subcategories).contains("Aluguel", "Condomínio", "Energia Elétrica", "Água", "Internet");
     }
 
     @Test

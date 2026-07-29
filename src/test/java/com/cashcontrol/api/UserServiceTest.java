@@ -16,6 +16,7 @@ import com.cashcontrol.api.repository.RoleRepository;
 import com.cashcontrol.api.repository.UserPermissionRepository;
 import com.cashcontrol.api.repository.UserRepository;
 import com.cashcontrol.api.repository.UserRoleRepository;
+import com.cashcontrol.api.security.PermissionResolver;
 import com.cashcontrol.api.service.EmailService;
 import com.cashcontrol.api.service.UserServiceImpl;
 import com.cashcontrol.api.util.DataMasker;
@@ -58,12 +59,14 @@ class UserServiceTest {
     @Mock private PasswordEncoder passwordEncoder;
     @Mock private AppProperties appProperties;
     @Mock private DataMasker dataMasker;
+    @Mock private PermissionResolver permissionResolver;
 
     @BeforeEach
     void setUp() {
         when(dataMasker.maskEmail(anyString())).thenReturn("m***@x.com");
         when(userRoleRepository.findByUserId(any())).thenReturn(List.of());
         when(userPermissionRepository.findByUserId(any())).thenReturn(List.of());
+        when(permissionResolver.resolveEffectivePermissions(any())).thenReturn(List.of());
 
         when(lookupCache.requireAccountStatus(UserSlugConstants.STATUS_INACTIVE))
                 .thenReturn(TestEntityFactory.accountStatus(UserSlugConstants.STATUS_INACTIVE));
