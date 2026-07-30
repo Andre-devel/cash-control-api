@@ -44,6 +44,8 @@ logging:
 
 app:
   base-url: http://localhost:8081
+  mail:
+    from: noreply@test.local
   oauth2-success-redirect-url: http://localhost:3000/auth/oauth2/callback
   oauth2-failure-redirect-url: http://localhost:3000/auth/oauth2/error
   jwt:

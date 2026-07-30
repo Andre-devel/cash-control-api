@@ -26,6 +26,10 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      # Local stack: the dev profile stubs email out via NoOpEmailService, so the
+      # placeholder MAIL_* values below are never bound. Production runs from the
+      # root docker-compose.yml, which requires real SMTP credentials.
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       DB_URL: jdbc:postgresql://postgres:5432/auth
       DB_USERNAME: ${DB_USERNAME:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
