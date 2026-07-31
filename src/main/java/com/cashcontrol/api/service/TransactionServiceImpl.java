@@ -134,7 +134,9 @@ public class TransactionServiceImpl implements TransactionService {
         if (request.paymentDate() != null) {
             tx.setPaymentDate(request.paymentDate());
         }
-        if (request.status() != null) {
+        // Reenviar o status atual é o comportamento natural de um PUT com o recurso
+        // completo (o formulário de edição devolve todos os campos): X → X é no-op.
+        if (request.status() != null && request.status() != tx.getStatus()) {
             validateStatusTransition(tx.getStatus(), request.status());
             tx.setStatus(request.status());
             if (request.status() == TransactionStatus.PAID && tx.getPaymentDate() == null) {
@@ -182,6 +184,16 @@ public class TransactionServiceImpl implements TransactionService {
         if (tx.getTransferGroupId() != null) {
             throw new BusinessRuleException(
                     "Transfer legs must be deleted as a pair via DELETE /api/v1/accounts/transfers/{groupId}.");
+        }
+
+        // A single installment is a slice of a contract with the issuer, not a standalone
+        // fact: dropping one would leave a gap in the series and desynchronise it from the
+        // real invoice. The series-level operations are the supported way out.
+        if (tx.getInstallmentSeries() != null) {
+            throw new BusinessRuleException(
+                    "Installments cannot be deleted individually. Use POST /api/v1/installments/series/{seriesId}/settle "
+                    + "to cancel the remaining installments, or DELETE /api/v1/installments/series/{seriesId} "
+                    + "to remove the whole series.");
         }
 
         creditCardService.detachInvoiceItemForTransaction(tx.getId());
@@ -301,6 +313,9 @@ public class TransactionServiceImpl implements TransactionService {
     }
 
     private void validateStatusTransition(TransactionStatus from, TransactionStatus to) {
+        if (from == to) {
+            return;
+        }
         boolean valid = switch (from) {
             case PENDING -> to == TransactionStatus.PAID || to == TransactionStatus.OVERDUE || to == TransactionStatus.CANCELLED;
             case OVERDUE -> to == TransactionStatus.PAID || to == TransactionStatus.CANCELLED;

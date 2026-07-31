@@ -2,8 +2,12 @@ package com.cashcontrol.api;
 
 import com.cashcontrol.api.config.PostgresTestContainerConfig;
 import com.cashcontrol.api.domain.entity.AccountType;
+import com.cashcontrol.api.domain.entity.CardBrand;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
+import com.cashcontrol.api.domain.exception.BusinessRuleException;
 import com.cashcontrol.api.dto.request.CreateAccountRequest;
+import com.cashcontrol.api.dto.request.CreateCardRequest;
 import com.cashcontrol.api.dto.request.CreateCategoryRequest;
 import com.cashcontrol.api.dto.request.CreateInstallmentRequest;
 import com.cashcontrol.api.dto.request.EarlySettlementRequest;
@@ -12,9 +16,12 @@ import com.cashcontrol.api.dto.request.EditSeriesRequest;
 import com.cashcontrol.api.dto.response.CategoryResponse;
 import com.cashcontrol.api.dto.response.InstallmentSeriesDetailResponse;
 import com.cashcontrol.api.repository.InstallmentSeriesRepository;
+import com.cashcontrol.api.repository.InvoiceItemRepository;
+import com.cashcontrol.api.repository.InvoiceRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.AccountService;
 import com.cashcontrol.api.service.CategoryService;
+import com.cashcontrol.api.service.CreditCardService;
 import com.cashcontrol.api.service.InstallmentService;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -33,6 +40,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -43,8 +51,11 @@ class InstallmentServiceIntegrationTest {
     @Autowired private InstallmentService installmentService;
     @Autowired private AccountService accountService;
     @Autowired private CategoryService categoryService;
+    @Autowired private CreditCardService creditCardService;
     @Autowired private TransactionRepository transactionRepository;
     @Autowired private InstallmentSeriesRepository installmentSeriesRepository;
+    @Autowired private InvoiceItemRepository invoiceItemRepository;
+    @Autowired private InvoiceRepository invoiceRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
     @PersistenceContext private EntityManager entityManager;
 
@@ -202,5 +213,127 @@ class InstallmentServiceIntegrationTest {
 
         // Installment 2 (detached) should retain its individually-assigned category
         assertThat(allInstallments.get(1).getCategory().getId()).isEqualTo(detachedCategory.id());
+    }
+
+    // ── deleteInstallmentSeries ───────────────────────────────────────────────
+
+    @Test
+    void deleteInstallmentSeries_pendingSeries_removesSeriesAndInstallments() {
+        LocalDate firstPayment = LocalDate.now().plusDays(1);
+        InstallmentSeriesDetailResponse created = installmentService.createInstallmentSeries(
+                new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3,
+                        firstPayment, "Series created by mistake", null, null, null, null, null),
+                userId);
+
+        UUID seriesId = created.series().id();
+
+        installmentService.deleteInstallmentSeries(seriesId, userId);
+
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(transactionRepository.findAllByInstallmentSeries_Id(seriesId)).isEmpty();
+        assertThat(installmentSeriesRepository.findByIdAndUserId(seriesId, userId)).isEmpty();
+    }
+
+    @Test
+    void deleteInstallmentSeries_withPaidInstallment_rejected() {
+        // firstPaymentDate = yesterday → installment 1 is PAID
+        LocalDate yesterday = LocalDate.now().minusDays(1);
+        InstallmentSeriesDetailResponse created = installmentService.createInstallmentSeries(
+                new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3,
+                        yesterday, "Series already under way", null, null, null, null, null),
+                userId);
+
+        UUID seriesId = created.series().id();
+
+        assertThatThrownBy(() -> installmentService.deleteInstallmentSeries(seriesId, userId))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("parcelas pagas");
+
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(transactionRepository.findAllByInstallmentSeries_Id(seriesId)).hasSize(3);
+        assertThat(installmentSeriesRepository.findByIdAndUserId(seriesId, userId)).isPresent();
+    }
+
+    @Test
+    void deleteInstallmentSeries_settledSeries_rejected() {
+        LocalDate firstPayment = LocalDate.now().plusDays(1);
+        InstallmentSeriesDetailResponse created = installmentService.createInstallmentSeries(
+                new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3,
+                        firstPayment, "Settled series", null, null, null, null, null),
+                userId);
+
+        UUID seriesId = created.series().id();
+        installmentService.earlySettlement(seriesId,
+                new EarlySettlementRequest(new BigDecimal("280.00"), LocalDate.now()), userId);
+
+        assertThatThrownBy(() -> installmentService.deleteInstallmentSeries(seriesId, userId))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("quitad");
+    }
+
+    @Test
+    void deleteInstallmentSeries_creditCard_givesAmountsBackToOpenInvoices() {
+        UUID cardId = createCard();
+        UUID seriesId = createCardSeries(cardId, "Card series to undo");
+
+        entityManager.flush();
+
+        List<UUID> invoiceIds = invoiceItemRepository.findAllByInstallmentSeries_Id(seriesId)
+                .stream()
+                .map(item -> item.getInvoice().getId())
+                .distinct()
+                .toList();
+        assertThat(invoiceIds).isNotEmpty();
+
+        installmentService.deleteInstallmentSeries(seriesId, userId);
+
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(invoiceItemRepository.findAllByInstallmentSeries_Id(seriesId)).isEmpty();
+        invoiceIds.forEach(invoiceId ->
+                assertThat(invoiceRepository.findById(invoiceId).orElseThrow().getTotalAmount())
+                        .isEqualByComparingTo("0.00"));
+    }
+
+    @Test
+    void deleteInstallmentSeries_reachedClosedInvoice_rejected() {
+        UUID cardId = createCard();
+        UUID seriesId = createCardSeries(cardId, "Card series already invoiced");
+
+        entityManager.flush();
+
+        UUID invoiceId = invoiceItemRepository.findAllByInstallmentSeries_Id(seriesId)
+                .get(0).getInvoice().getId();
+        jdbcTemplate.update("UPDATE invoices SET status = 'CLOSED' WHERE id = ?", invoiceId);
+        entityManager.clear();
+
+        assertThatThrownBy(() -> installmentService.deleteInstallmentSeries(seriesId, userId))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("fatura fechada");
+
+        entityManager.clear();
+        assertThat(transactionRepository.findAllByInstallmentSeries_Id(seriesId)).hasSize(3);
+        assertThat(invoiceItemRepository.findAllByInstallmentSeries_Id(seriesId)).hasSize(3);
+    }
+
+    private UUID createCard() {
+        return creditCardService.createCard(
+                new CreateCardRequest("Test Card", CardBrand.MASTERCARD, "Itaú",
+                        new BigDecimal("10000.00"), 10, 17, null),
+                userId).id();
+    }
+
+    private UUID createCardSeries(UUID cardId, String description) {
+        LocalDate firstPayment = LocalDate.now().plusMonths(1).withDayOfMonth(1);
+        return installmentService.createInstallmentSeries(
+                new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3,
+                        firstPayment, description, null, null, null,
+                        PaymentMethodSlug.CREDIT_CARD, cardId),
+                userId).series().id();
     }
 }

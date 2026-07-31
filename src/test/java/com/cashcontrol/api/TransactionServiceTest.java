@@ -6,6 +6,7 @@ import com.cashcontrol.api.domain.entity.Category;
 import com.cashcontrol.api.domain.entity.CategoryRule;
 import com.cashcontrol.api.domain.entity.CreditCard;
 import com.cashcontrol.api.domain.entity.CardBrand;
+import com.cashcontrol.api.domain.entity.InstallmentSeries;
 import com.cashcontrol.api.domain.entity.PaymentMethod;
 import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.Transaction;
@@ -440,6 +441,58 @@ class TransactionServiceTest {
                 .hasMessageContaining("transfer");
 
         verify(transactionRepository, never()).delete(any());
+    }
+
+    @Test
+    void deleteTransaction_installment_rejected() {
+        Transaction tx = buildPaidTransaction();
+        tx.setInstallmentSeries(new InstallmentSeries());
+        tx.setInstallmentNumber(2);
+        tx.setTotalInstallments(12);
+        when(transactionRepository.findByIdAndUserId(tx.getId(), userId)).thenReturn(Optional.of(tx));
+
+        assertThatThrownBy(() -> transactionService.deleteTransaction(tx.getId(), userId))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("Installments cannot be deleted individually");
+
+        verify(transactionRepository, never()).delete(any());
+    }
+
+    // ── editTransaction ───────────────────────────────────────────────────────
+
+    @Test
+    void editTransaction_resendingCurrentStatus_isNoOp() {
+        Transaction tx = buildPaidTransaction();
+        LocalDate originalPaymentDate = tx.getPaymentDate();
+        when(transactionRepository.findByIdAndUserId(tx.getId(), userId)).thenReturn(Optional.of(tx));
+        when(transactionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        EditTransactionRequest request = new EditTransactionRequest(
+                null, "Updated description", null, null, null, TransactionStatus.PAID,
+                null, null, null, null, null, null);
+
+        TransactionDetailResponse response = transactionService.editTransaction(tx.getId(), request, userId);
+
+        assertThat(response.status()).isEqualTo(TransactionStatus.PAID);
+        assertThat(response.description()).isEqualTo("Updated description");
+        assertThat(response.paymentDate()).isEqualTo(originalPaymentDate);
+        assertThat(tx.getCancelledAt()).isNull();
+    }
+
+    @Test
+    void editTransaction_invalidStatusTransition_rejected() {
+        Transaction tx = buildPaidTransaction();
+        when(transactionRepository.findByIdAndUserId(tx.getId(), userId)).thenReturn(Optional.of(tx));
+
+        EditTransactionRequest request = new EditTransactionRequest(
+                null, null, null, null, null, TransactionStatus.PENDING,
+                null, null, null, null, null, null);
+
+        assertThatThrownBy(() -> transactionService.editTransaction(tx.getId(), request, userId))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("Invalid status transition");
+
+        verify(transactionRepository, never()).save(any());
     }
 
     // ── listTransactions ──────────────────────────────────────────────────────

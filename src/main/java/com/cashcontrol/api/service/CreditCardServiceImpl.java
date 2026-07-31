@@ -484,6 +484,26 @@ public class CreditCardServiceImpl implements CreditCardService {
         });
     }
 
+    @Override
+    public void deleteInvoiceItemsForInstallmentSeries(UUID installmentSeriesId) {
+        List<InvoiceItem> items = invoiceItemRepository.findAllByInstallmentSeries_Id(installmentSeriesId);
+
+        for (InvoiceItem item : items) {
+            if (item.getInvoice().getStatus() != InvoiceStatus.OPEN) {
+                throw new BusinessRuleException(
+                        "Cannot delete an installment series that reached a closed invoice (reference month "
+                        + item.getInvoice().getReferenceMonth() + "). Use early settlement instead.");
+            }
+        }
+
+        for (InvoiceItem item : items) {
+            if (item.getCancelledAt() == null) {
+                subtractFromInvoice(item);
+            }
+        }
+        invoiceItemRepository.deleteAll(items);
+    }
+
     private void cancelLinkedInvoiceItem(UUID transactionId) {
         invoiceItemRepository.findByTransaction_Id(transactionId).ifPresent(item -> {
             if (item.getCancelledAt() != null) return;

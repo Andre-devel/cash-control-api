@@ -37,10 +37,13 @@ import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.core.authority.AuthorityUtils.createAuthorityList;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -209,6 +212,46 @@ class InstallmentControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"description\":\"Updated\"}"))
                 .andExpect(status().isUnprocessableEntity());
+    }
+
+    // ── DELETE /api/v1/installments/series/{seriesId} ─────────────────────────
+
+    @Test
+    void deleteInstallmentSeries_returns204() throws Exception {
+        UUID seriesId = UUID.randomUUID();
+        doNothing().when(installmentService).deleteInstallmentSeries(eq(seriesId), eq(userId));
+
+        mockMvc.perform(delete("/api/v1/installments/series/" + seriesId)
+                        .with(user(principal)))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void deleteInstallmentSeries_notFound_returns404() throws Exception {
+        UUID seriesId = UUID.randomUUID();
+        doThrow(new ResourceNotFoundException("Series not found"))
+                .when(installmentService).deleteInstallmentSeries(eq(seriesId), eq(userId));
+
+        mockMvc.perform(delete("/api/v1/installments/series/" + seriesId)
+                        .with(user(principal)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void deleteInstallmentSeries_hasPaidInstallments_returns422() throws Exception {
+        UUID seriesId = UUID.randomUUID();
+        doThrow(new BusinessRuleException("Cannot delete an installment series with paid installments."))
+                .when(installmentService).deleteInstallmentSeries(eq(seriesId), eq(userId));
+
+        mockMvc.perform(delete("/api/v1/installments/series/" + seriesId)
+                        .with(user(principal)))
+                .andExpect(status().isUnprocessableEntity());
+    }
+
+    @Test
+    void deleteInstallmentSeries_unauthenticated_returns401() throws Exception {
+        mockMvc.perform(delete("/api/v1/installments/series/" + UUID.randomUUID()))
+                .andExpect(status().isUnauthorized());
     }
 
     // ── PUT /api/v1/installments/{transactionId} ──────────────────────────────

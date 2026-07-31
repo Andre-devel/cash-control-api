@@ -26,6 +26,7 @@ import com.cashcontrol.api.dto.response.TagResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.dto.response.TransactionSummaryResponse;
 import com.cashcontrol.api.repository.AccountRepository;
+import com.cashcontrol.api.repository.AttachmentRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.InstallmentSeriesRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
@@ -51,6 +52,7 @@ public class InstallmentServiceImpl implements InstallmentService {
     private final TransactionRepository transactionRepository;
     private final AccountRepository accountRepository;
     private final CategoryRepository categoryRepository;
+    private final AttachmentRepository attachmentRepository;
     private final TransactionService transactionService;
     private final CreditCardService creditCardService;
 
@@ -360,6 +362,39 @@ public class InstallmentServiceImpl implements InstallmentService {
 
         updated = transactionRepository.saveAll(updated);
         return updated.stream().map(transactionService::toDetail).toList();
+    }
+
+    @Override
+    @Transactional
+    public void deleteInstallmentSeries(UUID seriesId, UUID userId) {
+        InstallmentSeries series = findOwnedSeries(seriesId, userId);
+
+        if (series.isSettled()) {
+            throw new BusinessRuleException(
+                    "Cannot delete a settled installment series; its settlement is part of the payment history.");
+        }
+
+        List<Transaction> installments = transactionRepository.findAllByInstallmentSeries_Id(seriesId);
+
+        boolean anyPaid = installments.stream().anyMatch(t -> t.getStatus() == TransactionStatus.PAID);
+        if (anyPaid) {
+            throw new BusinessRuleException(
+                    "Cannot delete an installment series with paid installments. "
+                    + "Use POST /api/v1/installments/series/{seriesId}/settle to cancel the remaining ones.");
+        }
+
+        List<UUID> installmentIds = installments.stream().map(Transaction::getId).toList();
+        if (!installmentIds.isEmpty() && attachmentRepository.countByTransaction_IdIn(installmentIds) > 0) {
+            throw new BusinessRuleException(
+                    "Cannot delete an installment series whose installments have attachments. "
+                    + "Remove the attachments first.");
+        }
+
+        // Rejects the deletion when any installment already landed on a closed invoice.
+        creditCardService.deleteInvoiceItemsForInstallmentSeries(seriesId);
+
+        transactionRepository.deleteAll(installments);
+        installmentSeriesRepository.delete(series);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
