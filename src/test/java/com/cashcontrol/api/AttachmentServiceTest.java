@@ -137,7 +137,7 @@ class AttachmentServiceTest {
 
         assertThatThrownBy(() -> attachmentService.attach(transactionId, new MultipartFile[]{file}, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("limit exceeded");
+                .hasMessageContaining("Limite de anexos excedido");
     }
 
     @Test
@@ -152,7 +152,7 @@ class AttachmentServiceTest {
 
         assertThatThrownBy(() -> attachmentService.attach(transactionId, new MultipartFile[]{file}, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("Unsupported file type");
+                .hasMessageContaining("Tipo de arquivo não suportado");
     }
 
     @Test
@@ -167,7 +167,7 @@ class AttachmentServiceTest {
 
         assertThatThrownBy(() -> attachmentService.attach(transactionId, new MultipartFile[]{file}, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("Unsupported file type");
+                .hasMessageContaining("Tipo de arquivo não suportado");
     }
 
     @Test
@@ -184,7 +184,7 @@ class AttachmentServiceTest {
 
         assertThatThrownBy(() -> attachmentService.attach(transactionId, new MultipartFile[]{file}, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("size exceeds");
+                .hasMessageContaining("excede o tamanho");
     }
 
     // ── getAttachments ────────────────────────────────────────────────────────

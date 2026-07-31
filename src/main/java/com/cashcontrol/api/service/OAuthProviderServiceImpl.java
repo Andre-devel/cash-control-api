@@ -45,7 +45,7 @@ public class OAuthProviderServiceImpl implements OAuthProviderService {
         String authOriginSlug = user.getAuthOrigin().getSlug();
         if (UserSlugConstants.ORIGIN_GOOGLE.equals(authOriginSlug) && user.getPasswordHash() == null) {
             throw new ConflictException(
-                    "Cannot unlink the only login method. Please set a local password first.");
+                    "Não é possível desvincular o único método de login. Defina uma senha local antes.");
         }
 
         oauthAccount.setUnlinkedAt(Instant.now());

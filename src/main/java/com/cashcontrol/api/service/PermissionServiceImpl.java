@@ -36,7 +36,7 @@ public class PermissionServiceImpl implements PermissionService {
     @Transactional
     public PermissionResponse createPermission(UUID actorId, String name, String description, UUID categoryId) {
         if (permissionRepository.existsByName(name)) {
-            throw new ConflictException("Permission name already exists: " + name);
+            throw new ConflictException("Já existe uma permissão com o nome: " + name);
         }
 
         Permission perm = new Permission();
@@ -60,13 +60,13 @@ public class PermissionServiceImpl implements PermissionService {
                 .orElseThrow(() -> new ResourceNotFoundException("Permission not found."));
 
         if (perm.isSystemPerm()) {
-            throw new ConflictException("System permissions cannot be deleted.");
+            throw new ConflictException("Permissões do sistema não podem ser excluídas.");
         }
         if (rolePermissionRepository.existsByPermissionId(permissionId)) {
-            throw new ConflictException("Permission is assigned to one or more roles and cannot be deleted.");
+            throw new ConflictException("A permissão está atribuída a um ou mais papéis e não pode ser excluída.");
         }
         if (userPermissionRepository.existsByPermissionId(permissionId)) {
-            throw new ConflictException("Permission is directly assigned to one or more users and cannot be deleted.");
+            throw new ConflictException("A permissão está atribuída diretamente a um ou mais usuários e não pode ser excluída.");
         }
 
         permissionRepository.delete(perm);

@@ -32,7 +32,7 @@ public class AnonymizationServiceImpl implements AnonymizationService {
 
         if (user.getDeletedAt() == null) {
             throw new ConflictException(
-                    "User must be soft-deleted before anonymization. Call DELETE /users/{id} first.");
+                    "O usuário precisa ser excluído logicamente antes da anonimização. Chame DELETE /users/{id} primeiro.");
         }
 
         if (user.getAnonymizedAt() != null) {

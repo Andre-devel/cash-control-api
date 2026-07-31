@@ -60,17 +60,17 @@ public class TransactionServiceImpl implements TransactionService {
     @Transactional
     public TransactionDetailResponse createTransaction(CreateTransactionRequest request, UUID userId) {
         if (request.type() == TransactionType.TRANSFER) {
-            throw new BusinessRuleException("Use the dedicated transfer endpoint to create TRANSFER transactions.");
+            throw new BusinessRuleException("Use o endpoint dedicado de transferência para criar transações do tipo TRANSFER.");
         }
         if (request.type() == TransactionType.MANUAL_ADJUSTMENT) {
-            throw new BusinessRuleException("Use the manual adjustment endpoint to create MANUAL_ADJUSTMENT transactions.");
+            throw new BusinessRuleException("Use o endpoint de ajuste manual para criar transações do tipo MANUAL_ADJUSTMENT.");
         }
 
         Account account = accountRepository.findByIdAndUserIdAndDeletedAtIsNull(request.accountId(), userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found: " + request.accountId()));
 
         if (account.getArchivedAt() != null) {
-            throw new BusinessRuleException("Cannot create a transaction on an archived account.");
+            throw new BusinessRuleException("Não é possível criar uma transação em uma conta arquivada.");
         }
 
         PaymentMethod paymentMethod = resolvePaymentMethod(request.paymentMethod());
@@ -112,7 +112,7 @@ public class TransactionServiceImpl implements TransactionService {
         Transaction tx = findOwnedTransaction(id, userId);
 
         if (tx.getStatus() == TransactionStatus.CANCELLED) {
-            throw new BusinessRuleException("Cancelled transactions cannot be edited.");
+            throw new BusinessRuleException("Transações canceladas não podem ser editadas.");
         }
 
         if (tx.getInstallmentSeries() != null && !tx.isDetached()) {
@@ -183,7 +183,7 @@ public class TransactionServiceImpl implements TransactionService {
 
         if (tx.getTransferGroupId() != null) {
             throw new BusinessRuleException(
-                    "Transfer legs must be deleted as a pair via DELETE /api/v1/accounts/transfers/{groupId}.");
+                    "As pernas de uma transferência devem ser excluídas em par via DELETE /api/v1/accounts/transfers/{groupId}.");
         }
 
         // A single installment is a slice of a contract with the issuer, not a standalone
@@ -191,9 +191,9 @@ public class TransactionServiceImpl implements TransactionService {
         // real invoice. The series-level operations are the supported way out.
         if (tx.getInstallmentSeries() != null) {
             throw new BusinessRuleException(
-                    "Installments cannot be deleted individually. Use POST /api/v1/installments/series/{seriesId}/settle "
-                    + "to cancel the remaining installments, or DELETE /api/v1/installments/series/{seriesId} "
-                    + "to remove the whole series.");
+                    "Parcelas não podem ser excluídas individualmente. Use POST /api/v1/installments/series/{seriesId}/settle "
+                    + "para cancelar as parcelas restantes, ou DELETE /api/v1/installments/series/{seriesId} "
+                    + "para remover o parcelamento inteiro.");
         }
 
         creditCardService.detachInvoiceItemForTransaction(tx.getId());
@@ -207,7 +207,7 @@ public class TransactionServiceImpl implements TransactionService {
 
         if (tx.getStatus() != TransactionStatus.PENDING && tx.getStatus() != TransactionStatus.OVERDUE) {
             throw new BusinessRuleException(
-                    "Only PENDING or OVERDUE transactions can be marked as paid. Current status: " + tx.getStatus());
+                    "Apenas transações PENDENTES ou VENCIDAS podem ser marcadas como pagas. Status atual: " + tx.getStatus());
         }
 
         tx.setStatus(TransactionStatus.PAID);
@@ -224,7 +224,7 @@ public class TransactionServiceImpl implements TransactionService {
         Transaction tx = findOwnedTransaction(id, userId);
 
         if (tx.getStatus() == TransactionStatus.CANCELLED) {
-            throw new BusinessRuleException("Transaction is already cancelled.");
+            throw new BusinessRuleException("A transação já está cancelada.");
         }
 
         tx.setStatus(TransactionStatus.CANCELLED);
@@ -290,19 +290,19 @@ public class TransactionServiceImpl implements TransactionService {
     public CreditCard validateAndResolveCreditCard(UUID creditCardId, PaymentMethodSlug slug, UUID userId) {
         if (slug == PaymentMethodSlug.CREDIT_CARD) {
             if (creditCardId == null) {
-                throw new BusinessRuleException("creditCardId is required when paymentMethod is CREDIT_CARD.");
+                throw new BusinessRuleException("creditCardId é obrigatório quando paymentMethod é CREDIT_CARD.");
             }
             CreditCard card = creditCardRepository.findByIdAndUserIdAndDeletedAtIsNull(creditCardId, userId)
                     .orElseThrow(() -> new ForbiddenAccessException(
-                            "Credit card not found or does not belong to the current user."));
+                            "Cartão de crédito não encontrado ou não pertence ao usuário atual."));
             if (card.getArchivedAt() != null) {
-                throw new BusinessRuleException("Cannot use an archived credit card for this transaction.");
+                throw new BusinessRuleException("Não é possível usar um cartão de crédito arquivado nesta transação.");
             }
             return card;
         }
         if (creditCardId != null) {
             throw new BusinessRuleException(
-                    "creditCardId must not be provided when paymentMethod is not CREDIT_CARD.");
+                    "creditCardId não deve ser informado quando paymentMethod não é CREDIT_CARD.");
         }
         return null;
     }
@@ -324,7 +324,7 @@ public class TransactionServiceImpl implements TransactionService {
         };
         if (!valid) {
             throw new BusinessRuleException(
-                    "Invalid status transition: " + from + " → " + to);
+                    "Transição de status inválida: " + from + " → " + to);
         }
     }
 

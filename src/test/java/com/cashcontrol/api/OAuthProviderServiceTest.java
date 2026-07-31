@@ -75,7 +75,7 @@ class OAuthProviderServiceTest {
 
         assertThatThrownBy(() -> oAuthProviderService.unlinkProvider(userId, "GOOGLE"))
                 .isInstanceOf(ConflictException.class)
-                .hasMessageContaining("Cannot unlink the only login method");
+                .hasMessageContaining("Não é possível desvincular o único método de login");
     }
 
     @Test

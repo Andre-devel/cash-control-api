@@ -84,7 +84,7 @@ public class InstallmentServiceImpl implements InstallmentService {
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found: " + request.accountId()));
 
         if (account.getArchivedAt() != null) {
-            throw new BusinessRuleException("Cannot create an installment series on an archived account.");
+            throw new BusinessRuleException("Não é possível criar um parcelamento em uma conta arquivada.");
         }
 
         Category category = resolveCategory(request.categoryId());
@@ -158,7 +158,7 @@ public class InstallmentServiceImpl implements InstallmentService {
         InstallmentSeries series = findOwnedSeries(seriesId, userId);
 
         if (series.isSettled()) {
-            throw new BusinessRuleException("Cannot edit a settled installment series.");
+            throw new BusinessRuleException("Não é possível editar um parcelamento quitado.");
         }
 
         Category category = resolveCategory(request.categoryId());
@@ -169,7 +169,7 @@ public class InstallmentServiceImpl implements InstallmentService {
                 : null;
 
         if (account != null && account.getArchivedAt() != null) {
-            throw new BusinessRuleException("Cannot move installments to an archived account.");
+            throw new BusinessRuleException("Não é possível mover parcelas para uma conta arquivada.");
         }
 
         PaymentMethod paymentMethod = null;
@@ -243,11 +243,11 @@ public class InstallmentServiceImpl implements InstallmentService {
                 .orElseThrow(() -> new ResourceNotFoundException("Transaction not found: " + transactionId));
 
         if (tx.getInstallmentSeries() == null) {
-            throw new BusinessRuleException("Transaction is not part of an installment series.");
+            throw new BusinessRuleException("A transação não faz parte de um parcelamento.");
         }
 
         if (tx.getStatus() == TransactionStatus.CANCELLED) {
-            throw new BusinessRuleException("Cancelled installments cannot be edited.");
+            throw new BusinessRuleException("Parcelas canceladas não podem ser editadas.");
         }
 
         if (!tx.isDetached()) {
@@ -290,7 +290,7 @@ public class InstallmentServiceImpl implements InstallmentService {
         InstallmentSeries series = findOwnedSeries(seriesId, userId);
 
         if (series.isSettled()) {
-            throw new BusinessRuleException("Installment series is already settled.");
+            throw new BusinessRuleException("O parcelamento já está quitado.");
         }
 
         List<Transaction> remaining = transactionRepository.findAllByInstallmentSeries_Id(seriesId)
@@ -343,8 +343,8 @@ public class InstallmentServiceImpl implements InstallmentService {
 
             if (tx.getStatus() != TransactionStatus.PENDING) {
                 throw new BusinessRuleException(
-                        "Only PENDING installments can be advanced. Installment " + installmentId
-                        + " has status: " + tx.getStatus());
+                        "Apenas parcelas PENDENTES podem ser antecipadas. A parcela " + installmentId
+                        + " está com status: " + tx.getStatus());
             }
 
             tx.setPaymentDate(request.newPaymentDate());
@@ -371,7 +371,7 @@ public class InstallmentServiceImpl implements InstallmentService {
 
         if (series.isSettled()) {
             throw new BusinessRuleException(
-                    "Cannot delete a settled installment series; its settlement is part of the payment history.");
+                    "Não é possível excluir um parcelamento quitado; a quitação faz parte do histórico de pagamentos.");
         }
 
         List<Transaction> installments = transactionRepository.findAllByInstallmentSeries_Id(seriesId);
@@ -379,15 +379,15 @@ public class InstallmentServiceImpl implements InstallmentService {
         boolean anyPaid = installments.stream().anyMatch(t -> t.getStatus() == TransactionStatus.PAID);
         if (anyPaid) {
             throw new BusinessRuleException(
-                    "Cannot delete an installment series with paid installments. "
-                    + "Use POST /api/v1/installments/series/{seriesId}/settle to cancel the remaining ones.");
+                    "Não é possível excluir um parcelamento com parcelas pagas. "
+                    + "Use POST /api/v1/installments/series/{seriesId}/settle para cancelar as restantes.");
         }
 
         List<UUID> installmentIds = installments.stream().map(Transaction::getId).toList();
         if (!installmentIds.isEmpty() && attachmentRepository.countByTransaction_IdIn(installmentIds) > 0) {
             throw new BusinessRuleException(
-                    "Cannot delete an installment series whose installments have attachments. "
-                    + "Remove the attachments first.");
+                    "Não é possível excluir um parcelamento cujas parcelas possuem anexos. "
+                    + "Remova os anexos antes.");
         }
 
         // Rejects the deletion when any installment already landed on a closed invoice.

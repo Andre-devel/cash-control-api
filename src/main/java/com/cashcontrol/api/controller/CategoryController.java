@@ -93,7 +93,7 @@ public class CategoryController {
 
     @Operation(summary = "Edit category",
             description = "Updates name, color, icon, or sort order of a user-defined category. " +
-                          "System default categories cannot be edited.")
+                          "Categorias padrão do sistema não podem ser editadas.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Category updated"),
             @ApiResponse(responseCode = "400", description = "Validation error",

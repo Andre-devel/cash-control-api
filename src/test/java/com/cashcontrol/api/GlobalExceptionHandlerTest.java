@@ -114,7 +114,7 @@ class GlobalExceptionHandlerTest {
         mockMvc.perform(get("/test/invalid-credentials"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.errorCode").value("UNAUTHORIZED"))
-                .andExpect(jsonPath("$.message").value("Invalid credentials."))
+                .andExpect(jsonPath("$.message").value("Credenciais inválidas."))
                 .andExpect(jsonPath("$.correlationId").value(not(emptyOrNullString())));
     }
 
@@ -122,7 +122,7 @@ class GlobalExceptionHandlerTest {
     void invalidCredentials_messageDoesNotRevealUserExistence() throws Exception {
         mockMvc.perform(get("/test/invalid-credentials"))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.message").value("Invalid credentials."));
+                .andExpect(jsonPath("$.message").value("Credenciais inválidas."));
     }
 
     @Test
@@ -146,7 +146,7 @@ class GlobalExceptionHandlerTest {
         mockMvc.perform(get("/test/access-denied"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.errorCode").value("FORBIDDEN"))
-                .andExpect(jsonPath("$.message").value("Access denied."))
+                .andExpect(jsonPath("$.message").value("Acesso negado."))
                 .andExpect(jsonPath("$.correlationId").value(not(emptyOrNullString())));
     }
 
@@ -155,7 +155,7 @@ class GlobalExceptionHandlerTest {
         mockMvc.perform(get("/test/error"))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.errorCode").value("INTERNAL_ERROR"))
-                .andExpect(jsonPath("$.message").value("An unexpected error occurred."))
+                .andExpect(jsonPath("$.message").value("Ocorreu um erro inesperado."))
                 .andExpect(jsonPath("$.correlationId").value(not(emptyOrNullString())));
     }
 
@@ -163,7 +163,7 @@ class GlobalExceptionHandlerTest {
     void unhandledException_responseBodyContainsNoStackTrace() throws Exception {
         mockMvc.perform(get("/test/error"))
                 .andExpect(status().isInternalServerError())
-                .andExpect(jsonPath("$.message").value("An unexpected error occurred."))
+                .andExpect(jsonPath("$.message").value("Ocorreu um erro inesperado."))
                 .andExpect(jsonPath("$.cause").doesNotExist())
                 .andExpect(jsonPath("$.stackTrace").doesNotExist());
     }
@@ -197,7 +197,7 @@ class GlobalExceptionHandlerTest {
         mockMvc.perform(get("/test/forbidden-access"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.errorCode").value("FORBIDDEN"))
-                .andExpect(jsonPath("$.message").value("Access denied."))
+                .andExpect(jsonPath("$.message").value("Acesso negado."))
                 .andExpect(jsonPath("$.correlationId").value(not(emptyOrNullString())));
     }
 

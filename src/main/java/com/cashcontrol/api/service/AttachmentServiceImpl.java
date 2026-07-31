@@ -45,7 +45,7 @@ public class AttachmentServiceImpl implements AttachmentService {
         long currentCount = attachmentRepository.countByTransaction_IdAndUserIdAndDeletedAtIsNull(transactionId, userId);
         if (currentCount + files.length > maxPerTransaction) {
             throw new BusinessRuleException(
-                    "Attachment limit exceeded. Maximum " + maxPerTransaction + " attachments per transaction.");
+                    "Limite de anexos excedido. Máximo de " + maxPerTransaction + " anexos por transação.");
         }
 
         return Arrays.stream(files)
@@ -80,12 +80,12 @@ public class AttachmentServiceImpl implements AttachmentService {
         String mimeType = file.getContentType();
         if (mimeType == null || !ALLOWED_MIME_TYPES.contains(mimeType)) {
             throw new BusinessRuleException(
-                    "Unsupported file type: " + mimeType + ". Allowed: PDF, PNG, JPEG.");
+                    "Tipo de arquivo não suportado: " + mimeType + ". Permitidos: PDF, PNG, JPEG.");
         }
 
         if (file.getSize() > maxFileSizeBytes) {
             throw new BusinessRuleException(
-                    "File size exceeds the maximum allowed size of " +
+                    "O arquivo excede o tamanho máximo permitido de " +
                     appProperties.getAttachments().getMaxFileSizeMb() + " MB.");
         }
 

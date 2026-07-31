@@ -265,7 +265,7 @@ class TransactionServiceTest {
 
         assertThatThrownBy(() -> transactionService.createTransaction(request, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("creditCardId is required");
+                .hasMessageContaining("creditCardId é obrigatório");
     }
 
     @Test
@@ -282,7 +282,7 @@ class TransactionServiceTest {
 
         assertThatThrownBy(() -> transactionService.createTransaction(request, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("must not be provided");
+                .hasMessageContaining("não deve ser informado");
     }
 
     @Test
@@ -329,7 +329,7 @@ class TransactionServiceTest {
 
         assertThatThrownBy(() -> transactionService.createTransaction(request, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("archived credit card");
+                .hasMessageContaining("cartão de crédito arquivado");
     }
 
     @Test
@@ -415,7 +415,7 @@ class TransactionServiceTest {
 
         assertThatThrownBy(() -> transactionService.cancelTransaction(tx.getId(), userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("already cancelled");
+                .hasMessageContaining("já está cancelada");
     }
 
     // ── deleteTransaction ─────────────────────────────────────────────────────
@@ -453,7 +453,7 @@ class TransactionServiceTest {
 
         assertThatThrownBy(() -> transactionService.deleteTransaction(tx.getId(), userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("Installments cannot be deleted individually");
+                .hasMessageContaining("Parcelas não podem ser excluídas individualmente");
 
         verify(transactionRepository, never()).delete(any());
     }
@@ -490,7 +490,7 @@ class TransactionServiceTest {
 
         assertThatThrownBy(() -> transactionService.editTransaction(tx.getId(), request, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("Invalid status transition");
+                .hasMessageContaining("Transição de status inválida");
 
         verify(transactionRepository, never()).save(any());
     }

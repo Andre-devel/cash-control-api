@@ -186,7 +186,7 @@ class CategoryServiceTest {
         assertThatThrownBy(() -> categoryService.createCategory(
                 new CreateCategoryRequest("DeepSub", parentId, null, null, 0), userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("Maximum depth is 2");
+                .hasMessageContaining("A profundidade máxima é 2");
     }
 
     @Test
@@ -239,7 +239,7 @@ class CategoryServiceTest {
         assertThatThrownBy(() -> categoryService.editCategory(catId,
                 new EditCategoryRequest("NewName", null, null, null), userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("cannot be edited");
+                .hasMessageContaining("não podem ser editadas");
     }
 
     @Test
@@ -342,7 +342,7 @@ class CategoryServiceTest {
 
         assertThatThrownBy(() -> categoryService.archiveCategory(catId, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("cannot be archived");
+                .hasMessageContaining("não podem ser arquivadas");
     }
 
     @Test
@@ -429,7 +429,7 @@ class CategoryServiceTest {
         assertThatThrownBy(() -> categoryService.createRule(
                 new CreateCategoryRuleRequest("Gas", catId, subId, null, 0), userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("does not belong");
+                .hasMessageContaining("não pertence");
     }
 
     @Test

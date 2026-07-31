@@ -67,14 +67,14 @@ public class CreditCardServiceImpl implements CreditCardService {
     @Override
     public CreditCardResponse createCard(CreateCardRequest request, UUID userId) {
         if (request.closingDay() < 1 || request.closingDay() > 28) {
-            throw new BusinessRuleException("closingDay must be between 1 and 28.");
+            throw new BusinessRuleException("closingDay deve estar entre 1 e 28.");
         }
         if (request.dueDay() < 1 || request.dueDay() > 28) {
-            throw new BusinessRuleException("dueDay must be between 1 and 28.");
+            throw new BusinessRuleException("dueDay deve estar entre 1 e 28.");
         }
 
         if (creditCardRepository.existsByUserIdAndNameAndDeletedAtIsNull(userId, request.name())) {
-            throw new ConflictException("A credit card with the name '" + request.name() + "' already exists.");
+            throw new ConflictException("Já existe um cartão de crédito com o nome '" + request.name() + "'.");
         }
 
         SharedLimitGroup sharedGroup = null;
@@ -138,7 +138,7 @@ public class CreditCardServiceImpl implements CreditCardService {
 
         if (!card.getName().equals(request.name()) &&
                 creditCardRepository.existsByUserIdAndNameAndDeletedAtIsNullAndIdNot(userId, request.name(), id)) {
-            throw new ConflictException("A credit card with the name '" + request.name() + "' already exists.");
+            throw new ConflictException("Já existe um cartão de crédito com o nome '" + request.name() + "'.");
         }
 
         card.setName(request.name());
@@ -155,7 +155,7 @@ public class CreditCardServiceImpl implements CreditCardService {
     public CreditCardResponse archiveCard(UUID id, UUID userId) {
         CreditCard card = findActiveCard(id, userId);
         if (card.getArchivedAt() != null) {
-            throw new BusinessRuleException("Credit card is already archived.");
+            throw new BusinessRuleException("O cartão de crédito já está arquivado.");
         }
         card.setArchivedAt(Instant.now());
         card = creditCardRepository.save(card);
@@ -166,7 +166,7 @@ public class CreditCardServiceImpl implements CreditCardService {
     public InvoiceItemResponse recordCharge(UUID cardId, RecordChargeRequest request, UUID userId) {
         CreditCard card = findActiveCard(cardId, userId);
         if (card.getArchivedAt() != null) {
-            throw new BusinessRuleException("Archived credit cards cannot receive new charges.");
+            throw new BusinessRuleException("Cartões de crédito arquivados não podem receber novos lançamentos.");
         }
 
         InvoiceCycleInfo cycleInfo = cycleCalculator.calculateForCharge(
@@ -261,10 +261,10 @@ public class CreditCardServiceImpl implements CreditCardService {
                 .orElseThrow(() -> new ResourceNotFoundException("Invoice not found: " + invoiceId));
 
         if (invoice.getStatus() == InvoiceStatus.PAID) {
-            throw new BusinessRuleException("Invoice is already fully paid.");
+            throw new BusinessRuleException("A fatura já está totalmente paga.");
         }
         if (invoice.getStatus() == InvoiceStatus.OPEN) {
-            throw new BusinessRuleException("Cannot pay an invoice that is still OPEN.");
+            throw new BusinessRuleException("Não é possível pagar uma fatura ainda ABERTA.");
         }
 
         Account sourceAccount = accountRepository.findByIdAndUserIdAndDeletedAtIsNull(
@@ -272,7 +272,7 @@ public class CreditCardServiceImpl implements CreditCardService {
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found: " + request.sourceAccountId()));
         if (sourceAccount.getArchivedAt() != null) {
             throw new BusinessRuleException(
-                    "Source account is archived and cannot be used for invoice payment.");
+                    "A conta de origem está arquivada e não pode ser usada para pagar faturas.");
         }
 
         BigDecimal remaining = invoice.getTotalAmount().subtract(invoice.getPaidAmount());
@@ -491,8 +491,8 @@ public class CreditCardServiceImpl implements CreditCardService {
         for (InvoiceItem item : items) {
             if (item.getInvoice().getStatus() != InvoiceStatus.OPEN) {
                 throw new BusinessRuleException(
-                        "Cannot delete an installment series that reached a closed invoice (reference month "
-                        + item.getInvoice().getReferenceMonth() + "). Use early settlement instead.");
+                        "Não é possível excluir um parcelamento que alcançou uma fatura fechada (mês de referência "
+                        + item.getInvoice().getReferenceMonth() + "). Use a quitação antecipada.");
             }
         }
 

@@ -145,14 +145,14 @@ class AccountIntegrationTest {
 
         assertThatThrownBy(() -> accountService.archiveAccount(account.id(), userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("already archived");
+                .hasMessageContaining("já está arquivad");
 
         AccountResponse unarchived = accountService.unarchiveAccount(account.id(), userId);
         assertThat(unarchived.archivedAt()).isNull();
 
         assertThatThrownBy(() -> accountService.unarchiveAccount(account.id(), userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("not archived");
+                .hasMessageContaining("não está arquivada");
     }
 
     @Test
@@ -190,7 +190,7 @@ class AccountIntegrationTest {
 
         assertThatThrownBy(() -> accountService.deleteAccount(account.id(), userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("existing transactions");
+                .hasMessageContaining("possui transações");
     }
 
     @Test

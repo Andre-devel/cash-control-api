@@ -5,7 +5,7 @@ import java.util.UUID;
 // Generic authentication failure — never reveals whether email, password, or account state caused the failure
 public class InvalidCredentialsException extends AuthException {
 
-    private static final String DEFAULT_MESSAGE = "Invalid credentials.";
+    private static final String DEFAULT_MESSAGE = "Credenciais inválidas.";
 
     public InvalidCredentialsException() {
         super(DEFAULT_MESSAGE);

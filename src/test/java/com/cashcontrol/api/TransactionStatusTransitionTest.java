@@ -128,7 +128,7 @@ class TransactionStatusTransitionTest {
         assertThatThrownBy(() ->
                 transactionService.cancelTransaction(tx.id(), userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("already cancelled");
+                .hasMessageContaining("já está cancelada");
     }
 
     // ── delete protection ─────────────────────────────────────────────────────

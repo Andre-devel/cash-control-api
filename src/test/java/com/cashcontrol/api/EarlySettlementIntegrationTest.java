@@ -209,7 +209,7 @@ class EarlySettlementIntegrationTest {
         assertThatThrownBy(() -> installmentService.earlySettlement(seriesId,
                 new EarlySettlementRequest(new BigDecimal("100.00"), LocalDate.now()), userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("already settled");
+                .hasMessageContaining("já está quitado");
     }
 
     // ── editSeries ────────────────────────────────────────────────────────────
@@ -241,7 +241,7 @@ class EarlySettlementIntegrationTest {
         assertThatThrownBy(() -> installmentService.editSeries(
                 seriesId, new EditSeriesRequest("Updated", null, null, null, null, null, null), userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("settled");
+                .hasMessageContaining("quitad");
     }
 
     // ── editInstallment ───────────────────────────────────────────────────────

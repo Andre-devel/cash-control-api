@@ -196,7 +196,7 @@ class CreditCardServiceIntegrationTest {
 
         assertThatThrownBy(() -> creditCardService.recordCharge(card.id(), chargeRequest, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("Archived");
+                .hasMessageContaining("arquivad");
     }
 
     @Test
