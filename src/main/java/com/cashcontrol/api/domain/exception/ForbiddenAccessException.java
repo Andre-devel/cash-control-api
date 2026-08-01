@@ -4,7 +4,7 @@ import java.util.UUID;
 
 public class ForbiddenAccessException extends AuthException {
 
-    private static final String DEFAULT_MESSAGE = "Access denied.";
+    private static final String DEFAULT_MESSAGE = "Acesso negado.";
 
     public ForbiddenAccessException() {
         super(DEFAULT_MESSAGE);

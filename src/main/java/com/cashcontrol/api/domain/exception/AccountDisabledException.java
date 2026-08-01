@@ -4,7 +4,7 @@ import java.util.UUID;
 
 public class AccountDisabledException extends AuthException {
 
-    private static final String DEFAULT_MESSAGE = "Invalid credentials.";
+    private static final String DEFAULT_MESSAGE = "Credenciais inválidas.";
 
     public AccountDisabledException() {
         super(DEFAULT_MESSAGE);

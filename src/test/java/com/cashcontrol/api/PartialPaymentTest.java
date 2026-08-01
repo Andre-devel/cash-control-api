@@ -176,7 +176,7 @@ class PartialPaymentTest {
                 new BigDecimal("100.00"), sourceAccountId, null);
         assertThatThrownBy(() -> creditCardService.payInvoice(invoice.getId(), request, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("OPEN");
+                .hasMessageContaining("ABERTA");
     }
 
     @Test
@@ -191,6 +191,6 @@ class PartialPaymentTest {
         assertThatThrownBy(() -> creditCardService.payInvoice(invoiceId,
                 new PayInvoiceRequest(new BigDecimal("100.00"), sourceAccountId, null), userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("already fully paid");
+                .hasMessageContaining("já está totalmente paga");
     }
 }

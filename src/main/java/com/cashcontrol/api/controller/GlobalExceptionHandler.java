@@ -40,13 +40,13 @@ public class GlobalExceptionHandler {
         Map<String, String> fieldErrors = ex.getBindingResult().getFieldErrors().stream()
                 .collect(Collectors.toMap(
                         FieldError::getField,
-                        fe -> fe.getDefaultMessage() != null ? fe.getDefaultMessage() : "Invalid value",
+                        fe -> fe.getDefaultMessage() != null ? fe.getDefaultMessage() : "Valor inválido",
                         (first, second) -> first
                 ));
         UUID correlationId = CorrelationIdHolder.get();
         return ResponseEntity.badRequest()
                 .body(ErrorResponse.withFieldErrors(
-                        "VALIDATION_ERROR", "Request validation failed.", correlationId, fieldErrors));
+                        "VALIDATION_ERROR", "Falha na validação da requisição.", correlationId, fieldErrors));
     }
 
     @ExceptionHandler(ConstraintViolationException.class)
@@ -54,31 +54,31 @@ public class GlobalExceptionHandler {
         Map<String, String> fieldErrors = ex.getConstraintViolations().stream()
                 .collect(Collectors.toMap(
                         cv -> cv.getPropertyPath().toString(),
-                        cv -> cv.getMessage() != null ? cv.getMessage() : "Invalid value",
+                        cv -> cv.getMessage() != null ? cv.getMessage() : "Valor inválido",
                         (first, second) -> first
                 ));
         UUID correlationId = CorrelationIdHolder.get();
         return ResponseEntity.badRequest()
                 .body(ErrorResponse.withFieldErrors(
-                        "VALIDATION_ERROR", "Constraint violation.", correlationId, fieldErrors));
+                        "VALIDATION_ERROR", "Violação de restrição.", correlationId, fieldErrors));
     }
 
     @ExceptionHandler(InvalidCredentialsException.class)
     public ResponseEntity<ErrorResponse> handleInvalidCredentials(InvalidCredentialsException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(ErrorResponse.of("UNAUTHORIZED", "Invalid credentials.", ex.getCorrelationId()));
+                .body(ErrorResponse.of("UNAUTHORIZED", "Credenciais inválidas.", ex.getCorrelationId()));
     }
 
     @ExceptionHandler(TokenExpiredException.class)
     public ResponseEntity<ErrorResponse> handleTokenExpired(TokenExpiredException ex) {
         return ResponseEntity.badRequest()
-                .body(ErrorResponse.of("TOKEN_EXPIRED", "The token has expired.", ex.getCorrelationId()));
+                .body(ErrorResponse.of("TOKEN_EXPIRED", "O token expirou.", ex.getCorrelationId()));
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleResourceNotFound(ResourceNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                .body(ErrorResponse.of("NOT_FOUND", "Resource not found.", ex.getCorrelationId()));
+                .body(ErrorResponse.of("NOT_FOUND", "Recurso não encontrado.", ex.getCorrelationId()));
     }
 
     @ExceptionHandler(ConflictException.class)
@@ -103,13 +103,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex) {
         UUID correlationId = CorrelationIdHolder.get();
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                .body(ErrorResponse.of("FORBIDDEN", "Access denied.", correlationId));
+                .body(ErrorResponse.of("FORBIDDEN", "Acesso negado.", correlationId));
     }
 
     @ExceptionHandler(AuthException.class)
     public ResponseEntity<ErrorResponse> handleAuthException(AuthException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(ErrorResponse.of("UNAUTHORIZED", "Authentication failed.", ex.getCorrelationId()));
+                .body(ErrorResponse.of("UNAUTHORIZED", "Falha na autenticação.", ex.getCorrelationId()));
     }
 
     @ExceptionHandler(MissingServletRequestParameterException.class)
@@ -117,7 +117,7 @@ public class GlobalExceptionHandler {
         UUID correlationId = CorrelationIdHolder.get();
         return ResponseEntity.badRequest()
                 .body(ErrorResponse.of("MISSING_PARAMETER",
-                        "Required parameter '" + ex.getParameterName() + "' is missing.", correlationId));
+                        "O parâmetro obrigatório '" + ex.getParameterName() + "' não foi informado.", correlationId));
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
@@ -125,28 +125,28 @@ public class GlobalExceptionHandler {
         UUID correlationId = CorrelationIdHolder.get();
         return ResponseEntity.badRequest()
                 .body(ErrorResponse.of("INVALID_PARAMETER",
-                        "Invalid value for parameter '" + ex.getName() + "'.", correlationId));
+                        "Valor inválido para o parâmetro '" + ex.getName() + "'.", correlationId));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleMessageNotReadable(HttpMessageNotReadableException ex) {
         UUID correlationId = CorrelationIdHolder.get();
         return ResponseEntity.badRequest()
-                .body(ErrorResponse.of("BAD_REQUEST", "Malformed or unreadable request body.", correlationId));
+                .body(ErrorResponse.of("BAD_REQUEST", "Corpo da requisição malformado ou ilegível.", correlationId));
     }
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ErrorResponse> handleMethodNotAllowed(HttpRequestMethodNotSupportedException ex) {
         UUID correlationId = CorrelationIdHolder.get();
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
-                .body(ErrorResponse.of("METHOD_NOT_ALLOWED", "Method not allowed.", correlationId));
+                .body(ErrorResponse.of("METHOD_NOT_ALLOWED", "Método não permitido.", correlationId));
     }
 
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<ErrorResponse> handleNoResourceFound(NoResourceFoundException ex) {
         UUID correlationId = CorrelationIdHolder.get();
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                .body(ErrorResponse.of("NOT_FOUND", "Resource not found.", correlationId));
+                .body(ErrorResponse.of("NOT_FOUND", "Recurso não encontrado.", correlationId));
     }
 
     @ExceptionHandler(ErrorResponseException.class)
@@ -157,7 +157,26 @@ public class GlobalExceptionHandler {
             status = HttpStatus.INTERNAL_SERVER_ERROR;
         }
         return ResponseEntity.status(status)
-                .body(ErrorResponse.of(status.name(), status.getReasonPhrase(), correlationId));
+                .body(ErrorResponse.of(status.name(), reasonPhrasePt(status), correlationId));
+    }
+
+    // HttpStatus.getReasonPhrase() é sempre em inglês; a API responde em pt-BR.
+    private static String reasonPhrasePt(HttpStatus status) {
+        return switch (status) {
+            case BAD_REQUEST -> "Requisição inválida.";
+            case UNAUTHORIZED -> "Não autenticado.";
+            case FORBIDDEN -> "Acesso negado.";
+            case NOT_FOUND -> "Recurso não encontrado.";
+            case METHOD_NOT_ALLOWED -> "Método não permitido.";
+            case NOT_ACCEPTABLE -> "Formato de resposta não suportado.";
+            case CONFLICT -> "Conflito com o estado atual do recurso.";
+            case PAYLOAD_TOO_LARGE -> "Requisição maior que o limite permitido.";
+            case UNSUPPORTED_MEDIA_TYPE -> "Tipo de conteúdo não suportado.";
+            case UNPROCESSABLE_ENTITY -> "Regra de negócio violada.";
+            case TOO_MANY_REQUESTS -> "Muitas requisições. Tente novamente em instantes.";
+            case SERVICE_UNAVAILABLE -> "Serviço temporariamente indisponível.";
+            default -> "Ocorreu um erro inesperado.";
+        };
     }
 
     @ExceptionHandler(Exception.class)
@@ -165,6 +184,6 @@ public class GlobalExceptionHandler {
         UUID correlationId = CorrelationIdHolder.get();
         log.error("Unhandled exception [correlationId={}]", correlationId, ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(ErrorResponse.of("INTERNAL_ERROR", "An unexpected error occurred.", correlationId));
+                .body(ErrorResponse.of("INTERNAL_ERROR", "Ocorreu um erro inesperado.", correlationId));
     }
 }

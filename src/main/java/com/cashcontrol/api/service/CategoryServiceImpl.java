@@ -80,13 +80,13 @@ public class CategoryServiceImpl implements CategoryService {
                     .orElseThrow(() -> new ResourceNotFoundException("Parent category not found: " + request.parentId()));
 
             if (parent.getParent() != null) {
-                throw new BusinessRuleException("Cannot create a subcategory under another subcategory. Maximum depth is 2.");
+                throw new BusinessRuleException("Não é possível criar uma subcategoria dentro de outra subcategoria. A profundidade máxima é 2.");
             }
         }
 
         UUID parentId = parent != null ? parent.getId() : null;
         if (categoryRepository.existsByUserIdAndParentIdAndNameAndArchivedAtIsNull(userId, parentId, request.name())) {
-            throw new ConflictException("A category with name '" + request.name() + "' already exists in this scope.");
+            throw new ConflictException("Já existe uma categoria com o nome '" + request.name() + "' neste escopo.");
         }
 
         Category category = new Category();
@@ -108,13 +108,13 @@ public class CategoryServiceImpl implements CategoryService {
                 .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + id));
 
         if (category.isDefault()) {
-            throw new BusinessRuleException("System default categories cannot be edited.");
+            throw new BusinessRuleException("Categorias padrão do sistema não podem ser editadas.");
         }
 
         if (request.name() != null && !request.name().equals(category.getName())) {
             UUID parentId = category.getParent() != null ? category.getParent().getId() : null;
             if (categoryRepository.existsByUserIdAndParentIdAndNameAndArchivedAtIsNullAndIdNot(userId, parentId, request.name(), id)) {
-                throw new ConflictException("A category with name '" + request.name() + "' already exists in this scope.");
+                throw new ConflictException("Já existe uma categoria com o nome '" + request.name() + "' neste escopo.");
             }
             category.setName(request.name());
         }
@@ -145,7 +145,7 @@ public class CategoryServiceImpl implements CategoryService {
                 .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + id));
 
         if (category.isDefault()) {
-            throw new BusinessRuleException("System default categories cannot be archived.");
+            throw new BusinessRuleException("Categorias padrão do sistema não podem ser arquivadas.");
         }
 
         Instant now = Instant.now();
@@ -225,7 +225,7 @@ public class CategoryServiceImpl implements CategoryService {
             subcategory = categoryRepository.findById(request.subcategoryId())
                     .orElseThrow(() -> new ResourceNotFoundException("Subcategory not found: " + request.subcategoryId()));
             if (subcategory.getParent() == null || !subcategory.getParent().getId().equals(category.getId())) {
-                throw new BusinessRuleException("Subcategory does not belong to the specified category.");
+                throw new BusinessRuleException("A subcategoria não pertence à categoria informada.");
             }
         }
 

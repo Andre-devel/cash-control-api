@@ -121,13 +121,13 @@ public class AuthServiceImpl implements AuthService {
         if (user == null) {
             bruteForceService.recordAttempt(null, maskedIp, truncatedUa, "PASSWORD", false, "INVALID_CREDENTIALS");
             auditService.record(AuditEventSlug.AUTH_FAILURE, AuditOutcomeSlug.FAILURE, null, null);
-            throw new InvalidCredentialsException("Authentication failed.");
+            throw new InvalidCredentialsException("Falha na autenticação.");
         }
 
         if (bruteForceService.isAccountLocked(user)) {
             bruteForceService.recordAttempt(user.getId(), maskedIp, truncatedUa, "PASSWORD", false, "ACCOUNT_LOCKED");
             auditService.record(AuditEventSlug.AUTH_FAILURE, AuditOutcomeSlug.FAILURE, null, user.getId());
-            throw new InvalidCredentialsException("Authentication failed.");
+            throw new InvalidCredentialsException("Falha na autenticação.");
         }
 
         try {
@@ -142,7 +142,7 @@ public class AuthServiceImpl implements AuthService {
             bruteForceService.recordAttempt(user.getId(), maskedIp, truncatedUa, "PASSWORD", false, "INVALID_CREDENTIALS");
             bruteForceService.incrementFailedAttempts(user);
             auditService.record(AuditEventSlug.AUTH_FAILURE, AuditOutcomeSlug.FAILURE, null, user.getId());
-            throw new InvalidCredentialsException("Authentication failed.");
+            throw new InvalidCredentialsException("Falha na autenticação.");
         }
 
         // Successful authentication

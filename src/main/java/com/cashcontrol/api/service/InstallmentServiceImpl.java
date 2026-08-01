@@ -26,6 +26,7 @@ import com.cashcontrol.api.dto.response.TagResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.dto.response.TransactionSummaryResponse;
 import com.cashcontrol.api.repository.AccountRepository;
+import com.cashcontrol.api.repository.AttachmentRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.InstallmentSeriesRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
@@ -51,6 +52,7 @@ public class InstallmentServiceImpl implements InstallmentService {
     private final TransactionRepository transactionRepository;
     private final AccountRepository accountRepository;
     private final CategoryRepository categoryRepository;
+    private final AttachmentRepository attachmentRepository;
     private final TransactionService transactionService;
     private final CreditCardService creditCardService;
 
@@ -82,7 +84,7 @@ public class InstallmentServiceImpl implements InstallmentService {
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found: " + request.accountId()));
 
         if (account.getArchivedAt() != null) {
-            throw new BusinessRuleException("Cannot create an installment series on an archived account.");
+            throw new BusinessRuleException("Não é possível criar um parcelamento em uma conta arquivada.");
         }
 
         Category category = resolveCategory(request.categoryId());
@@ -156,7 +158,7 @@ public class InstallmentServiceImpl implements InstallmentService {
         InstallmentSeries series = findOwnedSeries(seriesId, userId);
 
         if (series.isSettled()) {
-            throw new BusinessRuleException("Cannot edit a settled installment series.");
+            throw new BusinessRuleException("Não é possível editar um parcelamento quitado.");
         }
 
         Category category = resolveCategory(request.categoryId());
@@ -167,7 +169,7 @@ public class InstallmentServiceImpl implements InstallmentService {
                 : null;
 
         if (account != null && account.getArchivedAt() != null) {
-            throw new BusinessRuleException("Cannot move installments to an archived account.");
+            throw new BusinessRuleException("Não é possível mover parcelas para uma conta arquivada.");
         }
 
         PaymentMethod paymentMethod = null;
@@ -241,11 +243,11 @@ public class InstallmentServiceImpl implements InstallmentService {
                 .orElseThrow(() -> new ResourceNotFoundException("Transaction not found: " + transactionId));
 
         if (tx.getInstallmentSeries() == null) {
-            throw new BusinessRuleException("Transaction is not part of an installment series.");
+            throw new BusinessRuleException("A transação não faz parte de um parcelamento.");
         }
 
         if (tx.getStatus() == TransactionStatus.CANCELLED) {
-            throw new BusinessRuleException("Cancelled installments cannot be edited.");
+            throw new BusinessRuleException("Parcelas canceladas não podem ser editadas.");
         }
 
         if (!tx.isDetached()) {
@@ -288,7 +290,7 @@ public class InstallmentServiceImpl implements InstallmentService {
         InstallmentSeries series = findOwnedSeries(seriesId, userId);
 
         if (series.isSettled()) {
-            throw new BusinessRuleException("Installment series is already settled.");
+            throw new BusinessRuleException("O parcelamento já está quitado.");
         }
 
         List<Transaction> remaining = transactionRepository.findAllByInstallmentSeries_Id(seriesId)
@@ -341,8 +343,8 @@ public class InstallmentServiceImpl implements InstallmentService {
 
             if (tx.getStatus() != TransactionStatus.PENDING) {
                 throw new BusinessRuleException(
-                        "Only PENDING installments can be advanced. Installment " + installmentId
-                        + " has status: " + tx.getStatus());
+                        "Apenas parcelas PENDENTES podem ser antecipadas. A parcela " + installmentId
+                        + " está com status: " + tx.getStatus());
             }
 
             tx.setPaymentDate(request.newPaymentDate());
@@ -360,6 +362,39 @@ public class InstallmentServiceImpl implements InstallmentService {
 
         updated = transactionRepository.saveAll(updated);
         return updated.stream().map(transactionService::toDetail).toList();
+    }
+
+    @Override
+    @Transactional
+    public void deleteInstallmentSeries(UUID seriesId, UUID userId) {
+        InstallmentSeries series = findOwnedSeries(seriesId, userId);
+
+        if (series.isSettled()) {
+            throw new BusinessRuleException(
+                    "Não é possível excluir um parcelamento quitado; a quitação faz parte do histórico de pagamentos.");
+        }
+
+        List<Transaction> installments = transactionRepository.findAllByInstallmentSeries_Id(seriesId);
+
+        boolean anyPaid = installments.stream().anyMatch(t -> t.getStatus() == TransactionStatus.PAID);
+        if (anyPaid) {
+            throw new BusinessRuleException(
+                    "Não é possível excluir um parcelamento com parcelas pagas. "
+                    + "Use POST /api/v1/installments/series/{seriesId}/settle para cancelar as restantes.");
+        }
+
+        List<UUID> installmentIds = installments.stream().map(Transaction::getId).toList();
+        if (!installmentIds.isEmpty() && attachmentRepository.countByTransaction_IdIn(installmentIds) > 0) {
+            throw new BusinessRuleException(
+                    "Não é possível excluir um parcelamento cujas parcelas possuem anexos. "
+                    + "Remova os anexos antes.");
+        }
+
+        // Rejects the deletion when any installment already landed on a closed invoice.
+        creditCardService.deleteInvoiceItemsForInstallmentSeries(seriesId);
+
+        transactionRepository.deleteAll(installments);
+        installmentSeriesRepository.delete(series);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -29,4 +29,11 @@ public interface InstallmentService {
     EarlySettlementResponse earlySettlement(UUID seriesId, EarlySettlementRequest request, UUID userId);
 
     List<TransactionDetailResponse> advanceInstallments(AdvanceInstallmentRequest request, UUID userId);
+
+    /**
+     * Permanently removes a series and all of its installments. Only meant for series
+     * created by mistake: it is rejected once any installment has been paid or has
+     * reached a closed invoice, since that history must stay auditable.
+     */
+    void deleteInstallmentSeries(UUID seriesId, UUID userId);
 }

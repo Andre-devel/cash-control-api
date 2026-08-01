@@ -261,7 +261,7 @@ class AccountServiceTest {
 
         assertThatThrownBy(() -> accountService.archiveAccount(accountId, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("already archived");
+                .hasMessageContaining("já está arquivad");
     }
 
     @Test
@@ -285,7 +285,7 @@ class AccountServiceTest {
 
         assertThatThrownBy(() -> accountService.unarchiveAccount(accountId, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("not archived");
+                .hasMessageContaining("não está arquivada");
     }
 
     // ── deleteAccount ─────────────────────────────────────────────────────────
@@ -325,7 +325,7 @@ class AccountServiceTest {
 
         assertThatThrownBy(() -> accountService.deleteAccount(accountId, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("existing transactions");
+                .hasMessageContaining("possui transações");
     }
 
     // ── manualAdjustment ─────────────────────────────────────────────────────
@@ -389,7 +389,7 @@ class AccountServiceTest {
         TransferRequest request = new TransferRequest(accountId, accountId, new BigDecimal("100.00"), null, null);
         assertThatThrownBy(() -> accountService.createTransfer(request, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("different");
+                .hasMessageContaining("diferentes");
     }
 
     @Test
@@ -406,7 +406,7 @@ class AccountServiceTest {
         TransferRequest request = new TransferRequest(accountId, destinationId, new BigDecimal("100.00"), null, null);
         assertThatThrownBy(() -> accountService.createTransfer(request, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("archived");
+                .hasMessageContaining("arquivad");
     }
 
     @Test

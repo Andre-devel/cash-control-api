@@ -37,7 +37,7 @@ public class RoleServiceImpl implements RoleService {
     @Transactional
     public RoleResponse createRole(UUID actorId, String name, String description) {
         if (roleRepository.existsByName(name)) {
-            throw new ConflictException("Role name already exists: " + name);
+            throw new ConflictException("Já existe um papel com o nome: " + name);
         }
 
         Role role = new Role();
@@ -68,10 +68,10 @@ public class RoleServiceImpl implements RoleService {
         Role role = requireRole(roleId);
 
         if (role.isSystemRole()) {
-            throw new ConflictException("System roles cannot be deleted.");
+            throw new ConflictException("Papéis do sistema não podem ser excluídos.");
         }
         if (userRoleRepository.existsByRoleId(roleId)) {
-            throw new ConflictException("Role is assigned to one or more users and cannot be deleted.");
+            throw new ConflictException("O papel está atribuído a um ou mais usuários e não pode ser excluído.");
         }
 
         roleRepository.delete(role);

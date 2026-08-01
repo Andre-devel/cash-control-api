@@ -39,7 +39,7 @@ public class AccountServiceImpl implements AccountService {
     @Transactional
     public AccountResponse createAccount(CreateAccountRequest request, UUID userId) {
         if (accountRepository.existsByUserIdAndNameAndDeletedAtIsNull(userId, request.name())) {
-            throw new ConflictException("An account with the name '" + request.name() + "' already exists.");
+            throw new ConflictException("Já existe uma conta com o nome '" + request.name() + "'.");
         }
 
         Account account = new Account();
@@ -88,7 +88,7 @@ public class AccountServiceImpl implements AccountService {
 
         if (!account.getName().equals(request.name()) &&
                 accountRepository.existsByUserIdAndNameAndDeletedAtIsNullAndIdNot(userId, request.name(), id)) {
-            throw new ConflictException("An account with the name '" + request.name() + "' already exists.");
+            throw new ConflictException("Já existe uma conta com o nome '" + request.name() + "'.");
         }
 
         account.setName(request.name());
@@ -109,7 +109,7 @@ public class AccountServiceImpl implements AccountService {
     public AccountResponse archiveAccount(UUID id, UUID userId) {
         Account account = findActiveAccount(id, userId);
         if (account.getArchivedAt() != null) {
-            throw new BusinessRuleException("Account is already archived.");
+            throw new BusinessRuleException("A conta já está arquivada.");
         }
         account.setArchivedAt(Instant.now());
         account = accountRepository.save(account);
@@ -121,7 +121,7 @@ public class AccountServiceImpl implements AccountService {
     public AccountResponse unarchiveAccount(UUID id, UUID userId) {
         Account account = findActiveAccount(id, userId);
         if (account.getArchivedAt() == null) {
-            throw new BusinessRuleException("Account is not archived.");
+            throw new BusinessRuleException("A conta não está arquivada.");
         }
         account.setArchivedAt(null);
         account = accountRepository.save(account);
@@ -137,7 +137,7 @@ public class AccountServiceImpl implements AccountService {
                 .countByAccount_IdAndUserIdAndStatusNot(id, userId, TransactionStatus.CANCELLED);
         if (nonCancelledCount > 1) {
             throw new BusinessRuleException(
-                    "Account cannot be deleted because it has existing transactions. Archive it instead.");
+                    "A conta não pode ser excluída porque possui transações. Arquive-a em vez disso.");
         }
 
         account.setDeletedAt(Instant.now());
@@ -171,17 +171,17 @@ public class AccountServiceImpl implements AccountService {
     @Transactional
     public void createTransfer(TransferRequest request, UUID userId) {
         if (request.sourceAccountId().equals(request.destinationAccountId())) {
-            throw new BusinessRuleException("Source and destination accounts must be different.");
+            throw new BusinessRuleException("As contas de origem e destino devem ser diferentes.");
         }
 
         Account source = findActiveAccount(request.sourceAccountId(), userId);
         Account destination = findActiveAccount(request.destinationAccountId(), userId);
 
         if (source.getArchivedAt() != null) {
-            throw new BusinessRuleException("Source account is archived and cannot be used for transfers.");
+            throw new BusinessRuleException("A conta de origem está arquivada e não pode ser usada em transferências.");
         }
         if (destination.getArchivedAt() != null) {
-            throw new BusinessRuleException("Destination account is archived and cannot be used for transfers.");
+            throw new BusinessRuleException("A conta de destino está arquivada e não pode ser usada em transferências.");
         }
 
         UUID transferGroupId = UUID.randomUUID();

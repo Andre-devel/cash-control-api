@@ -98,7 +98,7 @@ class TransferIntegrationTest {
 
         assertThatThrownBy(() -> accountService.createTransfer(request, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("different");
+                .hasMessageContaining("diferentes");
     }
 
     @Test
@@ -111,7 +111,7 @@ class TransferIntegrationTest {
 
         assertThatThrownBy(() -> accountService.createTransfer(request, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("archived");
+                .hasMessageContaining("arquivad");
     }
 
     @Test
@@ -124,7 +124,7 @@ class TransferIntegrationTest {
 
         assertThatThrownBy(() -> accountService.createTransfer(request, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("archived");
+                .hasMessageContaining("arquivad");
     }
 
     @Test

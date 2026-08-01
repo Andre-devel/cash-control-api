@@ -26,6 +26,8 @@ public interface InvoiceItemRepository extends JpaRepository<InvoiceItem, UUID> 
 
     Optional<InvoiceItem> findByTransaction_Id(UUID transactionId);
 
+    List<InvoiceItem> findAllByInstallmentSeries_Id(UUID installmentSeriesId);
+
     @Query("SELECT ii.category.id, ii.category.name, SUM(ii.amount) as total " +
            "FROM InvoiceItem ii " +
            "WHERE ii.invoice.creditCard.id = :cardId AND ii.userId = :userId " +

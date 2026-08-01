@@ -58,7 +58,7 @@ public class RecurrenceServiceImpl implements RecurrenceService {
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found: " + request.accountId()));
 
         if (account.getArchivedAt() != null) {
-            throw new BusinessRuleException("Cannot create a recurrence on an archived account.");
+            throw new BusinessRuleException("Não é possível criar uma recorrência em uma conta arquivada.");
         }
 
         Category category = resolveCategory(request.categoryId());
@@ -122,7 +122,7 @@ public class RecurrenceServiceImpl implements RecurrenceService {
         RecurrenceRule rule = findOwnedRule(ruleId, userId);
 
         if (rule.getStatus() == RecurrenceStatus.DELETED) {
-            throw new BusinessRuleException("Cannot edit a deleted recurrence rule.");
+            throw new BusinessRuleException("Não é possível editar uma recorrência excluída.");
         }
 
         Account account = null;
@@ -130,7 +130,7 @@ public class RecurrenceServiceImpl implements RecurrenceService {
             account = accountRepository.findByIdAndUserIdAndDeletedAtIsNull(request.accountId(), userId)
                     .orElseThrow(() -> new ResourceNotFoundException("Account not found: " + request.accountId()));
             if (account.getArchivedAt() != null) {
-                throw new BusinessRuleException("Cannot move recurrence to an archived account.");
+                throw new BusinessRuleException("Não é possível mover a recorrência para uma conta arquivada.");
             }
         }
 
@@ -180,7 +180,7 @@ public class RecurrenceServiceImpl implements RecurrenceService {
         RecurrenceRule rule = findOwnedRule(ruleId, userId);
 
         if (rule.getStatus() != RecurrenceStatus.ACTIVE) {
-            throw new BusinessRuleException("Only ACTIVE recurrences can be paused. Current status: " + rule.getStatus());
+            throw new BusinessRuleException("Apenas recorrências ATIVAS podem ser pausadas. Status atual: " + rule.getStatus());
         }
 
         rule.setStatus(RecurrenceStatus.PAUSED);
@@ -215,7 +215,7 @@ public class RecurrenceServiceImpl implements RecurrenceService {
         RecurrenceRule rule = findOwnedRule(ruleId, userId);
 
         if (rule.getStatus() != RecurrenceStatus.PAUSED) {
-            throw new BusinessRuleException("Only PAUSED recurrences can be resumed. Current status: " + rule.getStatus());
+            throw new BusinessRuleException("Apenas recorrências PAUSADAS podem ser retomadas. Status atual: " + rule.getStatus());
         }
 
         rule.setStatus(RecurrenceStatus.ACTIVE);

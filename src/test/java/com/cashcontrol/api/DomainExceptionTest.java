@@ -101,7 +101,7 @@ class DomainExceptionTest {
     @Test
     void permissionDeniedExceptionUsesGenericMessage() {
         PermissionDeniedException ex = new PermissionDeniedException();
-        assertThat(ex.getMessage()).isEqualTo("Access denied.");
+        assertThat(ex.getMessage()).isEqualTo("Acesso negado.");
         assertThat(ex.getMessage()).doesNotContain("permission");
     }
 

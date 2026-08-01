@@ -152,14 +152,14 @@ public class TransactionController {
         return transactionService.editTransaction(id, request, principal.getUser().getId());
     }
 
-    @Operation(summary = "Delete transaction", description = "Permanently removes a transaction. Transfer legs must use the dedicated transfer delete endpoint.")
+    @Operation(summary = "Delete transaction", description = "Permanently removes a transaction. Transfer legs must use the dedicated transfer delete endpoint, and installments must use the installment series endpoints.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Transaction deleted"),
             @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "404", description = "Transaction not found",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "422", description = "Business rule violation (transfer leg)",
+            @ApiResponse(responseCode = "422", description = "Business rule violation (transfer leg, installment)",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     @DeleteMapping("/{id}")

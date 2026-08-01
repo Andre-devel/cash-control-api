@@ -18,7 +18,7 @@ public class AccountStatusChecker {
      */
     public void checkAuthenticationEligibility(User user) {
         if (user.getDeletedAt() != null) {
-            throw new InvalidCredentialsException("Authentication failed.");
+            throw new InvalidCredentialsException("Falha na autenticação.");
         }
 
         String statusSlug = user.getAccountStatus().getSlug();
@@ -27,14 +27,14 @@ public class AccountStatusChecker {
             Instant expiresAt = user.getLockoutExpiresAt();
             // MANUAL lockout (expiresAt == null) or unexpired automatic lockout → still locked
             if (expiresAt == null || expiresAt.isAfter(Instant.now())) {
-                throw new InvalidCredentialsException("Authentication failed.");
+                throw new InvalidCredentialsException("Falha na autenticação.");
             }
             // Auto-lockout window has passed; proceed and let AuthService clear it on success
             return;
         }
 
         if (!UserSlugConstants.STATUS_ACTIVE.equals(statusSlug)) {
-            throw new InvalidCredentialsException("Authentication failed.");
+            throw new InvalidCredentialsException("Falha na autenticação.");
         }
     }
 

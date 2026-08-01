@@ -134,7 +134,7 @@ public class UserServiceImpl implements UserService {
     @Transactional
     public void adminCreateUser(UUID actorId, String email, List<UUID> roleIds) {
         if (userRepository.existsByEmailAndDeletedAtIsNull(email)) {
-            throw new ConflictException("Email already registered.");
+            throw new ConflictException("E-mail já cadastrado.");
         }
 
         User user = new User();

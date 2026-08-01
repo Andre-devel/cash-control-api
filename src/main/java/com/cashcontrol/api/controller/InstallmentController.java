@@ -26,6 +26,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -120,6 +121,26 @@ public class InstallmentController {
             @Valid @RequestBody EditSeriesRequest request,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         return installmentService.editSeries(seriesId, request, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Delete installment series",
+            description = "Permanently removes the series and all of its installments. Intended for series created by mistake: it is rejected once an installment has been paid or has reached a closed invoice — use early settlement in those cases.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Installment series deleted"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Installment series not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Series is settled, has paid installments, reached a closed invoice, or has attachments",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @DeleteMapping("/series/{seriesId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("isAuthenticated()")
+    public void deleteInstallmentSeries(
+            @Parameter(description = "Installment series UUID", required = true) @PathVariable UUID seriesId,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        installmentService.deleteInstallmentSeries(seriesId, principal.getUser().getId());
     }
 
     @Operation(summary = "Edit individual installment",
