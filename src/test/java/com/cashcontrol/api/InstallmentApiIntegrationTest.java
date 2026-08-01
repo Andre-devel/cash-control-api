@@ -120,15 +120,21 @@ class InstallmentApiIntegrationTest {
 
     @Test
     void editSeries_updatesDescriptionOnNonDetachedInstallments() throws Exception {
+        // A data precisa ser futura: createInstallmentSeries marca a parcela 1
+        // como PAID quando firstPaymentDate não é posterior a hoje, e editSeries
+        // só afeta PENDING/OVERDUE. Com data fixa o teste passava até a véspera
+        // dela e quebrava sozinho depois.
+        LocalDate firstPaymentDate = LocalDate.now().plusMonths(1);
+
         String createBody = """
                 {
                     "accountId": "%s",
                     "totalAmount": 900.00,
                     "totalInstallments": 3,
-                    "firstPaymentDate": "2026-08-01",
+                    "firstPaymentDate": "%s",
                     "description": "Original Series Description"
                 }
-                """.formatted(accountId);
+                """.formatted(accountId, firstPaymentDate);
 
         String createResponse = mockMvc.perform(post("/api/v1/installments")
                         .header("Authorization", bearer())
@@ -191,15 +197,20 @@ class InstallmentApiIntegrationTest {
 
     @Test
     void earlySettlement_cancelsPendingInstallments() throws Exception {
+        // Mesmo motivo do editSeries acima: settleEarly também só cancela
+        // PENDING/OVERDUE, então a parcela 1 não pode nascer PAID.
+        LocalDate firstPaymentDate = LocalDate.now().plusMonths(1);
+        LocalDate settlementDate = firstPaymentDate.plusDays(14);
+
         String createBody = """
                 {
                     "accountId": "%s",
                     "totalAmount": 600.00,
                     "totalInstallments": 3,
-                    "firstPaymentDate": "2026-10-01",
+                    "firstPaymentDate": "%s",
                     "description": "To Settle Early"
                 }
-                """.formatted(accountId);
+                """.formatted(accountId, firstPaymentDate);
 
         String createResponse = mockMvc.perform(post("/api/v1/installments")
                         .header("Authorization", bearer())
@@ -213,9 +224,9 @@ class InstallmentApiIntegrationTest {
         String settleBody = """
                 {
                     "settlementAmount": 550.00,
-                    "settlementDate": "2026-10-15"
+                    "settlementDate": "%s"
                 }
-                """;
+                """.formatted(settlementDate);
 
         mockMvc.perform(post("/api/v1/installments/series/{seriesId}/settle", seriesId)
                         .header("Authorization", bearer())
