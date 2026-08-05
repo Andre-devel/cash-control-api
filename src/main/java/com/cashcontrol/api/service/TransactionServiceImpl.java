@@ -58,6 +58,7 @@ public class TransactionServiceImpl implements TransactionService {
     private final PaymentMethodRepository paymentMethodRepository;
     private final CreditCardRepository creditCardRepository;
     private final CreditCardService creditCardService;
+    private final CategoryRuleMatcher categoryRuleMatcher;
 
     @Override
     @Transactional
@@ -373,16 +374,12 @@ public class TransactionServiceImpl implements TransactionService {
 
     private void applyCategoryRule(Transaction tx, UUID userId, String description) {
         List<CategoryRule> rules = categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId);
-        String lowerDesc = description.toLowerCase();
-        for (CategoryRule rule : rules) {
-            if (lowerDesc.contains(rule.getPattern().toLowerCase())) {
-                tx.setCategory(rule.getCategory());
-                if (rule.getSubcategory() != null) {
-                    tx.setSubcategory(rule.getSubcategory());
-                }
-                break;
+        categoryRuleMatcher.match(rules, description).ifPresent(rule -> {
+            tx.setCategory(rule.getCategory());
+            if (rule.getSubcategory() != null) {
+                tx.setSubcategory(rule.getSubcategory());
             }
-        }
+        });
     }
 
     private void applyTags(Transaction tx, List<UUID> tagIds, UUID userId) {

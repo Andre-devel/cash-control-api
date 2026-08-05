@@ -44,6 +44,9 @@ public class AppProperties {
     private final Attachments attachments = new Attachments();
 
     @Valid
+    private final StatementImport statementImport = new StatementImport();
+
+    @Valid
     private final Dashboard dashboard = new Dashboard();
 
     @Valid
@@ -111,6 +114,22 @@ public class AppProperties {
         private int maxPerTransaction = 5;
 
         private String allowedTypes = "pdf,png,jpg,jpeg";
+    }
+
+    /** Importação de extrato bancário. Liga em {@code app.statement-import.*}. */
+    @Getter
+    @Setter
+    public static class StatementImport {
+
+        @Positive
+        private int maxFileSizeMb = 5;
+
+        /**
+         * Teto de lançamentos por arquivo. Um extrato de dois anos tem ~700 linhas;
+         * o limite existe para um upload absurdo não virar uma transação gigante.
+         */
+        @Positive
+        private int maxRows = 5000;
     }
 
     @Getter

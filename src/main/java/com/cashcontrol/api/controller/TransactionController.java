@@ -2,17 +2,22 @@ package com.cashcontrol.api.controller;
 
 import com.cashcontrol.api.dto.request.CreateTransactionRequest;
 import com.cashcontrol.api.dto.request.EditTransactionRequest;
+import com.cashcontrol.api.dto.request.ImportCommitRequest;
 import com.cashcontrol.api.dto.request.MarkAsPaidRequest;
 import com.cashcontrol.api.dto.request.TransactionFilterRequest;
 import com.cashcontrol.api.dto.response.AttachmentResponse;
 import com.cashcontrol.api.dto.response.ErrorResponse;
+import com.cashcontrol.api.dto.response.ImportPreviewResponse;
+import com.cashcontrol.api.dto.response.ImportResultResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.dto.response.TransactionSummaryResponse;
 import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
+import com.cashcontrol.api.domain.entity.StatementFormat;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.security.AuthenticatedUser;
 import com.cashcontrol.api.service.AttachmentService;
+import com.cashcontrol.api.service.StatementImportService;
 import com.cashcontrol.api.service.TransactionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -59,6 +64,7 @@ public class TransactionController {
 
     private final TransactionService transactionService;
     private final AttachmentService attachmentService;
+    private final StatementImportService statementImportService;
 
     @Operation(summary = "Create transaction", description = "Records a new INCOME, EXPENSE, or REFUND transaction for the authenticated user.")
     @ApiResponses({
@@ -214,6 +220,59 @@ public class TransactionController {
             @Parameter(description = "Transaction UUID", required = true) @PathVariable UUID id,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         return transactionService.cancelTransaction(id, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Preview statement import", description = """
+            Reads a bank statement file and returns every entry already classified (type, payment method, \
+            suggested category) together with a duplicate flag, **without persisting anything**.
+
+            Entries already imported into this account are detected by `externalRef`, a deterministic hash \
+            of the source row, so overlapping export periods do not duplicate. Send the approved rows back \
+            to `POST /api/v1/transactions/import` to persist them.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Preview returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Account not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Unreadable file, archived account, or row limit exceeded",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping(value = "/import/preview", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("isAuthenticated()")
+    public ImportPreviewResponse previewImport(
+            @Parameter(description = "Statement file", required = true) @RequestPart("file") MultipartFile file,
+            @Parameter(description = "Account UUID that will receive the transactions", required = true)
+            @RequestParam UUID accountId,
+            @Parameter(description = "Statement format") @RequestParam(defaultValue = "INTER_CSV") StatementFormat format,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return statementImportService.preview(file, format, accountId, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Commit statement import", description = """
+            Persists the statement rows the user approved in the preview.
+
+            Rows whose `externalRef` already exists in the account are skipped, so replaying the same \
+            payload is a no-op. Rows that fail validation are reported individually and do not prevent \
+            the remaining ones from being imported.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Import finished"),
+            @ApiResponse(responseCode = "400", description = "Validation error",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Account not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Archived account or row limit exceeded",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping("/import")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("isAuthenticated()")
+    public ImportResultResponse commitImport(
+            @Valid @RequestBody ImportCommitRequest request,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return statementImportService.commit(request, principal.getUser().getId());
     }
 
     @Operation(summary = "Upload attachments", description = "Attaches one or more receipt or proof-of-payment files to a transaction.")

@@ -28,6 +28,7 @@ import com.cashcontrol.api.repository.CreditCardRepository;
 import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TagRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
+import com.cashcontrol.api.service.CategoryRuleMatcher;
 import com.cashcontrol.api.service.CreditCardService;
 import com.cashcontrol.api.service.TransactionServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +37,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -69,6 +71,8 @@ class TransactionServiceTest {
     @Mock private PaymentMethodRepository paymentMethodRepository;
     @Mock private CreditCardRepository creditCardRepository;
     @Mock private CreditCardService creditCardService;
+    // Lógica pura de casamento de padrão: mockar não testaria nada, só devolveria null.
+    @Spy private CategoryRuleMatcher categoryRuleMatcher = new CategoryRuleMatcher();
     @InjectMocks private TransactionServiceImpl transactionService;
 
     private UUID userId;

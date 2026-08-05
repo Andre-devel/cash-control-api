@@ -31,6 +31,19 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     boolean existsByAccount_IdAndUserIdAndStatusNotIn(UUID accountId, UUID userId, List<TransactionStatus> statuses);
 
+    /**
+     * Quais destes lançamentos de extrato já foram importados nesta conta.
+     *
+     * <p>Uma consulta para o arquivo inteiro, não uma por linha: um extrato de dois
+     * anos passa de 700 linhas.
+     */
+    @Query("SELECT t.externalRef FROM Transaction t " +
+           "WHERE t.userId = :userId AND t.account.id = :accountId AND t.externalRef IN :externalRefs")
+    List<String> findExistingExternalRefs(
+            @Param("userId") UUID userId,
+            @Param("accountId") UUID accountId,
+            @Param("externalRefs") Collection<String> externalRefs);
+
     // TRANSFER amounts are stored signed: source leg = negative, destination leg = positive.
     // MANUAL_ADJUSTMENT amounts are also signed (positive = increase, negative = decrease).
     @Query("SELECT COALESCE(SUM(CASE " +

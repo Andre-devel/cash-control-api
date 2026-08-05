@@ -6,6 +6,13 @@ spring:
     virtual:
       enabled: true
 
+  # Sem isto vale o default do Boot (1 MB por arquivo), que rejeitaria uploads
+  # antes de o serviço aplicar os próprios limites — os de anexo (10 MB) inclusive.
+  servlet:
+    multipart:
+      max-file-size: ${MULTIPART_MAX_FILE_SIZE:10MB}
+      max-request-size: ${MULTIPART_MAX_REQUEST_SIZE:25MB}
+
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
@@ -81,6 +88,10 @@ app:
     max-file-size-mb: ${ATTACHMENT_MAX_SIZE_MB:10}
     max-per-transaction: ${ATTACHMENT_MAX_PER_TRANSACTION:5}
     allowed-types: pdf,png,jpg,jpeg
+
+  statement-import:
+    max-file-size-mb: ${STATEMENT_IMPORT_MAX_SIZE_MB:5}
+    max-rows: ${STATEMENT_IMPORT_MAX_ROWS:5000}
 
   dashboard:
     upcoming-bills-days: ${UPCOMING_BILLS_DAYS:7}

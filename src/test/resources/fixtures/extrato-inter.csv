@@ -1,0 +1,25 @@
+ Extrato Conta Corrente 
+Conta ;123456789
+Período ;06/08/2024 a 05/08/2026
+Saldo ;1.362,84
+
+Data Lançamento;Histórico;Descrição;Valor;Saldo
+04/08/2026;Pix enviado ;Pix Marketplace;-144,06;1.362,84
+02/08/2026;Compra no débito;Dias E Damasceno Ltda  Penapolis     Bra;-70,00;1.506,90
+31/07/2026;Pix recebido;Comercio De Bebidas E Pesca Koga Ltda;157,00;1.665,90
+25/07/2026;Cashback;Inter Shop - Cashback extra - 173260007007647;69,36;1.865,87
+13/07/2026;Pagamento efetuado;PORTOSEG SA C FINANC E INVEST;-253,44;981,10
+09/07/2026;Pix enviado devolvido;Bytedance Brasil Tecnologia Ltda;139,90;1.281,92
+13/05/2026;Crédito Renda Fixa;Cdb Di Flut Tb Pernambucanas Financiadora S.a;3.978,80;111,02
+08/05/2026;Resgate;Cdb Porq Obj Banco Inter Sa;155,00;1.952,95
+13/04/2026;Aplicação;Cdb Porq Obj Banco Inter Sa;-413,00;669,00
+09/02/2026;Débito Renda Fixa;Cdb Pernambucan;-9.000,00;1.154,37
+10/12/2025;Transferência recebida;Fulano De Tal;200,00;-2.241,23
+10/12/2025;Compra Inter Shop ;00019 132390574 Banco Inter S A;-3.762,60;-2.441,23
+11/06/2025;Crédito liberado;Pix No Crédito;254,12;2.745,36
+25/04/2025;Pix recebido devolvido ;Beltrano De Souza;4,05;65,47
+15/05/2026;Compra no débito;Cafe Do Ponto        Penapolis     Bra;-8,00;1.000,00
+15/05/2026;Compra no débito;Cafe Do Ponto        Penapolis     Bra;-8,00;992,00
+14/05/2026;Estorno de tarifa avulsa;Tarifa Cesta B;12,34;1.008,00
+32/13/2026;Pix enviado ;Data impossivel;-10,00;0,00
+13/05/2026;Pix enviado ;Valor ilegivel;-1.2O3,45;0,00

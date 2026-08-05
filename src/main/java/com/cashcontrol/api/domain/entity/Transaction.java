@@ -111,6 +111,14 @@ public class Transaction {
     @Column(name = "location", length = 255)
     private String location;
 
+    /**
+     * Hash da linha de origem quando a transação veio de um extrato importado.
+     * NULL para transações criadas manualmente. Único por (usuário, conta) — é o
+     * que impede que reimportar um extrato com período sobreposto duplique tudo.
+     */
+    @Column(name = "external_ref", length = 64)
+    private String externalRef;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "payment_method_id", nullable = false)
     private PaymentMethod paymentMethod;
