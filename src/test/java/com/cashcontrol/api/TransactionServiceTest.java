@@ -504,7 +504,7 @@ class TransactionServiceTest {
 
         when(transactionRepository.findWithFilters(
                 eq(userId), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), eq(false),
-                any(), any())).thenReturn(page);
+                any(), eq(false), any())).thenReturn(page);
 
         Page<TransactionSummaryResponse> result = transactionService.listTransactions(
                 TransactionFilterRequest.empty(), userId, PageRequest.of(0, 10));

@@ -35,10 +35,13 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -253,9 +256,31 @@ public class TransactionServiceImpl implements TransactionService {
                 filter.searchText(),
                 filter.includeCancelled(),
                 filter.paymentMethod(),
+                filter.groupInstallments(),
                 pageable
         );
-        return page.map(this::toSummary);
+
+        if (!filter.groupInstallments()) {
+            return page.map(this::toSummary);
+        }
+
+        Set<UUID> seriesIds = page.getContent().stream()
+                .filter(tx -> tx.getInstallmentSeries() != null && tx.getInstallmentNumber() != null)
+                .map(tx -> tx.getInstallmentSeries().getId())
+                .collect(Collectors.toSet());
+
+        if (seriesIds.isEmpty()) {
+            return page.map(this::toSummary);
+        }
+
+        Map<UUID, SeriesAggregate> aggregates = loadSeriesAggregates(seriesIds);
+        return page.map(tx -> {
+            if (tx.getInstallmentSeries() == null || tx.getInstallmentNumber() == null) {
+                return toSummary(tx);
+            }
+            SeriesAggregate agg = aggregates.get(tx.getInstallmentSeries().getId());
+            return agg != null ? toGroupedSummary(tx, agg) : toSummary(tx);
+        });
     }
 
     @Override
@@ -372,7 +397,7 @@ public class TransactionServiceImpl implements TransactionService {
 
     @Override
     public TransactionSummaryResponse toSummary(Transaction tx) {
-        return new TransactionSummaryResponse(
+        return TransactionSummaryResponse.ungrouped(
                 tx.getId(),
                 tx.getAccount().getId(),
                 tx.getAccount().getName(),
@@ -385,13 +410,76 @@ public class TransactionServiceImpl implements TransactionService {
                 tx.getCategory() != null ? tx.getCategory().getId() : null,
                 tx.getCategory() != null ? tx.getCategory().getName() : null,
                 tx.getCreatedAt(),
-                tx.getPaymentMethod() != null
-                        ? new PaymentMethodResponse(
-                                tx.getPaymentMethod().getId(),
-                                tx.getPaymentMethod().getSlug(),
-                                tx.getPaymentMethod().getName())
-                        : null
+                summaryPaymentMethod(tx),
+                tx.getInstallmentSeries() != null ? tx.getInstallmentSeries().getId() : null,
+                tx.getInstallmentNumber(),
+                tx.getTotalInstallments()
         );
+    }
+
+    /**
+     * Linha que representa o parcelamento inteiro: valor total da compra e status derivado
+     * do conjunto das parcelas. A data de competência é a da parcela representante — a
+     * primeira do recorte filtrado —, para que a linha não escape da janela consultada.
+     */
+    private TransactionSummaryResponse toGroupedSummary(Transaction tx, SeriesAggregate agg) {
+        TransactionStatus status;
+        if (agg.activeCount() == 0) {
+            status = TransactionStatus.CANCELLED;
+        } else if (agg.paidCount() == agg.activeCount()) {
+            status = TransactionStatus.PAID;
+        } else if (agg.overdueCount() > 0) {
+            status = TransactionStatus.OVERDUE;
+        } else {
+            status = TransactionStatus.PENDING;
+        }
+
+        return new TransactionSummaryResponse(
+                tx.getId(),
+                tx.getAccount().getId(),
+                tx.getAccount().getName(),
+                tx.getType(),
+                status,
+                agg.totalAmount(),
+                tx.getDescription(),
+                tx.getCompetenceDate(),
+                status == TransactionStatus.PAID ? agg.lastPaymentDate() : null,
+                tx.getCategory() != null ? tx.getCategory().getId() : null,
+                tx.getCategory() != null ? tx.getCategory().getName() : null,
+                tx.getCreatedAt(),
+                summaryPaymentMethod(tx),
+                tx.getInstallmentSeries().getId(),
+                tx.getInstallmentNumber(),
+                tx.getTotalInstallments(),
+                agg.totalAmount(),
+                agg.paidCount(),
+                true
+        );
+    }
+
+    private PaymentMethodResponse summaryPaymentMethod(Transaction tx) {
+        return tx.getPaymentMethod() != null
+                ? new PaymentMethodResponse(
+                        tx.getPaymentMethod().getId(),
+                        tx.getPaymentMethod().getSlug(),
+                        tx.getPaymentMethod().getName())
+                : null;
+    }
+
+    private record SeriesAggregate(
+            BigDecimal totalAmount, int paidCount, int activeCount, int overdueCount, LocalDate lastPaymentDate) {}
+
+    private Map<UUID, SeriesAggregate> loadSeriesAggregates(Set<UUID> seriesIds) {
+        Map<UUID, SeriesAggregate> byId = new HashMap<>();
+        for (Object[] row : transactionRepository.aggregateInstallmentSeries(seriesIds)) {
+            byId.put((UUID) row[0], new SeriesAggregate(
+                    (BigDecimal) row[1],
+                    ((Number) row[2]).intValue(),
+                    ((Number) row[3]).intValue(),
+                    ((Number) row[4]).intValue(),
+                    (LocalDate) row[5]));
+        }
+        return byId;
     }
 
     @Override

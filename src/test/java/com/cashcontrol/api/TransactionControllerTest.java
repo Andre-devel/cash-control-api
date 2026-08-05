@@ -474,11 +474,12 @@ class TransactionControllerTest {
     }
 
     private TransactionSummaryResponse buildSummary(UUID id) {
-        return new TransactionSummaryResponse(
+        return TransactionSummaryResponse.ungrouped(
                 id, UUID.randomUUID(), "Checking",
                 TransactionType.INCOME, TransactionStatus.PAID,
                 new BigDecimal("100.00"), "Test Transaction",
                 LocalDate.now(), LocalDate.now(),
-                null, null, Instant.now(), null);
+                null, null, Instant.now(), null,
+                null, null, null);
     }
 }

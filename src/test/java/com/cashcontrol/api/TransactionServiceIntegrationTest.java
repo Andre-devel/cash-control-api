@@ -7,6 +7,7 @@ import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.dto.request.CreateAccountRequest;
 import com.cashcontrol.api.dto.request.CreateCategoryRequest;
 import com.cashcontrol.api.dto.request.CreateCategoryRuleRequest;
+import com.cashcontrol.api.dto.request.CreateInstallmentRequest;
 import com.cashcontrol.api.dto.request.CreateTransactionRequest;
 import com.cashcontrol.api.dto.request.MarkAsPaidRequest;
 import com.cashcontrol.api.dto.request.TransactionFilterRequest;
@@ -15,6 +16,7 @@ import com.cashcontrol.api.dto.response.TransactionSummaryResponse;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.AccountService;
 import com.cashcontrol.api.service.CategoryService;
+import com.cashcontrol.api.service.InstallmentService;
 import com.cashcontrol.api.service.TransactionService;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -44,6 +46,7 @@ class TransactionServiceIntegrationTest {
     @Autowired private TransactionService transactionService;
     @Autowired private AccountService accountService;
     @Autowired private CategoryService categoryService;
+    @Autowired private InstallmentService installmentService;
     @Autowired private TransactionRepository transactionRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
     @PersistenceContext private EntityManager entityManager;
@@ -76,7 +79,7 @@ class TransactionServiceIntegrationTest {
         TransactionFilterRequest filter = new TransactionFilterRequest(
                 null, null, null, null,
                 null, null, null, null, null, null,
-                "supermercado", false, null);
+                "supermercado", false, null, false);
 
         Page<TransactionSummaryResponse> result = transactionService.listTransactions(
                 filter, userId, PageRequest.of(0, 10));
@@ -114,7 +117,7 @@ class TransactionServiceIntegrationTest {
         assertThat(withoutCancelled.getTotalElements()).isEqualTo(3);
 
         TransactionFilterRequest includeAll = new TransactionFilterRequest(
-                null, null, null, null, null, null, null, null, null, null, null, true, null);
+                null, null, null, null, null, null, null, null, null, null, null, true, null, false);
         Page<TransactionSummaryResponse> withCancelled = transactionService.listTransactions(
                 includeAll, userId, PageRequest.of(0, 20));
         assertThat(withCancelled.getTotalElements()).isEqualTo(5);
@@ -207,7 +210,114 @@ class TransactionServiceIntegrationTest {
         assertThat(reloaded.getCancelledAt()).isNotNull();
     }
 
+    // ── groupInstallments ─────────────────────────────────────────────────────
+
+    @Test
+    void listTransactions_groupInstallments_collapsesSeriesIntoOneRowWithTheFullAmount() {
+        LocalDate firstPayment = LocalDate.now().plusMonths(1);
+        installmentService.createInstallmentSeries(
+                new CreateInstallmentRequest(accountId, new BigDecimal("1000.00"), 5,
+                        firstPayment, "Notebook", null, null, null, null, null),
+                userId);
+        entityManager.flush();
+        entityManager.clear();
+
+        Page<TransactionSummaryResponse> ungrouped = transactionService.listTransactions(
+                TransactionFilterRequest.empty(), userId, PageRequest.of(0, 20));
+        assertThat(ungrouped.getTotalElements()).isEqualTo(5);
+
+        Page<TransactionSummaryResponse> grouped = transactionService.listTransactions(
+                grouping(), userId, PageRequest.of(0, 20));
+
+        assertThat(grouped.getTotalElements()).isEqualTo(1);
+        TransactionSummaryResponse row = grouped.getContent().get(0);
+        assertThat(row.installmentGroup()).isTrue();
+        assertThat(row.amount()).isEqualByComparingTo("1000.00");
+        assertThat(row.installmentTotalAmount()).isEqualByComparingTo("1000.00");
+        assertThat(row.totalInstallments()).isEqualTo(5);
+        assertThat(row.competenceDate()).isEqualTo(firstPayment);
+        assertThat(row.description()).isEqualTo("Notebook");
+    }
+
+    @Test
+    void listTransactions_groupInstallments_leavesPlainTransactionsUntouched() {
+        createPaidTransaction("Mercado", "80.00");
+        installmentService.createInstallmentSeries(
+                new CreateInstallmentRequest(accountId, new BigDecimal("1000.00"), 5,
+                        LocalDate.now().plusMonths(1), "Notebook", null, null, null, null, null),
+                userId);
+        entityManager.flush();
+        entityManager.clear();
+
+        Page<TransactionSummaryResponse> grouped = transactionService.listTransactions(
+                grouping(), userId, PageRequest.of(0, 20));
+
+        assertThat(grouped.getTotalElements()).isEqualTo(2);
+        TransactionSummaryResponse plain = grouped.getContent().stream()
+                .filter(r -> r.description().equals("Mercado")).findFirst().orElseThrow();
+        assertThat(plain.installmentGroup()).isFalse();
+        assertThat(plain.installmentSeriesId()).isNull();
+        assertThat(plain.amount()).isEqualByComparingTo("80.00");
+    }
+
+    @Test
+    void listTransactions_groupInstallments_statusIsPaidOnlyWhenEveryInstallmentIsSettled() {
+        LocalDate firstPayment = LocalDate.now();
+        var series = installmentService.createInstallmentSeries(
+                new CreateInstallmentRequest(accountId, new BigDecimal("1000.00"), 5,
+                        firstPayment, "Notebook", null, null, null, null, null),
+                userId);
+        entityManager.flush();
+        entityManager.clear();
+
+        // A primeira parcela já nasce PAID (vencimento hoje); as outras quatro ficam pendentes.
+        Page<TransactionSummaryResponse> partial = transactionService.listTransactions(
+                grouping(), userId, PageRequest.of(0, 20));
+        assertThat(partial.getContent().get(0).status()).isEqualTo(TransactionStatus.PENDING);
+        assertThat(partial.getContent().get(0).paidInstallments()).isEqualTo(1);
+
+        series.installments().stream()
+                .filter(i -> i.status() != TransactionStatus.PAID)
+                .forEach(i -> transactionService.markAsPaid(i.id(), new MarkAsPaidRequest(firstPayment), userId));
+        entityManager.flush();
+        entityManager.clear();
+
+        Page<TransactionSummaryResponse> settled = transactionService.listTransactions(
+                grouping(), userId, PageRequest.of(0, 20));
+        assertThat(settled.getContent().get(0).status()).isEqualTo(TransactionStatus.PAID);
+        assertThat(settled.getContent().get(0).paidInstallments()).isEqualTo(5);
+    }
+
+    @Test
+    void listTransactions_groupInstallments_showsTheSeriesOnceWithinAFilteredWindow() {
+        LocalDate firstPayment = LocalDate.of(2026, 1, 10);
+        installmentService.createInstallmentSeries(
+                new CreateInstallmentRequest(accountId, new BigDecimal("1000.00"), 5,
+                        firstPayment, "Notebook", null, null, null, null, null),
+                userId);
+        entityManager.flush();
+        entityManager.clear();
+
+        // Janela que exclui a 1ª parcela: a série continua aparecendo uma única vez,
+        // representada pela parcela mais antiga que sobrevive ao filtro.
+        TransactionFilterRequest marchOnwards = new TransactionFilterRequest(
+                null, null, null, null, LocalDate.of(2026, 3, 1), null,
+                null, null, null, null, null, false, null, true);
+
+        Page<TransactionSummaryResponse> grouped = transactionService.listTransactions(
+                marchOnwards, userId, PageRequest.of(0, 20));
+
+        assertThat(grouped.getTotalElements()).isEqualTo(1);
+        assertThat(grouped.getContent().get(0).competenceDate()).isEqualTo(LocalDate.of(2026, 3, 10));
+        assertThat(grouped.getContent().get(0).installmentTotalAmount()).isEqualByComparingTo("1000.00");
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static TransactionFilterRequest grouping() {
+        return new TransactionFilterRequest(null, null, null, null,
+                null, null, null, null, null, null, null, false, null, true);
+    }
 
     private void createPaidTransaction(String description, String amount) {
         LocalDate today = LocalDate.now();

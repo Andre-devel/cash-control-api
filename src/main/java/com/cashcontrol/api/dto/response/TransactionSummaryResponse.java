@@ -23,5 +23,24 @@ public record TransactionSummaryResponse(
         @Schema(description = "Primary category UUID") UUID categoryId,
         @Schema(description = "Primary category name") String categoryName,
         @Schema(description = "Record creation timestamp") Instant createdAt,
-        @Schema(description = "Payment method used for this transaction") PaymentMethodResponse paymentMethod
-) {}
+        @Schema(description = "Payment method used for this transaction") PaymentMethodResponse paymentMethod,
+        @Schema(description = "Parent installment series UUID. Null for non-installment transactions.") UUID installmentSeriesId,
+        @Schema(description = "1-based installment position within the series. Null for non-installment transactions.", example = "2") Integer installmentNumber,
+        @Schema(description = "Total installments in the series. Null for non-installment transactions.", example = "5") Integer totalInstallments,
+        @Schema(description = "Sum of the non-cancelled installments of the series. Only filled on grouped rows.", example = "1000.00") BigDecimal installmentTotalAmount,
+        @Schema(description = "How many installments of the series are already PAID. Only filled on grouped rows.", example = "1") Integer paidInstallments,
+        @Schema(description = "True when this row stands for the whole series (groupInstallments=true) instead of a single installment.") boolean installmentGroup
+) {
+
+    /** Non-installment row, or an installment listed individually (groupInstallments=false). */
+    public static TransactionSummaryResponse ungrouped(
+            UUID id, UUID accountId, String accountName, TransactionType type, TransactionStatus status,
+            BigDecimal amount, String description, LocalDate competenceDate, LocalDate paymentDate,
+            UUID categoryId, String categoryName, Instant createdAt, PaymentMethodResponse paymentMethod,
+            UUID installmentSeriesId, Integer installmentNumber, Integer totalInstallments) {
+        return new TransactionSummaryResponse(
+                id, accountId, accountName, type, status, amount, description,
+                competenceDate, paymentDate, categoryId, categoryName, createdAt, paymentMethod,
+                installmentSeriesId, installmentNumber, totalInstallments, null, null, false);
+    }
+}

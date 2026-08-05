@@ -77,7 +77,7 @@ class TransactionRepositoryIntegrationTest {
         Page<Transaction> result = transactionRepository.findWithFilters(
                 userId, null, null, null, null,
                 null, null, null, null,
-                null, null, "supermercado", false, null, PageRequest.of(0, 100));
+                null, null, "supermercado", false, null, false, PageRequest.of(0, 100));
 
         assertThat(result.getTotalElements()).isEqualTo(1);
         assertThat(result.getContent().get(0).getDescription()).isEqualTo("Supermercado Pão de Açúcar");
@@ -95,7 +95,7 @@ class TransactionRepositoryIntegrationTest {
         Page<Transaction> result = transactionRepository.findWithFilters(
                 userId, null, null, null, null,
                 null, null, null, null,
-                null, null, "parcelada", false, null, PageRequest.of(0, 100));
+                null, null, "parcelada", false, null, false, PageRequest.of(0, 100));
 
         assertThat(result.getTotalElements()).isEqualTo(1);
         assertThat(result.getContent().get(0).getNotes()).isEqualTo("Compra parcelada");
@@ -126,11 +126,11 @@ class TransactionRepositoryIntegrationTest {
         Page<Transaction> userA = transactionRepository.findWithFilters(
                 userId, null, null, null, null,
                 null, null, null, null,
-                null, null, null, false, null, PageRequest.of(0, 100));
+                null, null, null, false, null, false, PageRequest.of(0, 100));
         Page<Transaction> userB = transactionRepository.findWithFilters(
                 otherUser, null, null, null, null,
                 null, null, null, null,
-                null, null, null, false, null, PageRequest.of(0, 100));
+                null, null, null, false, null, false, PageRequest.of(0, 100));
 
         assertThat(userA.getTotalElements()).isEqualTo(3);
         assertThat(userB.getTotalElements()).isEqualTo(2);
@@ -148,7 +148,7 @@ class TransactionRepositoryIntegrationTest {
         Page<Transaction> result = transactionRepository.findWithFilters(
                 userId, defaultAccount.getId(), null, null, null,
                 null, null, null, null,
-                null, null, null, false, null, PageRequest.of(0, 100));
+                null, null, null, false, null, false, PageRequest.of(0, 100));
 
         assertThat(result.getTotalElements()).isEqualTo(1);
         assertThat(result.getContent().get(0).getDescription()).isEqualTo("Checking income");
@@ -164,11 +164,11 @@ class TransactionRepositoryIntegrationTest {
         Page<Transaction> incomeOnly = transactionRepository.findWithFilters(
                 userId, null, TransactionType.INCOME, null, null,
                 null, null, null, null,
-                null, null, null, false, null, PageRequest.of(0, 100));
+                null, null, null, false, null, false, PageRequest.of(0, 100));
         Page<Transaction> expenseOnly = transactionRepository.findWithFilters(
                 userId, null, TransactionType.EXPENSE, null, null,
                 null, null, null, null,
-                null, null, null, false, null, PageRequest.of(0, 100));
+                null, null, null, false, null, false, PageRequest.of(0, 100));
 
         assertThat(incomeOnly.getTotalElements()).isEqualTo(1);
         assertThat(expenseOnly.getTotalElements()).isEqualTo(1);
@@ -186,11 +186,11 @@ class TransactionRepositoryIntegrationTest {
         Page<Transaction> paid = transactionRepository.findWithFilters(
                 userId, null, null, TransactionStatus.PAID, null,
                 null, null, null, null,
-                null, null, null, true, null, PageRequest.of(0, 100));
+                null, null, null, true, null, false, PageRequest.of(0, 100));
         Page<Transaction> pending = transactionRepository.findWithFilters(
                 userId, null, null, TransactionStatus.PENDING, null,
                 null, null, null, null,
-                null, null, null, true, null, PageRequest.of(0, 100));
+                null, null, null, true, null, false, PageRequest.of(0, 100));
 
         assertThat(paid.getTotalElements()).isEqualTo(1);
         assertThat(pending.getTotalElements()).isEqualTo(1);
@@ -212,7 +212,7 @@ class TransactionRepositoryIntegrationTest {
         Page<Transaction> result = transactionRepository.findWithFilters(
                 userId, null, null, null, null,
                 LocalDate.of(2026, 2, 1), LocalDate.of(2026, 4, 30),
-                null, null, null, null, null, false, null, PageRequest.of(0, 100));
+                null, null, null, null, null, false, null, false, PageRequest.of(0, 100));
 
         assertThat(result.getTotalElements()).isEqualTo(1);
         assertThat(result.getContent().get(0).getDescription()).isEqualTo("March");
@@ -235,7 +235,7 @@ class TransactionRepositoryIntegrationTest {
                 userId, null, null, null, null,
                 null, null,
                 LocalDate.of(2026, 3, 1), LocalDate.of(2026, 5, 31),
-                null, null, null, false, null, PageRequest.of(0, 100));
+                null, null, null, false, null, false, PageRequest.of(0, 100));
 
         assertThat(result.getTotalElements()).isEqualTo(1);
         assertThat(result.getContent().get(0).getDescription()).isEqualTo("April payment");
@@ -254,7 +254,7 @@ class TransactionRepositoryIntegrationTest {
                 userId, null, null, null, null,
                 null, null, null, null,
                 new BigDecimal("200.00"), new BigDecimal("600.00"),
-                null, false, null, PageRequest.of(0, 100));
+                null, false, null, false, PageRequest.of(0, 100));
 
         assertThat(result.getTotalElements()).isEqualTo(1);
         assertThat(result.getContent().get(0).getAmount()).isEqualByComparingTo("500.00");
@@ -270,11 +270,11 @@ class TransactionRepositoryIntegrationTest {
         Page<Transaction> excludingCancelled = transactionRepository.findWithFilters(
                 userId, null, null, null, null,
                 null, null, null, null,
-                null, null, null, false, null, PageRequest.of(0, 100));
+                null, null, null, false, null, false, PageRequest.of(0, 100));
         Page<Transaction> includingCancelled = transactionRepository.findWithFilters(
                 userId, null, null, null, null,
                 null, null, null, null,
-                null, null, null, true, null, PageRequest.of(0, 100));
+                null, null, null, true, null, false, PageRequest.of(0, 100));
 
         assertThat(excludingCancelled.getTotalElements()).isEqualTo(1);
         assertThat(includingCancelled.getTotalElements()).isEqualTo(2);
@@ -294,7 +294,7 @@ class TransactionRepositoryIntegrationTest {
         Page<Transaction> result = transactionRepository.findWithFilters(
                 userId, defaultAccount.getId(), TransactionType.EXPENSE, null, null,
                 null, null, null, null,
-                null, null, "supermercado", false, null, PageRequest.of(0, 100));
+                null, null, "supermercado", false, null, false, PageRequest.of(0, 100));
 
         assertThat(result.getTotalElements()).isEqualTo(1);
         assertThat(result.getContent().get(0).getDescription()).isEqualTo("Supermercado Carrefour");

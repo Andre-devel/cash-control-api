@@ -81,7 +81,12 @@ public class TransactionController {
         return transactionService.createTransaction(request, principal.getUser().getId());
     }
 
-    @Operation(summary = "List transactions", description = "Returns a filtered, paginated list of transactions for the authenticated user.")
+    @Operation(summary = "List transactions", description = """
+            Returns a filtered, paginated list of transactions for the authenticated user.
+
+            With `groupInstallments=true` an installment series collapses into a single row standing for the whole \
+            purchase: `amount` and `installmentTotalAmount` carry the full price, `totalInstallments` the number of \
+            instalments, and `status` is derived from the set (PAID only when every instalment is settled).""")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Transaction list returned"),
             @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
@@ -103,6 +108,8 @@ public class TransactionController {
             @Parameter(description = "Full-text search on description and notes") @RequestParam(required = false) String searchText,
             @Parameter(description = "Include cancelled transactions") @RequestParam(defaultValue = "false") boolean includeCancelled,
             @Parameter(description = "Filter by payment method slug") @RequestParam(required = false) PaymentMethodSlug paymentMethod,
+            @Parameter(description = "Collapse each installment series into a single row representing the whole purchase")
+            @RequestParam(defaultValue = "false") boolean groupInstallments,
             @PageableDefault(sort = "competenceDate", direction = Sort.Direction.DESC) Pageable pageable,
             @AuthenticationPrincipal AuthenticatedUser principal) {
 
@@ -110,7 +117,7 @@ public class TransactionController {
                 accountId, type, status, categoryId,
                 competenceDateFrom, competenceDateTo,
                 paymentDateFrom, paymentDateTo,
-                amountMin, amountMax, searchText, includeCancelled, paymentMethod);
+                amountMin, amountMax, searchText, includeCancelled, paymentMethod, groupInstallments);
 
         return transactionService.listTransactions(filter, principal.getUser().getId(), pageable);
     }

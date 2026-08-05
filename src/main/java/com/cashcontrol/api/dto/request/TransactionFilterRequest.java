@@ -21,10 +21,12 @@ public record TransactionFilterRequest(
         BigDecimal amountMax,
         String searchText,
         boolean includeCancelled,
-        PaymentMethodSlug paymentMethod
+        PaymentMethodSlug paymentMethod,
+        /** Colapsa cada parcelamento em uma linha só, representando a compra inteira. */
+        boolean groupInstallments
 ) {
     public static TransactionFilterRequest empty() {
         return new TransactionFilterRequest(null, null, null, null,
-                null, null, null, null, null, null, null, false, null);
+                null, null, null, null, null, null, null, false, null, false);
     }
 }
