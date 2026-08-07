@@ -79,7 +79,7 @@ class TransactionControllerIT {
                 userId).id();
 
         CreditCardResponse card = creditCardService.createCard(
-                new CreateCardRequest("My Visa", CardBrand.VISA, "Nubank",
+                new CreateCardRequest("My Visa", CardBrand.VISA, "Nubank", null,
                         new BigDecimal("5000.00"), 15, 22, null),
                 userId);
         creditCardId = card.id();

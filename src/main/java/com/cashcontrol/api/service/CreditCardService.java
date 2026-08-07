@@ -1,5 +1,7 @@
 package com.cashcontrol.api.service;
 
+import com.cashcontrol.api.domain.entity.CreditCard;
+import com.cashcontrol.api.domain.entity.Invoice;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.dto.request.CreateCardRequest;
 import com.cashcontrol.api.dto.request.EditCardRequest;
@@ -10,6 +12,7 @@ import com.cashcontrol.api.dto.response.InvoiceItemResponse;
 import com.cashcontrol.api.dto.response.InvoiceResponse;
 import com.cashcontrol.api.dto.response.LimitUsageResponse;
 import com.cashcontrol.api.dto.response.SpendingByCategoryResponse;
+import com.cashcontrol.api.service.InvoiceCycleCalculator.InvoiceCycleInfo;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -34,6 +37,16 @@ public interface CreditCardService {
     LimitUsageResponse getLimitUsage(UUID cardId, UUID userId);
 
     List<SpendingByCategoryResponse> getSpendingByCategory(UUID cardId, LocalDate from, LocalDate to, UUID userId);
+
+    /**
+     * A fatura do ciclo, criando-a ABERTA e zerada se ainda não existir.
+     *
+     * <p>Público porque a importação de fatura em PDF precisa exatamente disto: o PDF
+     * de julho pode chegar antes de qualquer lançamento do mês ter sido registrado, e
+     * duplicar aqui a regra de "acha a fatura do mês ou abre uma" daria duas versões
+     * da mesma decisão.
+     */
+    Invoice getOrCreateInvoice(CreditCard card, InvoiceCycleInfo cycleInfo);
 
     void createInvoiceItemForTransaction(Transaction tx);
 

@@ -323,7 +323,7 @@ class InstallmentServiceIntegrationTest {
 
     private UUID createCard() {
         return creditCardService.createCard(
-                new CreateCardRequest("Test Card", CardBrand.MASTERCARD, "Itaú",
+                new CreateCardRequest("Test Card", CardBrand.MASTERCARD, "Itaú", null,
                         new BigDecimal("10000.00"), 10, 17, null),
                 userId).id();
     }

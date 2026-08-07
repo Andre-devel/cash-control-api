@@ -8,6 +8,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
@@ -23,6 +24,11 @@ public record CreateCardRequest(
 
         @Schema(description = "Issuing bank or institution name", example = "Nubank")
         @Size(max = 100) String issuer,
+
+        @Schema(description = "Last four digits printed on the card. Optional, but required for a "
+                              + "PDF invoice import to match its card sections automatically.",
+                example = "7866")
+        @Pattern(regexp = "\\d{4}", message = "Informe exatamente 4 dígitos.") String last4Digits,
 
         @Schema(description = "Total credit limit for this card. Serialized as decimal string.", required = true, example = "10000.00")
         @NotNull @Digits(integer = 17, fraction = 2) @DecimalMin("0.01") BigDecimal creditLimit,

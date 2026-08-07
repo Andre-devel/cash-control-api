@@ -374,7 +374,7 @@ class CreditCardControllerTest {
     }
 
     private CreditCardResponse buildCardResponse(UUID id) {
-        return new CreditCardResponse(id, "My Visa", CardBrand.VISA, "Test Bank",
+        return new CreditCardResponse(id, "My Visa", CardBrand.VISA, "Test Bank", null,
                 new BigDecimal("5000.00"), 15, 10, null, null, Instant.now(), Instant.now());
     }
 

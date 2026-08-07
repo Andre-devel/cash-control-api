@@ -70,7 +70,7 @@ class PartialPaymentTest {
      */
     private UUID setupClosedInvoice(String cardName, BigDecimal invoiceTotal) {
         CreditCardResponse card = creditCardService.createCard(
-                new CreateCardRequest(cardName, CardBrand.VISA, "Bank",
+                new CreateCardRequest(cardName, CardBrand.VISA, "Bank", null,
                         new BigDecimal("5000.00"), 15, 10, null),
                 userId);
 
@@ -159,7 +159,7 @@ class PartialPaymentTest {
     @Test
     void payingOpenInvoice_throwsBusinessRuleException() {
         CreditCardResponse card = creditCardService.createCard(
-                new CreateCardRequest("Open Invoice Card", CardBrand.VISA, "Bank",
+                new CreateCardRequest("Open Invoice Card", CardBrand.VISA, "Bank", null,
                         new BigDecimal("5000.00"), 15, 10, null),
                 userId);
 

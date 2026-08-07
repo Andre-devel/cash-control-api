@@ -119,7 +119,7 @@ class CreditCardApiIntegrationTest {
     @Test
     void recordCharge_updatesInvoiceTotal() throws Exception {
         CreditCardResponse card = creditCardService.createCard(
-                new CreateCardRequest("Charge Test Card", CardBrand.MASTERCARD, "Bank",
+                new CreateCardRequest("Charge Test Card", CardBrand.MASTERCARD, "Bank", null,
                         new BigDecimal("5000.00"), 15, 10, null), userId);
 
         LocalDate chargeDate = LocalDate.of(2026, 5, 5);
@@ -152,7 +152,7 @@ class CreditCardApiIntegrationTest {
     @Test
     void getInvoice_returnsInvoiceDetailWithItems() throws Exception {
         CreditCardResponse card = creditCardService.createCard(
-                new CreateCardRequest("Invoice Detail Card", CardBrand.ELO, "Bank",
+                new CreateCardRequest("Invoice Detail Card", CardBrand.ELO, "Bank", null,
                         new BigDecimal("3000.00"), 15, 10, null), userId);
 
         LocalDate chargeDate = LocalDate.of(2026, 4, 10);
@@ -175,7 +175,7 @@ class CreditCardApiIntegrationTest {
     @Test
     void payInvoice_fullPayment_marksInvoiceAsPaid() throws Exception {
         CreditCardResponse card = creditCardService.createCard(
-                new CreateCardRequest("Pay Test Card", CardBrand.VISA, "Bank",
+                new CreateCardRequest("Pay Test Card", CardBrand.VISA, "Bank", null,
                         new BigDecimal("2000.00"), 15, 10, null), userId);
 
         LocalDate chargeDate = LocalDate.of(2026, 3, 5);
@@ -213,7 +213,7 @@ class CreditCardApiIntegrationTest {
     @Test
     void getLimitUsage_reflectsCharges() throws Exception {
         CreditCardResponse card = creditCardService.createCard(
-                new CreateCardRequest("Limit Usage Card", CardBrand.VISA, "Bank",
+                new CreateCardRequest("Limit Usage Card", CardBrand.VISA, "Bank", null,
                         new BigDecimal("1000.00"), 15, 10, null), userId);
 
         LocalDate chargeDate = LocalDate.of(2026, 5, 5);
@@ -235,7 +235,7 @@ class CreditCardApiIntegrationTest {
     @Test
     void recordCharge_onArchivedCard_returns422() throws Exception {
         CreditCardResponse card = creditCardService.createCard(
-                new CreateCardRequest("Archived Card", CardBrand.VISA, "Bank",
+                new CreateCardRequest("Archived Card", CardBrand.VISA, "Bank", null,
                         new BigDecimal("5000.00"), 15, 10, null), userId);
         creditCardService.archiveCard(card.id(), userId);
 

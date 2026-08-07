@@ -72,7 +72,7 @@ class InstallmentControllerIT {
                 userId).id();
 
         CreditCardResponse card = creditCardService.createCard(
-                new CreateCardRequest("My Mastercard", CardBrand.MASTERCARD, "Itaú",
+                new CreateCardRequest("My Mastercard", CardBrand.MASTERCARD, "Itaú", null,
                         new BigDecimal("10000.00"), 10, 17, null),
                 userId);
         creditCardId = card.id();

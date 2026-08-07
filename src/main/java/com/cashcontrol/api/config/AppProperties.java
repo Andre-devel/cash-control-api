@@ -47,6 +47,9 @@ public class AppProperties {
     private final StatementImport statementImport = new StatementImport();
 
     @Valid
+    private final InvoiceImport invoiceImport = new InvoiceImport();
+
+    @Valid
     private final Dashboard dashboard = new Dashboard();
 
     @Valid
@@ -130,6 +133,19 @@ public class AppProperties {
          */
         @Positive
         private int maxRows = 5000;
+    }
+
+    /** Importação de fatura de cartão em PDF. Liga em {@code app.invoice-import.*}. */
+    @Getter
+    @Setter
+    public static class InvoiceImport {
+
+        /**
+         * Sem teto de linhas equivalente ao do extrato: uma fatura raramente passa de
+         * duas dezenas de lançamentos, e o tamanho do arquivo já limita o abuso.
+         */
+        @Positive
+        private int maxFileSizeMb = 5;
     }
 
     @Getter

@@ -1,17 +1,22 @@
 package com.cashcontrol.api.controller;
 
+import com.cashcontrol.api.domain.entity.InvoiceImportFormat;
 import com.cashcontrol.api.dto.request.CreateCardRequest;
 import com.cashcontrol.api.dto.request.EditCardRequest;
+import com.cashcontrol.api.dto.request.FaturaImportCommitRequest;
 import com.cashcontrol.api.dto.request.PayInvoiceRequest;
 import com.cashcontrol.api.dto.request.RecordChargeRequest;
 import com.cashcontrol.api.dto.response.CreditCardResponse;
 import com.cashcontrol.api.dto.response.ErrorResponse;
+import com.cashcontrol.api.dto.response.FaturaImportPreviewResponse;
+import com.cashcontrol.api.dto.response.FaturaImportResultResponse;
 import com.cashcontrol.api.dto.response.InvoiceItemResponse;
 import com.cashcontrol.api.dto.response.InvoiceResponse;
 import com.cashcontrol.api.dto.response.LimitUsageResponse;
 import com.cashcontrol.api.dto.response.SpendingByCategoryResponse;
 import com.cashcontrol.api.security.AuthenticatedUser;
 import com.cashcontrol.api.service.CreditCardService;
+import com.cashcontrol.api.service.FaturaImportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -24,6 +29,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -33,8 +39,10 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -48,6 +56,7 @@ import java.util.UUID;
 public class CreditCardController {
 
     private final CreditCardService creditCardService;
+    private final FaturaImportService faturaImportService;
 
     @Operation(summary = "Create credit card", description = "Registers a new credit card for the authenticated user and opens the first invoice.")
     @ApiResponses({
@@ -159,6 +168,59 @@ public class CreditCardController {
             @RequestParam(defaultValue = "20") int size,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         return creditCardService.getInvoice(id, referenceMonth, principal.getUser().getId(), page, size);
+    }
+
+    @Operation(summary = "Preview invoice import", description = """
+            Reads a credit card invoice PDF and returns its charges grouped by card section, \
+            **without persisting anything**.
+
+            A single Inter invoice covers the primary card and its additional cards, so the response \
+            is a list of groups: each one carries the last four digits read from the PDF and, when a \
+            registered card has the same `last4Digits`, the suggested card to import into. Credits \
+            (invoice payments, refunds) are dropped and only counted. Charges already imported into \
+            that month's invoice are flagged by `externalRef`, so re-importing the same PDF is safe. \
+            Send the approved rows back to `POST /api/v1/cards/invoices/import` to persist them.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Preview returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Unreadable file or unsupported format",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping(value = "/invoices/import/preview", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("isAuthenticated()")
+    public FaturaImportPreviewResponse previewInvoiceImport(
+            @Parameter(description = "Invoice PDF file", required = true) @RequestPart("file") MultipartFile file,
+            @Parameter(description = "Invoice file format")
+            @RequestParam(defaultValue = "INTER_FATURA_PDF") InvoiceImportFormat format,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return faturaImportService.preview(file, format, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Commit invoice import", description = """
+            Persists the invoice charges the user approved in the preview.
+
+            Each row carries the credit card chosen for its group, and every row lands on that card's \
+            invoice for `referenceMonth` — the invoice is opened if it does not exist yet. Rows whose \
+            `externalRef` already exists on that invoice are skipped, so replaying the same payload is \
+            a no-op. A card whose invoice already received a payment is reported per row and does not \
+            prevent the other cards in the same PDF from being imported.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Import finished"),
+            @ApiResponse(responseCode = "400", description = "Validation error",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Invalid reference month",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping("/invoices/import")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("isAuthenticated()")
+    public FaturaImportResultResponse commitInvoiceImport(
+            @Valid @RequestBody FaturaImportCommitRequest request,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return faturaImportService.commit(request, principal.getUser().getId());
     }
 
     @Operation(summary = "Pay invoice", description = "Pays an invoice fully or partially. A partial payment creates a revolving balance item on the next invoice.")

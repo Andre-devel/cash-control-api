@@ -89,6 +89,7 @@ public class CreditCardServiceImpl implements CreditCardService {
         card.setName(request.name());
         card.setBrand(request.brand());
         card.setIssuer(request.issuer());
+        card.setLast4Digits(request.last4Digits());
         card.setCreditLimit(request.creditLimit());
         card.setClosingDay(request.closingDay());
         card.setDueDay(request.dueDay());
@@ -144,6 +145,7 @@ public class CreditCardServiceImpl implements CreditCardService {
         card.setName(request.name());
         card.setBrand(request.brand());
         card.setIssuer(request.issuer());
+        card.setLast4Digits(request.last4Digits());
         card.setCreditLimit(request.creditLimit());
         card.setClosingDay(request.closingDay());
         card.setDueDay(request.dueDay());
@@ -204,7 +206,8 @@ public class CreditCardServiceImpl implements CreditCardService {
         return toItemResponse(item);
     }
 
-    private Invoice getOrCreateInvoice(CreditCard card, InvoiceCycleInfo cycleInfo) {
+    @Override
+    public Invoice getOrCreateInvoice(CreditCard card, InvoiceCycleInfo cycleInfo) {
         return invoiceRepository.findByCreditCard_IdAndReferenceMonth(card.getId(), cycleInfo.referenceMonth())
                 .orElseGet(() -> {
                     Invoice inv = new Invoice();
@@ -530,6 +533,7 @@ public class CreditCardServiceImpl implements CreditCardService {
                 card.getName(),
                 card.getBrand(),
                 card.getIssuer(),
+                card.getLast4Digits(),
                 card.getCreditLimit(),
                 card.getClosingDay(),
                 card.getDueDay(),

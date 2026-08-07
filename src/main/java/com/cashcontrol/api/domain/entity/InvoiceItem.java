@@ -83,6 +83,13 @@ public class InvoiceItem {
     @Column(name = "total_installments")
     private Integer totalInstallments;
 
+    /**
+     * Hash da linha da fatura em PDF que originou este item. NULL em tudo que não
+     * veio de importação; é ele que faz reimportar a mesma fatura ser um no-op.
+     */
+    @Column(name = "external_ref", length = 64)
+    private String externalRef;
+
     @Column(name = "is_detached", nullable = false)
     private boolean isDetached = false;
 

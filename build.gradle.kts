@@ -29,6 +29,7 @@ val springdocVersion = "2.8.8"
 val bouncycastleVersion = "1.80"
 val logstashEncoderVersion = "8.0"
 val testcontainersVersion = "1.21.0"
+val pdfboxVersion = "3.0.7"
 
 dependencies {
     // Spring Boot Starters
@@ -67,6 +68,11 @@ dependencies {
 
     // Structured JSON logging for observability stacks (ELK, Loki, CloudWatch)
     implementation("net.logstash.logback:logstash-logback-encoder:$logstashEncoderVersion")
+
+    // PDFBox — extração de texto das faturas de cartão em PDF. Única dependência nova
+    // da importação de fatura: diferente do CSV do extrato, não há como ler um PDF em
+    // JVM pura sem uma biblioteca.
+    implementation("org.apache.pdfbox:pdfbox:$pdfboxVersion")
 
     // Test
     testImplementation("org.springframework.boot:spring-boot-starter-test")

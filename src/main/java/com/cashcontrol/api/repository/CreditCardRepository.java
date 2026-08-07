@@ -17,6 +17,15 @@ public interface CreditCardRepository extends JpaRepository<CreditCard, UUID> {
 
     Optional<CreditCard> findByIdAndUserIdAndDeletedAtIsNull(UUID id, UUID userId);
 
+    /**
+     * Cartões cujos 4 últimos dígitos casam com uma seção da fatura em PDF.
+     *
+     * <p>Lista e não {@code Optional}: nada impede o usuário de ter dois cartões
+     * terminando igual, e nesse caso a importação prefere não sugerir nada a sugerir
+     * o errado.
+     */
+    List<CreditCard> findAllByUserIdAndLast4DigitsAndDeletedAtIsNull(UUID userId, String last4Digits);
+
     boolean existsByUserIdAndNameAndDeletedAtIsNull(UUID userId, String name);
 
     boolean existsByUserIdAndNameAndDeletedAtIsNullAndIdNot(UUID userId, String name, UUID excludeId);

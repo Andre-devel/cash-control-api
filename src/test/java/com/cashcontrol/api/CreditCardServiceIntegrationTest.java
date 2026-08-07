@@ -12,7 +12,9 @@ import com.cashcontrol.api.dto.response.CreditCardResponse;
 import com.cashcontrol.api.dto.response.InvoiceItemResponse;
 import com.cashcontrol.api.dto.response.InvoiceResponse;
 import com.cashcontrol.api.dto.response.LimitUsageResponse;
+import com.cashcontrol.api.dto.response.SpendingByCategoryResponse;
 import com.cashcontrol.api.repository.InvoiceRepository;
+import com.cashcontrol.api.service.CategoryService;
 import com.cashcontrol.api.service.CreditCardService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,6 +40,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class CreditCardServiceIntegrationTest {
 
     @Autowired private CreditCardService creditCardService;
+    @Autowired private CategoryService categoryService;
     @Autowired private InvoiceRepository invoiceRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
 
@@ -57,7 +60,7 @@ class CreditCardServiceIntegrationTest {
     }
 
     private CreateCardRequest defaultRequest(String name) {
-        return new CreateCardRequest(name, CardBrand.VISA, "Test Bank",
+        return new CreateCardRequest(name, CardBrand.VISA, "Test Bank", null,
                 new BigDecimal("5000.00"), 15, 10, null);
     }
 
@@ -93,7 +96,7 @@ class CreditCardServiceIntegrationTest {
     void listCards_returnsAllCards() {
         creditCardService.createCard(defaultRequest("Card A"), userId);
         creditCardService.createCard(new CreateCardRequest("Card B", CardBrand.MASTERCARD,
-                "Bank B", new BigDecimal("3000.00"), 20, 5, null), userId);
+                "Bank B", null, new BigDecimal("3000.00"), 20, 5, null), userId);
 
         List<CreditCardResponse> cards = creditCardService.listCards(userId);
         assertThat(cards).hasSize(2);
@@ -103,7 +106,7 @@ class CreditCardServiceIntegrationTest {
     void editCard_changesName() {
         CreditCardResponse created = creditCardService.createCard(defaultRequest("Old Name"), userId);
 
-        EditCardRequest editRequest = new EditCardRequest("New Name", CardBrand.VISA, "Test Bank",
+        EditCardRequest editRequest = new EditCardRequest("New Name", CardBrand.VISA, "Test Bank", null,
                 new BigDecimal("5000.00"), 15, 10);
         CreditCardResponse updated = creditCardService.editCard(created.id(), editRequest, userId);
 
@@ -115,10 +118,10 @@ class CreditCardServiceIntegrationTest {
     void editCard_duplicateNameForOtherCard_throwsConflict() {
         creditCardService.createCard(defaultRequest("Card X"), userId);
         CreditCardResponse card2 = creditCardService.createCard(
-                new CreateCardRequest("Card Y", CardBrand.ELO, "Bank", new BigDecimal("2000.00"), 10, 5, null),
+                new CreateCardRequest("Card Y", CardBrand.ELO, "Bank", null, new BigDecimal("2000.00"), 10, 5, null),
                 userId);
 
-        EditCardRequest editRequest = new EditCardRequest("Card X", CardBrand.ELO, "Bank",
+        EditCardRequest editRequest = new EditCardRequest("Card X", CardBrand.ELO, "Bank", null,
                 new BigDecimal("2000.00"), 10, 5);
         assertThatThrownBy(() -> creditCardService.editCard(card2.id(), editRequest, userId))
                 .isInstanceOf(ConflictException.class);
@@ -140,6 +143,50 @@ class CreditCardServiceIntegrationTest {
 
         assertThatThrownBy(() -> creditCardService.archiveCard(created.id(), userId))
                 .isInstanceOf(BusinessRuleException.class);
+    }
+
+    /**
+     * O filtro de data opcional precisa de {@code CAST(:from AS LocalDate)} no JPQL: sem
+     * ele o Postgres recebe {@code ? IS NULL} sem contexto de tipo e recusa a consulta com
+     * "could not determine data type of parameter". O teste de controller não pega isso
+     * porque lá o serviço é mockado — só um banco de verdade reproduz.
+     */
+    @Test
+    void getSpendingByCategory_withoutADateRange_readsEveryCharge() {
+        CreditCardResponse card = creditCardService.createCard(defaultRequest("Spending Card"), userId);
+        UUID categoryId = foodCategoryId();
+        creditCardService.recordCharge(card.id(), new RecordChargeRequest(
+                "Mercado", new BigDecimal("150.00"), LocalDate.now().withDayOfMonth(1),
+                categoryId, null, null), userId);
+
+        List<SpendingByCategoryResponse> spending =
+                creditCardService.getSpendingByCategory(card.id(), null, null, userId);
+
+        assertThat(spending).singleElement().satisfies(row -> {
+            assertThat(row.categoryId()).isEqualTo(categoryId);
+            assertThat(row.totalAmount()).isEqualByComparingTo("150.00");
+        });
+    }
+
+    @Test
+    void getSpendingByCategory_withADateRange_leavesOutWhatIsOutsideIt() {
+        CreditCardResponse card = creditCardService.createCard(defaultRequest("Ranged Card"), userId);
+        LocalDate inside = LocalDate.now().withDayOfMonth(1);
+        creditCardService.recordCharge(card.id(), new RecordChargeRequest(
+                "Mercado", new BigDecimal("150.00"), inside, foodCategoryId(), null, null), userId);
+
+        assertThat(creditCardService.getSpendingByCategory(
+                card.id(), inside.plusDays(1), inside.plusMonths(1), userId)).isEmpty();
+        assertThat(creditCardService.getSpendingByCategory(
+                card.id(), inside, inside.plusMonths(1), userId)).hasSize(1);
+    }
+
+    private UUID foodCategoryId() {
+        return categoryService.listCategories(userId, false, false).stream()
+                .filter(category -> category.name().equals("Alimentação"))
+                .findFirst()
+                .orElseThrow()
+                .id();
     }
 
     @Test

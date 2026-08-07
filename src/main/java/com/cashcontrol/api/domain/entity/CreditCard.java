@@ -50,6 +50,13 @@ public class CreditCard {
     @Column(name = "issuer", length = 100)
     private String issuer;
 
+    /**
+     * Últimos 4 dígitos impressos no cartão. Opcional, e é o que casa cada seção
+     * "CARTÃO ****XXXX" da fatura em PDF com o cartão cadastrado na importação.
+     */
+    @Column(name = "last4_digits", length = 4)
+    private String last4Digits;
+
     @Column(name = "credit_limit", nullable = false, precision = 19, scale = 2)
     private BigDecimal creditLimit;
 
