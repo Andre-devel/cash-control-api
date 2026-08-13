@@ -97,6 +97,7 @@ tasks.withType<JavaCompile> {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    maxHeapSize = "3g"
 }
 
 fun loadDotEnv(): Map<String, String> {
