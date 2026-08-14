@@ -12,5 +12,5 @@ public record CreateCategoryRequest(
         @Pattern(regexp = "^#[0-9A-Fa-f]{6}$", message = "Color must be a valid hex code (e.g. #FF5733)")
         @Size(max = 7) String color,
         @Size(max = 50) String icon,
-        int sortOrder
+        Integer sortOrder
 ) {}

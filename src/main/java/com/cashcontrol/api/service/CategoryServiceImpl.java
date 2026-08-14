@@ -95,7 +95,7 @@ public class CategoryServiceImpl implements CategoryService {
         category.setName(request.name());
         category.setColor(request.color());
         category.setIcon(request.icon());
-        category.setSortOrder(request.sortOrder());
+        category.setSortOrder(request.sortOrder() != null ? request.sortOrder() : 0);
 
         category = categoryRepository.save(category);
         return toCategoryResponse(category, Collections.emptyList());
