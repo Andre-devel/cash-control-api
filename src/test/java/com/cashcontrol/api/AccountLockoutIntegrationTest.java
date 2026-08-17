@@ -73,7 +73,7 @@ class AccountLockoutIntegrationTest extends BaseIntegrationTest {
         // Login should now succeed — expired auto-lockout is cleared automatically
         var response = authService.login(new LoginRequest(email, password), "127.0.0.1", "TestAgent");
 
-        assertThat(response.accessToken()).isNotBlank();
+        assertThat(response.response().accessToken()).isNotBlank();
 
         User cleared = userRepository.findByEmailAndDeletedAtIsNull(email).orElseThrow();
         assertThat(cleared.getAccountStatus().getSlug()).isEqualTo(UserSlugConstants.STATUS_ACTIVE);

@@ -4,9 +4,11 @@ import com.cashcontrol.api.config.PostgresTestContainerConfig;
 import com.cashcontrol.api.domain.UserSlugConstants;
 import com.cashcontrol.api.domain.entity.User;
 import com.cashcontrol.api.dto.response.AuthResponse;
+import com.cashcontrol.api.service.AuthTokens;
 import com.cashcontrol.api.dto.response.MessageResponse;
 import com.cashcontrol.api.dto.response.UserProfileResponse;
 import com.cashcontrol.api.security.AuthenticatedUser;
+import com.cashcontrol.api.security.RefreshTokenCookie;
 import com.cashcontrol.api.service.AuthService;
 import com.cashcontrol.api.service.EmailVerificationService;
 import com.cashcontrol.api.service.PasswordResetService;
@@ -16,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import jakarta.servlet.http.Cookie;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -28,6 +32,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doNothing;
@@ -92,7 +99,7 @@ class AuthControllerTest {
     @Test
     void login_withValidCredentials_returns200WithJwt() throws Exception {
         when(authService.login(any(), anyString(), any()))
-                .thenReturn(AuthResponse.of("jwt-token-here", 900));
+                .thenReturn(new AuthTokens(AuthResponse.of("jwt-token-here", 900), "refresh-token"));
 
         mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -100,7 +107,34 @@ class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accessToken").value("jwt-token-here"))
                 .andExpect(jsonPath("$.tokenType").value("Bearer"))
-                .andExpect(header().string("Cache-Control", "no-store"));
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(header().string(HttpHeaders.SET_COOKIE,
+                        allOf(containsString(RefreshTokenCookie.NAME + "=refresh-token"),
+                              containsString("HttpOnly"),
+                              containsString("SameSite=Lax"),
+                              containsString("Path=/api/v1/auth"))))
+                // The refresh token must only ever leave through the cookie
+                .andExpect(jsonPath("$.refreshToken").doesNotExist())
+                .andExpect(content().string(not(containsString("refresh-token"))));
+    }
+
+    @Test
+    void refresh_withCookie_returnsNewTokenAndRotatesCookie() throws Exception {
+        when(authService.refresh(anyString(), anyString(), any()))
+                .thenReturn(new AuthTokens(AuthResponse.of("rotated-jwt", 900), "rotated-refresh"));
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(new Cookie(RefreshTokenCookie.NAME, "current-refresh")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").value("rotated-jwt"))
+                .andExpect(header().string(HttpHeaders.SET_COOKIE,
+                        containsString(RefreshTokenCookie.NAME + "=rotated-refresh")));
+    }
+
+    @Test
+    void refresh_withoutCookie_returns401() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/refresh"))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

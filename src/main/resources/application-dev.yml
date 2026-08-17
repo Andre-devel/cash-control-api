@@ -17,6 +17,9 @@ management:
 app:
   mail:
     from: noreply@dev.local
+  jwt:
+    # Local development runs over plain HTTP, where a Secure cookie is never sent back.
+    refresh-cookie-secure: false
 
 logging:
   level:

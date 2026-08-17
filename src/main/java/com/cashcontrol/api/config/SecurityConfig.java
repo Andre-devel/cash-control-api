@@ -69,6 +69,8 @@ public class SecurityConfig {
                 .requestMatchers(
                     "/api/v1/auth/register",
                     "/api/v1/auth/login",
+                    // Called precisely when the access token is already dead
+                    "/api/v1/auth/refresh",
                     "/api/v1/auth/password-reset/request",
                     "/api/v1/auth/password-reset/confirm",
                     "/api/v1/auth/email/verify",
@@ -121,7 +123,9 @@ public class SecurityConfig {
 
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Correlation-Id"));
-        config.setAllowCredentials(false);
+        // Required for the refresh token cookie to be sent cross-origin in development,
+        // where the Vite dev server and the API sit on different ports.
+        config.setAllowCredentials(true);
         config.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

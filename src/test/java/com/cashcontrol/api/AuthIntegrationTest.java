@@ -78,8 +78,8 @@ class AuthIntegrationTest extends BaseIntegrationTest {
 
         var response = authService.login(new LoginRequest(email, "Str0ng!Pass123"), "127.0.0.1", "TestAgent");
 
-        assertThat(response.accessToken()).isNotBlank();
-        assertThat(response.tokenType()).isEqualTo("Bearer");
+        assertThat(response.response().accessToken()).isNotBlank();
+        assertThat(response.response().tokenType()).isEqualTo("Bearer");
     }
 
     @Test

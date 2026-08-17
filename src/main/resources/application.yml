@@ -71,8 +71,10 @@ app:
   jwt:
     secret: ${JWT_SECRET}
     expiration-minutes: ${JWT_EXPIRATION_MINUTES:15}
+    refresh-expiration-days: ${JWT_REFRESH_EXPIRATION_DAYS:7}
+    refresh-cookie-secure: ${JWT_REFRESH_COOKIE_SECURE:true}
   cors:
-    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:3000,http://localhost:8080,http://localhost:5174}
+    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,http://localhost:8080,http://localhost:5174}
   security:
     max-failed-attempts: ${MAX_FAILED_ATTEMPTS:5}
     lockout-duration-minutes: ${LOCKOUT_DURATION_MINUTES:15}
@@ -83,6 +85,7 @@ app:
   retention:
     password-reset-days: ${RETENTION_PASSWORD_RESET_DAYS:30}
     verification-token-days: ${RETENTION_VERIFICATION_TOKEN_DAYS:7}
+    refresh-token-days: ${RETENTION_REFRESH_TOKEN_DAYS:30}
 
   attachments:
     max-file-size-mb: ${ATTACHMENT_MAX_SIZE_MB:10}

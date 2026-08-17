@@ -17,12 +17,15 @@ import com.cashcontrol.api.repository.UserRepository;
 import com.cashcontrol.api.security.CorrelationIdHolder;
 import com.cashcontrol.api.security.JwtService;
 import com.cashcontrol.api.security.PermissionResolver;
+import com.cashcontrol.api.security.RefreshTokenCookie;
 import com.cashcontrol.api.service.AccountStatusChecker;
+import com.cashcontrol.api.service.RefreshTokenService;
 import com.cashcontrol.api.util.DataMasker;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
@@ -52,6 +55,8 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
     private final LoginAttemptRepository loginAttemptRepository;
     private final CookieOAuth2AuthorizationRequestRepository cookieOAuth2AuthorizationRequestRepository;
     private final OAuth2UserInfoExtractor oAuth2UserInfoExtractor;
+    private final RefreshTokenService refreshTokenService;
+    private final RefreshTokenCookie refreshTokenCookie;
 
     @Override
     @Transactional
@@ -100,6 +105,10 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
         attempt.setWasSuccessful(true);
         attempt.setCorrelationId(correlationId);
         loginAttemptRepository.save(attempt);
+
+        String refreshToken = refreshTokenService.issue(
+                user, request.getRemoteAddr(), request.getHeader("User-Agent"));
+        response.addHeader(HttpHeaders.SET_COOKIE, refreshTokenCookie.build(refreshToken).toString());
 
         response.sendRedirect(appProperties.getOauth2SuccessRedirectUrl() + "?token=" + jwt);
     }

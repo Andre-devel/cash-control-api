@@ -74,6 +74,6 @@ class UserManagementIntegrationTest extends BaseIntegrationTest {
         userService.activateUser(null, user.getId());
 
         var response = authService.login(new LoginRequest(email, "Str0ng!Pass123"), null, null);
-        assertThat(response.accessToken()).isNotBlank();
+        assertThat(response.response().accessToken()).isNotBlank();
     }
 }

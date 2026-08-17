@@ -4,6 +4,7 @@ import com.cashcontrol.api.config.PostgresTestContainerConfig;
 import com.cashcontrol.api.domain.UserSlugConstants;
 import com.cashcontrol.api.domain.entity.User;
 import com.cashcontrol.api.dto.response.AuthResponse;
+import com.cashcontrol.api.service.AuthTokens;
 import com.cashcontrol.api.dto.response.UserProfileResponse;
 import com.cashcontrol.api.security.AuthenticatedUser;
 import com.cashcontrol.api.service.AuthService;
@@ -67,7 +68,7 @@ class SensitiveFieldLeakTest {
     @Test
     void loginResponse_doesNotContainPasswordHash() throws Exception {
         when(authService.login(any(), anyString(), any()))
-                .thenReturn(AuthResponse.of("jwt-token", 900));
+                .thenReturn(new AuthTokens(AuthResponse.of("jwt-token", 900), "refresh-token"));
 
         mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -82,7 +83,7 @@ class SensitiveFieldLeakTest {
     @Test
     void loginResponse_doesNotExposeUserEmail() throws Exception {
         when(authService.login(any(), anyString(), any()))
-                .thenReturn(AuthResponse.of("jwt-token", 900));
+                .thenReturn(new AuthTokens(AuthResponse.of("jwt-token", 900), "refresh-token"));
 
         mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)

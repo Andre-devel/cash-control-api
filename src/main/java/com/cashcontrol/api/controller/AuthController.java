@@ -5,8 +5,12 @@ import com.cashcontrol.api.dto.response.AuthResponse;
 import com.cashcontrol.api.dto.response.ErrorResponse;
 import com.cashcontrol.api.dto.response.MessageResponse;
 import com.cashcontrol.api.dto.response.UserProfileResponse;
+import com.cashcontrol.api.domain.exception.InvalidCredentialsException;
 import com.cashcontrol.api.security.AuthenticatedUser;
+import com.cashcontrol.api.security.RefreshTokenCookie;
 import com.cashcontrol.api.service.AuthService;
+import com.cashcontrol.api.service.AuthTokens;
+import com.cashcontrol.api.service.RefreshTokenService;
 import com.cashcontrol.api.service.EmailVerificationService;
 import com.cashcontrol.api.service.OAuthProviderService;
 import com.cashcontrol.api.service.PasswordResetService;
@@ -43,6 +47,8 @@ public class AuthController {
     private final PasswordResetService passwordResetService;
     private final EmailVerificationService emailVerificationService;
     private final OAuthProviderService oAuthProviderService;
+    private final RefreshTokenService refreshTokenService;
+    private final RefreshTokenCookie refreshTokenCookie;
 
     @Operation(
             summary = "Register a new account",
@@ -87,12 +93,42 @@ public class AuthController {
     public ResponseEntity<AuthResponse> login(
             @Valid @RequestBody LoginRequest request,
             HttpServletRequest httpRequest) {
-        String ip = httpRequest.getRemoteAddr();
-        String userAgent = httpRequest.getHeader(HttpHeaders.USER_AGENT);
-        AuthResponse response = authService.login(request, ip, userAgent);
+        AuthTokens tokens = authService.login(
+                request, httpRequest.getRemoteAddr(), httpRequest.getHeader(HttpHeaders.USER_AGENT));
+        return tokenResponse(tokens);
+    }
+
+    @Operation(
+            summary = "Refresh the access token",
+            description = "Exchanges the refresh token cookie for a new access token. "
+                    + "The refresh token is rotated: the presented one is revoked and a replacement cookie is set. "
+                    + "Re-presenting an already revoked token revokes the entire session family.",
+            security = {}
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "New access token issued and refresh cookie rotated"),
+            @ApiResponse(responseCode = "401", description = "Missing, expired, revoked or reused refresh token",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "429", description = "Rate limit exceeded",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "500", description = "Internal server error",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping("/refresh")
+    public ResponseEntity<AuthResponse> refresh(HttpServletRequest httpRequest) {
+        String rawToken = refreshTokenCookie.read(httpRequest)
+                .orElseThrow(() -> new InvalidCredentialsException("Refresh token cookie is missing."));
+
+        AuthTokens tokens = authService.refresh(
+                rawToken, httpRequest.getRemoteAddr(), httpRequest.getHeader(HttpHeaders.USER_AGENT));
+        return tokenResponse(tokens);
+    }
+
+    private ResponseEntity<AuthResponse> tokenResponse(AuthTokens tokens) {
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")
-                .body(response);
+                .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.build(tokens.refreshToken()).toString())
+                .body(tokens.response());
     }
 
     @Operation(
@@ -110,10 +146,16 @@ public class AuthController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     @PostMapping("/logout")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
     @PreAuthorize("isAuthenticated()")
-    public void logout(@AuthenticationPrincipal AuthenticatedUser principal) {
+    public ResponseEntity<Void> logout(
+            @AuthenticationPrincipal AuthenticatedUser principal,
+            HttpServletRequest httpRequest) {
+        refreshTokenCookie.read(httpRequest).ifPresent(refreshTokenService::revoke);
         authService.logout(principal.getUser().getId());
+
+        return ResponseEntity.noContent()
+                .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.clear().toString())
+                .build();
     }
 
     @Operation(

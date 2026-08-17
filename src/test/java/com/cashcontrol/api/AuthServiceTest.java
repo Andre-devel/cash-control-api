@@ -12,6 +12,7 @@ import com.cashcontrol.api.dto.request.ChangePasswordRequest;
 import com.cashcontrol.api.dto.request.LoginRequest;
 import com.cashcontrol.api.dto.request.RegisterRequest;
 import com.cashcontrol.api.dto.response.AuthResponse;
+import com.cashcontrol.api.service.AuthTokens;
 import com.cashcontrol.api.dto.response.MessageResponse;
 import com.cashcontrol.api.repository.EmailVerificationTokenRepository;
 import com.cashcontrol.api.repository.LookupCache;
@@ -23,6 +24,7 @@ import com.cashcontrol.api.service.AccountStatusChecker;
 import com.cashcontrol.api.service.AuthServiceImpl;
 import com.cashcontrol.api.service.BruteForceProtectionService;
 import com.cashcontrol.api.service.EmailService;
+import com.cashcontrol.api.service.RefreshTokenService;
 import com.cashcontrol.api.util.DataMasker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -63,6 +65,7 @@ class AuthServiceTest {
     @Mock private AuditService auditService;
     @Mock private AccountStatusChecker accountStatusChecker;
     @Mock private BruteForceProtectionService bruteForceService;
+    @Mock private RefreshTokenService refreshTokenService;
     @Mock private EmailService emailService;
     @Mock private AppProperties appProperties;
     @Mock private DataMasker dataMasker;
@@ -166,9 +169,9 @@ class AuthServiceTest {
         when(permissionResolver.resolveEffectivePermissions(any())).thenReturn(List.of("user:read"));
         when(jwtService.generateToken(any(), any(), any())).thenReturn("jwt.token.here");
 
-        AuthResponse response = authService.login(new LoginRequest("u@x.com", "correct"), null, null);
+        AuthTokens response = authService.login(new LoginRequest("u@x.com", "correct"), null, null);
 
-        assertThat(response.accessToken()).isEqualTo("jwt.token.here");
+        assertThat(response.response().accessToken()).isEqualTo("jwt.token.here");
         verify(bruteForceService).resetFailedAttempts(user);
         verify(auditService).record(eq(AuditEventSlug.AUTH_SUCCESS), eq(AuditOutcomeSlug.SUCCESS), any(), any());
     }

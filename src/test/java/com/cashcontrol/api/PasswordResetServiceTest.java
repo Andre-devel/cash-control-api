@@ -44,6 +44,7 @@ class PasswordResetServiceTest {
     @Mock private PasswordResetTokenRepository tokenRepository;
     @Mock private AuditService auditService;
     @Mock private EmailService emailService;
+    @Mock private com.cashcontrol.api.service.RefreshTokenService refreshTokenService;
     @Mock private PasswordEncoder passwordEncoder;
     @Mock private AppProperties appProperties;
     @Mock private DataMasker dataMasker;

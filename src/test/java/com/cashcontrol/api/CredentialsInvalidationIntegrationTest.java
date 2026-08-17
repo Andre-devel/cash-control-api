@@ -5,7 +5,7 @@ import com.cashcontrol.api.domain.UserSlugConstants;
 import com.cashcontrol.api.domain.entity.User;
 import com.cashcontrol.api.dto.request.LoginRequest;
 import com.cashcontrol.api.dto.request.RegisterRequest;
-import com.cashcontrol.api.dto.response.AuthResponse;
+import com.cashcontrol.api.service.AuthTokens;
 import com.cashcontrol.api.repository.LookupCache;
 import com.cashcontrol.api.repository.UserRepository;
 import com.cashcontrol.api.service.AdminSecurityService;
@@ -58,8 +58,8 @@ class CredentialsInvalidationIntegrationTest {
         authService.register(new RegisterRequest(email, password, true));
         activateUser(email);
 
-        AuthResponse loginResponse = authService.login(new LoginRequest(email, password), "127.0.0.1", "TestAgent");
-        String oldToken = loginResponse.accessToken();
+        AuthTokens loginResponse = authService.login(new LoginRequest(email, password), "127.0.0.1", "TestAgent");
+        String oldToken = loginResponse.response().accessToken();
 
         // Advance credentialsUpdatedAt past the JWT's iat to guarantee rejection
         User user = userRepository.findByEmailAndDeletedAtIsNull(email).orElseThrow();
@@ -79,8 +79,8 @@ class CredentialsInvalidationIntegrationTest {
         authService.register(new RegisterRequest(email, password, true));
         activateUser(email);
 
-        AuthResponse loginResponse = authService.login(new LoginRequest(email, password), "127.0.0.1", "TestAgent");
-        String oldToken = loginResponse.accessToken();
+        AuthTokens loginResponse = authService.login(new LoginRequest(email, password), "127.0.0.1", "TestAgent");
+        String oldToken = loginResponse.response().accessToken();
 
         User user = userRepository.findByEmailAndDeletedAtIsNull(email).orElseThrow();
 
@@ -105,8 +105,8 @@ class CredentialsInvalidationIntegrationTest {
         authService.register(new RegisterRequest(email, password, true));
         activateUser(email);
 
-        AuthResponse loginResponse = authService.login(new LoginRequest(email, password), "127.0.0.1", "TestAgent");
-        String oldToken = loginResponse.accessToken();
+        AuthTokens loginResponse = authService.login(new LoginRequest(email, password), "127.0.0.1", "TestAgent");
+        String oldToken = loginResponse.response().accessToken();
 
         User user = userRepository.findByEmailAndDeletedAtIsNull(email).orElseThrow();
 

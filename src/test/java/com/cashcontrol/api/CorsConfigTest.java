@@ -52,10 +52,11 @@ class CorsConfigTest {
     }
 
     @Test
-    void allowCredentialsIsNotSet() throws Exception {
+    void allowCredentialsIsSet() throws Exception {
+        // Required so the browser attaches the refresh token's HttpOnly cookie cross-origin
         mockMvc.perform(options("/api/v1/auth/login")
                         .header("Origin", "http://localhost:3000")
                         .header("Access-Control-Request-Method", "POST"))
-                .andExpect(header().doesNotExist("Access-Control-Allow-Credentials"));
+                .andExpect(header().string("Access-Control-Allow-Credentials", "true"));
     }
 }

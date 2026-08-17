@@ -6,6 +6,7 @@ import com.cashcontrol.api.audit.AuditService;
 import com.cashcontrol.api.config.AppProperties;
 import com.cashcontrol.api.repository.EmailVerificationTokenRepository;
 import com.cashcontrol.api.repository.PasswordResetTokenRepository;
+import com.cashcontrol.api.repository.RefreshTokenRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -22,6 +23,7 @@ public class TokenRetentionServiceImpl implements TokenRetentionService {
 
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final EmailVerificationTokenRepository emailVerificationTokenRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
     private final AuditService auditService;
     private final AppProperties appProperties;
 
@@ -57,6 +59,25 @@ public class TokenRetentionServiceImpl implements TokenRetentionService {
         auditService.record(AuditEventSlug.TOKEN_RETENTION_PURGE, AuditOutcomeSlug.SUCCESS, null, null,
                 Map.of(
                         "type", "EMAIL_VERIFICATION",
+                        "deletedCount", deleted,
+                        "retentionDays", retentionDays,
+                        "cutoff", cutoff.toString()
+                ));
+    }
+
+    @Override
+    @Scheduled(cron = "0 0 2 * * *")
+    public void purgeExpiredRefreshTokens() {
+        int retentionDays = appProperties.getRetention().getRefreshTokenDays();
+        Instant cutoff = Instant.now().minus(retentionDays, ChronoUnit.DAYS);
+
+        int deleted = refreshTokenRepository.deleteExpiredBefore(cutoff);
+        log.info("Token retention purge: deleted {} refresh tokens that expired more than {} days ago",
+                deleted, retentionDays);
+
+        auditService.record(AuditEventSlug.TOKEN_RETENTION_PURGE, AuditOutcomeSlug.SUCCESS, null, null,
+                Map.of(
+                        "type", "REFRESH_TOKEN",
                         "deletedCount", deleted,
                         "retentionDays", retentionDays,
                         "cutoff", cutoff.toString()

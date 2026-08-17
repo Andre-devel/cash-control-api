@@ -64,6 +64,15 @@ public class AppProperties {
 
         @Positive
         private int expirationMinutes = 15;
+
+        @Positive
+        private int refreshExpirationDays = 7;
+
+        /**
+         * Only turned off for local HTTP development — a refresh cookie without the
+         * Secure attribute travels in clear text.
+         */
+        private boolean refreshCookieSecure = true;
     }
 
     @Getter
@@ -104,6 +113,9 @@ public class AppProperties {
 
         @Positive
         private int verificationTokenDays = 7;
+
+        @Positive
+        private int refreshTokenDays = 30;
     }
 
     @Getter

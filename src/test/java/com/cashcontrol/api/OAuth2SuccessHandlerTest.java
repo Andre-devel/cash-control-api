@@ -66,6 +66,8 @@ class OAuth2SuccessHandlerTest {
     @Mock private LoginAttemptRepository loginAttemptRepository;
     @Mock private CookieOAuth2AuthorizationRequestRepository cookieOAuth2AuthorizationRequestRepository;
     @Mock private OAuth2UserInfoExtractor oAuth2UserInfoExtractor;
+    @Mock private com.cashcontrol.api.service.RefreshTokenService refreshTokenService;
+    @Mock private com.cashcontrol.api.security.RefreshTokenCookie refreshTokenCookie;
     @Mock private HttpServletRequest request;
     @Mock private HttpServletResponse response;
     @Mock private Authentication authentication;
@@ -107,6 +109,10 @@ class OAuth2SuccessHandlerTest {
         when(permissionResolver.resolveEffectivePermissions(any())).thenReturn(List.of("user:read"));
         when(accountStatusChecker.hasExpiredAutoLockout(any())).thenReturn(false);
         doNothing().when(accountStatusChecker).checkAuthenticationEligibility(any());
+
+        when(refreshTokenService.issue(any(), any(), any())).thenReturn("refresh-token");
+        when(refreshTokenCookie.build(anyString()))
+                .thenReturn(org.springframework.http.ResponseCookie.from("cash_control_refresh", "refresh-token").build());
     }
 
     @Test

@@ -13,6 +13,7 @@ Production-ready authentication and authorization module built with Spring Boot 
    - [Registration](#registration-emailpassword)
    - [Email Verification](#email-verification)
    - [Login](#login-emailpassword)
+   - [Token Refresh](#token-refresh)
    - [Google OAuth2](#google-oauth2)
    - [Logout](#logout)
    - [Password Reset](#password-reset)
@@ -99,9 +100,9 @@ Production-ready authentication and authorization module built with Spring Boot 
 
 **Key design decisions:**
 
-- **Stateless** — no server-side HTTP session. Every request is authenticated by verifying the JWT.
-- **No refresh tokens** — short-lived access tokens (default 15 min). Re-login for a new token.
-- **Credential invalidation without a blacklist** — `credentials_updated_at` column on `users`. Any JWT issued before this timestamp is rejected.
+- **Stateless access tokens** — no server-side HTTP session. Every request is authenticated by verifying the JWT.
+- **Short-lived access + rotating refresh tokens** — the access token lives 15 min (default); a refresh token in an HttpOnly cookie renews it for up to 7 days of sliding activity, without ever touching JavaScript.
+- **Credential invalidation without an access-token blacklist** — `credentials_updated_at` column on `users`. Any JWT issued before this timestamp is rejected. Refresh tokens follow the same rule (see [Token Refresh](#token-refresh)).
 - **Database-driven lookups** — statuses, event types, and categories are FK rows, not SQL ENUMs. Extensible without DDL changes.
 
 ---
@@ -112,10 +113,11 @@ Production-ready authentication and authorization module built with Spring Boot 
 
 #### Issuance
 
-A JWT is issued on successful login or OAuth2 callback. The token is returned in the response body as `{ "token": "..." }`. The client is responsible for storing and sending it.
+A JWT is issued on successful login, token refresh, or OAuth2 callback. The access token is returned in the response body; the client is responsible for storing and sending it. Login, refresh, and the OAuth2 callback also set an HttpOnly refresh token cookie alongside it — see [Token Refresh](#token-refresh).
 
 ```
-POST /api/v1/auth/login  →  { "token": "<jwt>" }
+POST /api/v1/auth/login  →  { "accessToken": "<jwt>", "tokenType": "Bearer", "expiresInSeconds": 900 }
+                             Set-Cookie: cash_control_refresh=<opaque>; HttpOnly; SameSite=Lax; Path=/api/v1/auth
 ```
 
 #### Token Structure
@@ -175,7 +177,7 @@ Include it as a standard Bearer token:
 Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 ```
 
-> **Cookie / HttpOnly note:** This API does **not** use HttpOnly cookies for the JWT. The token is returned in the response body and the client stores it (memory or `localStorage`). This enables use from native apps, CLIs, and cross-origin SPAs. If you need cookie-based delivery (BFF pattern), it must be added at the gateway layer or as a custom response strategy.
+> **Cookie / HttpOnly note:** The access token itself is **not** in an HttpOnly cookie — it's returned in the response body and the client stores it (memory or `localStorage`), which enables use from native apps, CLIs, and cross-origin SPAs. Only the **refresh** token lives in an HttpOnly cookie (see [Token Refresh](#token-refresh)); it never passes through JavaScript, so it isn't exposed to XSS the way a token in `localStorage` would be.
 
 ---
 
@@ -247,11 +249,43 @@ Content-Type: application/json
    - Resets `failed_login_attempts`.
    - Updates `last_login_at`.
    - Resolves effective permissions via `PermissionResolver`.
-   - Issues JWT.
+   - Issues an access token JWT and a refresh token (see [Token Refresh](#token-refresh)).
    - Records `AUTH_SUCCESS`.
-   - Returns `{ "token": "...", "expiresIn": 900 }`.
+   - Returns `{ "accessToken": "...", "tokenType": "Bearer", "expiresInSeconds": 900 }` plus the refresh cookie; response has `Cache-Control: no-store`.
 
 All failure cases return the **same generic** `401 Unauthorized` body to prevent enumeration.
+
+---
+
+### Token Refresh
+
+```
+POST /api/v1/auth/refresh
+Cookie: cash_control_refresh=<opaque>
+```
+
+No request body, no `Authorization` header — the endpoint is called precisely when the access token has already expired. It reads the refresh token from the `cash_control_refresh` cookie instead.
+
+**Flow (rotation with reuse detection):**
+
+1. Hashes the incoming raw token (SHA-256) and looks it up in `refresh_tokens`.
+2. Not found, expired, or issued before `credentials_updated_at` → `401`.
+3. **Already revoked** → the cookie was replayed after its session already rotated past it, which only happens if it leaked. The entire token *family* (every token descended from the same login) is revoked, `REFRESH_TOKEN_REUSE_DETECTED` is recorded, and the request is rejected.
+4. Otherwise: the presented token is revoked, a successor is issued in the same family, and a new access token is minted. Records `TOKEN_REFRESHED`.
+
+```
+Response: { "accessToken": "<new jwt>", "tokenType": "Bearer", "expiresInSeconds": 900 }
+           Set-Cookie: cash_control_refresh=<new opaque>; HttpOnly; SameSite=Lax; Path=/api/v1/auth
+```
+
+**Properties:**
+
+- **Opaque, not a JWT** — 32 random bytes (`SecureRandom`), base64url-encoded. Only its SHA-256 hash is stored, mirroring the `password_reset_tokens` / `email_verification_tokens` pattern.
+- **Sliding 7-day lifetime** (`JWT_REFRESH_EXPIRATION_DAYS`) — each rotation resets the clock, so an actively used session never expires; an abandoned one does.
+- **Single-use via rotation** — every `/auth/refresh` call invalidates the token it consumed, whether or not the caller keeps using the response.
+- **Scoped cookie** — `HttpOnly`, `SameSite=Lax`, `Secure` (except local HTTP dev, `JWT_REFRESH_COOKIE_SECURE=false`), and `Path=/api/v1/auth` so it is never sent to the financial endpoints that don't need it.
+- **Rate-limited** the same as `/auth/login` (see [Rate Limiting](#rate-limiting)).
+- **Logout-scoped, not global** — logout revokes only the refresh token in the request's own cookie; other devices/sessions stay signed in. Password change, password reset, admin force-reauth, account disable, and soft delete all bump `credentials_updated_at`, which invalidates *every* refresh token for that user on their next use — same mechanism access tokens already relied on.
 
 ---
 
@@ -279,7 +313,7 @@ GET /login/oauth2/code/google?code=...&state=...
    - **Not found:** Creates a new user with status `ACTIVE`, `auth_origin=GOOGLE`. Records `USER_REGISTERED_GOOGLE`.
    - **Found (LOCAL origin):** Links the Google account, sets `auth_origin=MIXED`. Records `ACCOUNT_LINKED_GOOGLE`.
    - **Found (already GOOGLE or MIXED):** Updates `last_used_at`.
-4. Issues JWT.
+4. Issues an access token JWT and a refresh token, set as the `cash_control_refresh` HttpOnly cookie on the redirect response (see [Token Refresh](#token-refresh)).
 5. Redirects to `OAUTH2_SUCCESS_REDIRECT_URL?token=<jwt>`.
 
 **Unlink provider:**
@@ -295,9 +329,10 @@ DELETE /api/v1/auth/provider/google    (requires active password on account)
 ```
 POST /api/v1/auth/logout
 Authorization: Bearer <token>
+Cookie: cash_control_refresh=<opaque>
 ```
 
-Records audit event `AUTH_LOGOUT` and returns 200. The server has **no token blacklist** — the JWT remains cryptographically valid until `exp`. Mitigation: short TTL (15 min default). The client must discard the token immediately.
+Revokes the refresh token from the request's cookie (if present) and clears the cookie, records audit event `AUTH_LOGOUT`, and returns `204`. The **access token itself is never blacklisted** — it remains cryptographically valid until `exp`, mitigated by its short TTL (15 min default). The client must discard it immediately. This only ends the current session; other devices/tabs keep their own refresh token valid.
 
 ---
 
@@ -443,6 +478,7 @@ IP-based sliding window, applied **before** authentication:
 Protected paths:
 
 - `POST /api/v1/auth/login`
+- `POST /api/v1/auth/refresh`
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/password-reset/request`
 - `POST /api/v1/auth/email/verify/resend`
@@ -467,10 +503,10 @@ Set by Spring Security:
 | Allowed origins | `http://localhost:3000,http://localhost:8080` | `ALLOWED_ORIGINS` |
 | Allowed methods | `GET,POST,PUT,DELETE,OPTIONS` | — |
 | Allowed headers | `Authorization, Content-Type, X-Correlation-Id` | — |
-| Credentials | `false` (JWT via header, not cookies) | — |
+| Credentials | `true` | — |
 | Max age | `3600 s` | — |
 
-No wildcard origins in production. Credentials are `false` because the JWT is sent as a Bearer header, not a cookie.
+No wildcard origins in production — `allowCredentials: true` requires an explicit origin list, which this API already had. Credentials are needed so the browser attaches the `cash_control_refresh` HttpOnly cookie on cross-origin requests (e.g. the Vite dev server on a different port than the API).
 
 ### CSRF
 
@@ -509,6 +545,8 @@ All security-relevant events are recorded to `audit_logs` — an **append-only**
 | `PASSWORD_RESET_REQUESTED` | ACCOUNT | NORMAL |
 | `PASSWORD_RESET_COMPLETED` | ACCOUNT | HIGH |
 | `CREDENTIALS_INVALIDATED` | TOKEN | HIGH |
+| `TOKEN_REFRESHED` | SECURITY | NORMAL |
+| `REFRESH_TOKEN_REUSE_DETECTED` | SECURITY | HIGH |
 | `ACCOUNT_LOCKED` | SECURITY | HIGH |
 | `ACCOUNT_UNLOCKED` | SECURITY | NORMAL |
 | `PERMISSION_GRANTED` | AUTHORIZATION | NORMAL |
@@ -615,6 +653,7 @@ user_permissions (user_id, permission_id, granted_by_id, granted_at, expires_at)
 
 email_verification_tokens (user_id, token_hash UNIQUE, new_email, expires_at, consumed_at, invalidated_at, ...)
 password_reset_tokens (user_id, token_hash UNIQUE, expires_at, consumed_at, invalidated_at, ip_address_masked, ...)
+refresh_tokens (user_id, token_hash UNIQUE, family_id, expires_at, revoked_at, ip_address_masked, user_agent_truncated, ...)
 
 oauth_accounts (user_id, provider_id FK, provider_user_id, provider_email, display_name, linked_at, ...)
 
@@ -649,8 +688,9 @@ Base path: `/api/v1`
 | Method | Path | Auth | Description |
 |--------|------|:----:|-------------|
 | POST | `/register` | — | Register (email/password) |
-| POST | `/login` | — | Login; returns JWT |
-| POST | `/logout` | ✓ | Record logout |
+| POST | `/login` | — | Login; returns JWT + sets refresh cookie |
+| POST | `/refresh` | — (refresh cookie) | Exchange refresh cookie for a new access token, rotating it |
+| POST | `/logout` | ✓ | Revoke this session's refresh token, clear cookie, record logout |
 | GET | `/me` | ✓ | Authenticated user profile |
 | POST | `/password/change` | ✓ | Change password |
 | POST | `/password-reset/request` | — | Request password reset link |
@@ -754,6 +794,8 @@ All configuration is environment-variable driven. No secrets are hardcoded.
 | `DB_PASSWORD` | ✓ | — | PostgreSQL password |
 | `JWT_SECRET` | ✓ | — | HS512 signing key — **minimum 64 characters** |
 | `JWT_EXPIRATION_MINUTES` | — | `15` | Access token TTL in minutes |
+| `JWT_REFRESH_EXPIRATION_DAYS` | — | `7` | Refresh token sliding TTL in days (resets on each rotation) |
+| `JWT_REFRESH_COOKIE_SECURE` | — | `true` | `Secure` attribute on the refresh cookie — set `false` only for local HTTP dev |
 | `MAX_FAILED_ATTEMPTS` | — | `5` | Failed logins before lockout |
 | `LOCKOUT_DURATION_MINUTES` | — | `15` | Account lockout duration |
 | `PASSWORD_RESET_EXPIRY_MINUTES` | — | `60` | Password reset token TTL |
@@ -772,6 +814,7 @@ All configuration is environment-variable driven. No secrets are hardcoded.
 | `RATE_LIMIT_WINDOW_SECONDS` | — | `60` | Rate limit window size |
 | `RETENTION_PASSWORD_RESET_DAYS` | — | `30` | Cleanup age for reset token records |
 | `RETENTION_VERIFICATION_TOKEN_DAYS` | — | `7` | Cleanup age for verification token records |
+| `RETENTION_REFRESH_TOKEN_DAYS` | — | `30` | Cleanup age for expired refresh token records |
 
 Copy `.env.example` to `.env` to get started.
 

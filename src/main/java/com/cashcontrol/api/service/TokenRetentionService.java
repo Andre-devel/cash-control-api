@@ -5,4 +5,6 @@ public interface TokenRetentionService {
     void purgeExpiredPasswordResetTokens();
 
     void purgeExpiredVerificationTokens();
+
+    void purgeExpiredRefreshTokens();
 }

@@ -53,6 +53,7 @@ public class AuthServiceImpl implements AuthService {
     private final AuditService auditService;
     private final AccountStatusChecker accountStatusChecker;
     private final BruteForceProtectionService bruteForceService;
+    private final RefreshTokenService refreshTokenService;
     private final EmailService emailService;
     private final AppProperties appProperties;
     private final DataMasker dataMasker;
@@ -112,7 +113,7 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional(noRollbackFor = AuthException.class)
-    public AuthResponse login(LoginRequest request, String ipAddress, String userAgent) {
+    public AuthTokens login(LoginRequest request, String ipAddress, String userAgent) {
         String maskedIp = dataMasker.maskIp(ipAddress);
         String truncatedUa = dataMasker.truncateUserAgent(userAgent, 512);
 
@@ -152,11 +153,26 @@ public class AuthServiceImpl implements AuthService {
 
         bruteForceService.recordAttempt(user.getId(), maskedIp, truncatedUa, "PASSWORD", true, null);
 
-        var authorities = permissionResolver.resolveEffectivePermissions(user.getId());
-        String token = jwtService.generateToken(user.getId(), authorities, user.getCredentialsUpdatedAt());
-
         auditService.record(AuditEventSlug.AUTH_SUCCESS, AuditOutcomeSlug.SUCCESS, user.getId(), user.getId());
 
+        return new AuthTokens(
+                buildAccessToken(user),
+                refreshTokenService.issue(user, ipAddress, userAgent));
+    }
+
+    @Override
+    @Transactional(noRollbackFor = InvalidCredentialsException.class)
+    public AuthTokens refresh(String rawRefreshToken, String ipAddress, String userAgent) {
+        RefreshTokenService.RotationResult rotation =
+                refreshTokenService.rotate(rawRefreshToken, ipAddress, userAgent);
+
+        return new AuthTokens(buildAccessToken(rotation.user()), rotation.rawToken());
+    }
+
+    /** Permissions are resolved on every issue, so a role change lands on the next refresh. */
+    private AuthResponse buildAccessToken(User user) {
+        var authorities = permissionResolver.resolveEffectivePermissions(user.getId());
+        String token = jwtService.generateToken(user.getId(), authorities, user.getCredentialsUpdatedAt());
         return AuthResponse.of(token, appProperties.getJwt().getExpirationMinutes() * 60);
     }
 
@@ -182,6 +198,10 @@ public class AuthServiceImpl implements AuthService {
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         user.setCredentialsUpdatedAt(Instant.now());
         userRepository.save(user);
+
+        // credentials_updated_at only invalidates access tokens; without this the old
+        // refresh cookie would keep minting new ones after a password change.
+        refreshTokenService.revokeAllActiveForUser(userId);
 
         auditService.record(AuditEventSlug.PASSWORD_CHANGED, AuditOutcomeSlug.SUCCESS, userId, userId);
         auditService.record(AuditEventSlug.CREDENTIALS_INVALIDATED, AuditOutcomeSlug.SUCCESS, userId, userId,

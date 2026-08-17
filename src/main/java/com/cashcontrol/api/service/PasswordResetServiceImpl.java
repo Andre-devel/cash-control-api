@@ -33,6 +33,7 @@ public class PasswordResetServiceImpl implements PasswordResetService {
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final AuditService auditService;
     private final EmailService emailService;
+    private final RefreshTokenService refreshTokenService;
     private final PasswordEncoder passwordEncoder;
     private final AppProperties appProperties;
     private final DataMasker dataMasker;
@@ -86,6 +87,8 @@ public class PasswordResetServiceImpl implements PasswordResetService {
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user.setCredentialsUpdatedAt(Instant.now());
         userRepository.save(user);
+
+        refreshTokenService.revokeAllActiveForUser(user.getId());
 
         auditService.record(AuditEventSlug.PASSWORD_RESET_COMPLETED, AuditOutcomeSlug.SUCCESS,
                 null, user.getId());
