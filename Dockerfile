@@ -1,6 +1,11 @@
 # Stage 1: Build
 FROM eclipse-temurin:25-jdk-alpine AS builder
 WORKDIR /app
+# Baked into META-INF/build-info.properties (see build.gradle.kts) so GET /api/v1/version
+# can report which commit is actually running — the builder stage has no .git dir to
+# read this from itself, so it's passed in from the deploy script instead.
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=$GIT_COMMIT
 COPY gradlew settings.gradle.kts build.gradle.kts ./
 COPY gradle/ gradle/
 RUN chmod +x gradlew && ./gradlew dependencies --no-daemon -q

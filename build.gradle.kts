@@ -8,6 +8,18 @@ plugins {
 group = "com.cashcontrol"
 version = "0.0.1-SNAPSHOT"
 
+// Bakes version/time/commit into META-INF/build-info.properties, which Spring Boot's
+// ProjectInfoAutoConfiguration picks up as a BuildProperties bean — read by
+// VersionController to expose GET /api/v1/version. GIT_COMMIT is set as a Docker
+// build ARG (the builder stage has no .git dir to read it from directly).
+springBoot {
+    buildInfo {
+        properties {
+            additional.set(mapOf("commit" to (System.getenv("GIT_COMMIT") ?: "unknown")))
+        }
+    }
+}
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(25)
