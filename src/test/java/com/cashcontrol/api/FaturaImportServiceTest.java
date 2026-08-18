@@ -146,7 +146,8 @@ class FaturaImportServiceTest {
                 .thenReturn(Optional.empty());
         when(invoiceItemRepository.findExistingExternalRefs(any(), any(), anyList()))
                 .thenReturn(List.of());
-        when(invoiceItemRepository.findAllExternalRefs(any(), any())).thenReturn(List.of());
+        when(invoiceItemRepository.findAllByExternalRefIn(any(), any())).thenReturn(List.of());
+        when(transactionRepository.findAllByExternalRefIn(any(), any(), any())).thenReturn(List.of());
         when(creditCardRepository.findByIdAndUserIdAndDeletedAtIsNull(cardA.getId(), userId))
                 .thenReturn(Optional.of(cardA));
         when(creditCardRepository.findByIdAndUserIdAndDeletedAtIsNull(cardB.getId(), userId))
@@ -424,7 +425,7 @@ class FaturaImportServiceTest {
         commit(commitRowsFromPreview());
 
         String expected = new FaturaRowHasher().hashInstallment("1234", LocalDate.of(2026, 4, 4),
-                "LOJA DE TESTE (Parcela 05 de 05)", new BigDecimal("55.19"), 5, 5);
+                "LOJA DE TESTE (Parcela 05 de 05)", 5, 5, 0);
 
         assertThat(itemsOf("2026-08"))
                 .filteredOn(item -> item.getInstallmentNumber() == 5)
@@ -467,14 +468,14 @@ class FaturaImportServiceTest {
         FaturaImportCommitRow parceled = commitRowsFromPreview().getFirst();
         FaturaImportCommitRow renamed = new FaturaImportCommitRow(
                 parceled.lineNumber(), parceled.creditCardId(), parceled.cardLast4(),
-                parceled.externalRef(), parceled.date(), "Fone de ouvido",
+                parceled.externalRef(), parceled.ordinal(), parceled.date(), "Fone de ouvido",
                 parceled.originalDescription(), parceled.amount(),
                 parceled.installmentNumber(), parceled.totalInstallments(), null);
 
         commit(List.of(renamed));
 
         String expected = new FaturaRowHasher().hashInstallment("1234", LocalDate.of(2026, 4, 4),
-                "LOJA DE TESTE (Parcela 05 de 05)", new BigDecimal("55.19"), 5, 5);
+                "LOJA DE TESTE (Parcela 05 de 05)", 5, 5, 0);
 
         assertThat(itemsOf("2026-08")).singleElement().satisfies(item -> {
             assertThat(item.getExternalRef()).isEqualTo(expected);
@@ -486,9 +487,9 @@ class FaturaImportServiceTest {
     @Test
     void commit_skipsAGeneratedInstallmentThatAnEarlierImportAlreadyCreated() {
         String alreadyThere = new FaturaRowHasher().hashInstallment("1234", LocalDate.of(2026, 4, 4),
-                "LOJA DE TESTE (Parcela 05 de 05)", new BigDecimal("55.19"), 5, 5);
-        when(invoiceItemRepository.findAllExternalRefs(eq(userId), any()))
-                .thenReturn(List.of(alreadyThere));
+                "LOJA DE TESTE (Parcela 05 de 05)", 5, 5, 0);
+        when(transactionRepository.findAllByExternalRefIn(eq(userId), eq(account.getId()), any()))
+                .thenReturn(List.of(existingCharge(alreadyThere, "55.19")));
 
         FaturaImportResultResponse result = commit(List.of(commitRowsFromPreview().getFirst()));
 
@@ -497,6 +498,161 @@ class FaturaImportServiceTest {
         assertThat(result.imported()).isEqualTo(1);
         assertThat(result.futureInstallments()).isZero();
         assertThat(result.skippedDuplicates()).isZero();
+    }
+
+    // ── commit: a compra cujas parcelas caem todas na mesma fatura ────────────
+
+    /**
+     * O caso que motivou o agrupamento por compra. O emissor estorna a compra e relança as
+     * três parcelas na fatura do mês — todas com a data da compra e o mesmo valor:
+     *
+     * <pre>
+     * 10 de abr. 2026   EBN *TikTok Shop (Parcela 01 de 03)      R$ 41,94
+     * 10 de abr. 2026   EBN *TikTok Shop                       + R$ 125,82   (estorno)
+     * 10 de abr. 2026   EBN *TikTok Shop (Parcela 02 de 03)      R$ 41,94
+     * 10 de abr. 2026   EBN *TikTok Shop (Parcela 03 de 03)      R$ 41,94
+     * </pre>
+     *
+     * <p>Tratando linha a linha, a "Parcela 01 de 03" gerava as parcelas 2 e 3 nos meses
+     * seguintes com exatamente as chaves que as outras duas linhas do arquivo produzem — duas
+     * transações com o mesmo {@code external_ref} na mesma conta, recusadas pelo índice único
+     * no flush, com um 500 que derrubava a importação inteira.
+     */
+    @Test
+    void commit_doesNotGenerateAnInstallmentThatTheFileItselfBrings() {
+        parser.sections = List.of(new ParsedCardSection("1234", installmentsOfTheSamePurchase()));
+
+        FaturaImportResultResponse result = commit(commitRowsFromPreview());
+
+        assertThat(result.imported()).isEqualTo(3);
+        assertThat(result.futureInstallments()).isZero();
+        assertThat(result.failed()).isZero();
+        assertThat(capturedTransactions()).extracting(Transaction::getExternalRef).doesNotHaveDuplicates();
+    }
+
+    /** E as três ficam na fatura do PDF, que é quem cobra — não espalhadas por três meses. */
+    @Test
+    void commit_keepsEveryInstallmentOfTheFileOnTheInvoiceThePdfDescribes() {
+        parser.sections = List.of(new ParsedCardSection("1234", installmentsOfTheSamePurchase()));
+
+        commit(commitRowsFromPreview());
+
+        assertThat(captureSavedItems())
+                .hasSize(3)
+                .allSatisfy(item -> {
+                    assertThat(item.getInvoice().getReferenceMonth()).isEqualTo(REFERENCE_MONTH);
+                    // A competência acompanha a fatura de destino, não o número da parcela:
+                    // 07/2026 é o mês que está cobrando as três.
+                    assertThat(item.getCompetenceDate()).isEqualTo(LocalDate.of(2026, 7, 10));
+                })
+                .extracting(InvoiceItem::getInstallmentNumber)
+                .containsExactlyInAnyOrder(1, 2, 3);
+    }
+
+    /**
+     * Uma série, não três. Uma por linha mostraria três parcelamentos de uma parcela cada na
+     * tela de Parcelamentos, no lugar de um de três.
+     */
+    @Test
+    void commit_createsOneSeriesForAPurchaseThatCameAsSeveralRows() {
+        parser.sections = List.of(new ParsedCardSection("1234", installmentsOfTheSamePurchase()));
+
+        commit(commitRowsFromPreview());
+
+        assertThat(capturedSeries()).singleElement().satisfies(series -> {
+            assertThat(series.getTotalInstallments()).isEqualTo(3);
+            assertThat(series.getTotalAmount()).isEqualByComparingTo("125.82"); // 41,94 × 3
+        });
+        assertThat(capturedTransactions())
+                .allSatisfy(tx -> assertThat(tx.getInstallmentSeries()).isNotNull());
+    }
+
+    /**
+     * Duas compras iguais no mesmo dia continuam sendo duas: o ordinal que a prévia devolveu
+     * é o que as separa, agora que o valor saiu da identidade das parceladas.
+     */
+    @Test
+    void commit_separatesTwoPurchasesThatDifferOnlyByAmount() {
+        parser.sections = List.of(new ParsedCardSection("1234", List.of(
+                new ParsedFaturaRow(1, LocalDate.of(2026, 3, 2),
+                        "MERCADOLIVRE*2PRODUTO (Parcela 02 de 03)", new BigDecimal("-85.11"), 2, 3),
+                new ParsedFaturaRow(2, LocalDate.of(2026, 3, 2),
+                        "MERCADOLIVRE*2PRODUTO (Parcela 02 de 03)", new BigDecimal("-70.74"), 2, 3))));
+
+        FaturaImportResultResponse result = commit(commitRowsFromPreview());
+
+        assertThat(result.imported()).isEqualTo(2);
+        assertThat(result.skippedDuplicates()).isZero();
+        // Uma parcela 3 para cada compra, com chaves diferentes.
+        assertThat(result.futureInstallments()).isEqualTo(2);
+        assertThat(capturedTransactions()).extracting(Transaction::getExternalRef).doesNotHaveDuplicates();
+        assertThat(capturedSeries()).hasSize(2);
+    }
+
+    // ── commit: cobrança que já existe na conta ───────────────────────────────
+
+    /**
+     * O alcance da checagem é a conta, igual ao do índice único de {@code transactions} — e
+     * não a fatura. Uma parcela gerada por uma importação anterior mora na fatura do mês
+     * dela; procurar só na fatura que o PDF descreve deixava a chave passar e o insert
+     * estourava no flush.
+     */
+    @Test
+    void commit_skipsAChargeThatAlreadyExistsOnAnotherInvoiceOfTheSameAccount() {
+        List<FaturaImportCommitRow> rows = commitRowsFromPreview();
+        Transaction elsewhere = existingCharge(rows.getFirst().externalRef(), "55.19");
+        when(transactionRepository.findAllByExternalRefIn(eq(userId), eq(account.getId()), any()))
+                .thenReturn(List.of(elsewhere));
+        when(invoiceItemRepository.findAllByExternalRefIn(eq(userId), any()))
+                .thenReturn(List.of(existingItem(elsewhere, invoiceB)));
+
+        FaturaImportResultResponse result = commit(rows);
+
+        assertThat(result.failed()).isZero();
+        assertThat(result.skippedDuplicates()).isEqualTo(1);
+        assertThat(capturedTransactions()).extracting(Transaction::getExternalRef)
+                .doesNotContain(rows.getFirst().externalRef());
+    }
+
+    /**
+     * A parcela estimada no mês passado recebe o valor real quando o PDF chega com ele. O
+     * emissor deixa o resto da divisão na primeira parcela — 48,28 e depois 48,26 —, então a
+     * estimativa nasce alguns centavos acima.
+     */
+    @Test
+    void commit_correctsTheAmountOfAnInstallmentThatAnEarlierImportEstimated() {
+        parser.sections = List.of(new ParsedCardSection("1234", List.of(
+                new ParsedFaturaRow(1, LocalDate.of(2026, 3, 30),
+                        "EBN *TikTok Shop (Parcela 02 de 03)", new BigDecimal("-48.26"), 2, 3))));
+        List<FaturaImportCommitRow> rows = commitRowsFromPreview();
+        Transaction estimated = existingCharge(rows.getFirst().externalRef(), "48.28");
+        InvoiceItem estimatedItem = existingItem(estimated, invoiceA);
+        invoiceA.setTotalAmount(new BigDecimal("100.00"));
+        when(transactionRepository.findAllByExternalRefIn(eq(userId), eq(account.getId()), any()))
+                .thenReturn(List.of(estimated));
+        when(invoiceItemRepository.findAllByExternalRefIn(eq(userId), any()))
+                .thenReturn(List.of(estimatedItem));
+
+        FaturaImportResultResponse result = commit(rows);
+
+        assertThat(result.skippedDuplicates()).isEqualTo(1);
+        assertThat(estimated.getAmount()).isEqualByComparingTo("48.26");
+        assertThat(estimatedItem.getAmount()).isEqualByComparingTo("48.26");
+        // A fatura que a estava cobrando encolhe os mesmos dois centavos.
+        assertThat(invoiceA.getTotalAmount()).isEqualByComparingTo("99.98");
+    }
+
+    /** As três linhas de uma mesma compra, todas na fatura do PDF, como o emissor as lançou. */
+    private List<ParsedFaturaRow> installmentsOfTheSamePurchase() {
+        return List.of(
+                new ParsedFaturaRow(1, LocalDate.of(2026, 7, 10),
+                        "EBN *TikTok Shop (Parcela 01 de 03)", new BigDecimal("-41.94"), 1, 3),
+                new ParsedFaturaRow(2, LocalDate.of(2026, 7, 10),
+                        "EBN *TikTok Shop", new BigDecimal("125.82"), null, null),
+                new ParsedFaturaRow(3, LocalDate.of(2026, 7, 10),
+                        "EBN *TikTok Shop (Parcela 02 de 03)", new BigDecimal("-41.94"), 2, 3),
+                new ParsedFaturaRow(4, LocalDate.of(2026, 7, 10),
+                        "EBN *TikTok Shop (Parcela 03 de 03)", new BigDecimal("-41.94"), 3, 3));
     }
 
     @Test
@@ -515,8 +671,8 @@ class FaturaImportServiceTest {
     @Test
     void commit_skipsRowsAlreadyOnTheInvoice() {
         List<FaturaImportCommitRow> rows = commitRowsFromPreview();
-        when(invoiceItemRepository.findAllExternalRefs(userId, invoiceA.getId()))
-                .thenReturn(List.of(rows.getFirst().externalRef()));
+        when(transactionRepository.findAllByExternalRefIn(eq(userId), eq(account.getId()), any()))
+                .thenReturn(List.of(existingCharge(rows.getFirst().externalRef(), "55.19")));
 
         FaturaImportResultResponse result = commit(rows);
 
@@ -588,7 +744,7 @@ class FaturaImportServiceTest {
         when(categoryRepository.findAllByUserId(userId)).thenReturn(List.of());
 
         FaturaImportCommitRow row = new FaturaImportCommitRow(
-                1, cardA.getId(), "1234", "ref-1", LocalDate.of(2026, 7, 15), "Compra", "Compra",
+                1, cardA.getId(), "1234", "ref-1", 0, LocalDate.of(2026, 7, 15), "Compra", "Compra",
                 new BigDecimal("10.00"), null, null, UUID.randomUUID());
 
         FaturaImportResultResponse result = commit(List.of(row));
@@ -656,21 +812,45 @@ class FaturaImportServiceTest {
             for (FaturaImportPreviewRow row : group.rows()) {
                 rows.add(new FaturaImportCommitRow(
                         row.lineNumber(), group.suggestedCreditCardId(), group.cardLast4(),
-                        row.externalRef(), row.date(), row.description(), row.description(),
-                        row.amount(), row.installmentNumber(), row.totalInstallments(), null));
+                        row.externalRef(), row.ordinal(), row.date(), row.description(),
+                        row.description(), row.amount(), row.installmentNumber(),
+                        row.totalInstallments(), null));
             }
         }
         return rows;
     }
 
     private FaturaImportCommitRow commitRow(UUID cardId, String externalRef, String description, String amount) {
-        return new FaturaImportCommitRow(1, cardId, "1234", externalRef, LocalDate.of(2026, 7, 15),
+        return new FaturaImportCommitRow(1, cardId, "1234", externalRef, 0, LocalDate.of(2026, 7, 15),
                 description, description, new BigDecimal(amount), null, null, null);
     }
 
     private List<String> hashesOfFirstGroup() {
         return new FaturaRowHasher().hashAll("1234", parser.parse(null).cardSections().getFirst().rows()
-                .stream().filter(row -> row.signedAmount().signum() < 0).toList());
+                .stream().filter(row -> row.signedAmount().signum() < 0).toList())
+                .stream().map(FaturaRowHasher.RowKey::externalRef).toList();
+    }
+
+    /** Uma cobrança que já ocupa a chave na conta, como se viesse de uma importação anterior. */
+    private Transaction existingCharge(String externalRef, String amount) {
+        Transaction tx = new Transaction();
+        ReflectionTestUtils.setField(tx, "id", UUID.randomUUID());
+        tx.setUserId(userId);
+        tx.setAccount(account);
+        tx.setExternalRef(externalRef);
+        tx.setAmount(new BigDecimal(amount));
+        return tx;
+    }
+
+    private InvoiceItem existingItem(Transaction tx, Invoice invoice) {
+        InvoiceItem item = new InvoiceItem();
+        ReflectionTestUtils.setField(item, "id", UUID.randomUUID());
+        item.setUserId(userId);
+        item.setInvoice(invoice);
+        item.setTransaction(tx);
+        item.setExternalRef(tx.getExternalRef());
+        item.setAmount(tx.getAmount());
+        return item;
     }
 
     private List<InvoiceItem> captureSavedItems() {
@@ -765,6 +945,9 @@ class FaturaImportServiceTest {
 
         private LocalDate dueDate = LocalDate.of(2026, 8, 7);
 
+        /** Null usa a fatura padrão; um teste que precisa de outra forma substitui as seções. */
+        private List<ParsedCardSection> sections;
+
         @Override
         public InvoiceImportFormat format() {
             return InvoiceImportFormat.INTER_FATURA_PDF;
@@ -772,7 +955,12 @@ class FaturaImportServiceTest {
 
         @Override
         public ParsedFatura parse(InputStream in) {
-            return new ParsedFatura(dueDate, new BigDecimal("502.00"), List.of(
+            return new ParsedFatura(dueDate, new BigDecimal("502.00"),
+                    sections != null ? sections : defaultSections(), List.of());
+        }
+
+        private List<ParsedCardSection> defaultSections() {
+            return List.of(
                     new ParsedCardSection("1234", List.of(
                             new ParsedFaturaRow(6, LocalDate.of(2026, 4, 4),
                                     "LOJA DE TESTE (Parcela 04 de 05)", new BigDecimal("-55.19"), 4, 5),
@@ -782,8 +970,7 @@ class FaturaImportServiceTest {
                                     "ASSINATURA MENSAL", new BigDecimal("-110.00"), null, null))),
                     new ParsedCardSection("5678", List.of(
                             new ParsedFaturaRow(12, LocalDate.of(2026, 7, 24),
-                                    "OUTRA LOJA (Parcela 01 de 10)", new BigDecimal("-336.81"), 1, 10)))),
-                    List.of());
+                                    "OUTRA LOJA (Parcela 01 de 10)", new BigDecimal("-336.81"), 1, 10))));
         }
     }
 }

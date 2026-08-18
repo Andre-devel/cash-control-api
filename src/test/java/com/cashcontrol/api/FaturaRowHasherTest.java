@@ -1,6 +1,7 @@
 package com.cashcontrol.api;
 
 import com.cashcontrol.api.service.fatura.FaturaRowHasher;
+import com.cashcontrol.api.service.fatura.FaturaRowHasher.RowKey;
 import com.cashcontrol.api.service.fatura.ParsedFaturaRow;
 import org.junit.jupiter.api.Test;
 
@@ -25,12 +26,17 @@ class FaturaRowHasherTest {
                 new BigDecimal(amount), number, total);
     }
 
+    private List<String> refs(String cardLast4, List<ParsedFaturaRow> rows) {
+        return hasher.hashAll(cardLast4, rows).stream().map(RowKey::externalRef).toList();
+    }
+
+    private String ref(String cardLast4, ParsedFaturaRow row) {
+        return refs(cardLast4, List.of(row)).getFirst();
+    }
+
     @Test
     void hash_fitsTheColumn() {
-        List<String> hashes = hasher.hashAll("7866", List.of(
-                row(59, "2026-04-04", "SHOPEE *LarkSpComercio (Parcela 04 de 05)", "-55.19")));
-
-        assertThat(hashes).singleElement().satisfies(hash -> assertThat(hash).hasSize(64));
+        assertThat(ref("7866", row(59, "2026-04-04", "SHOPEE *LarkSpComercio", "-55.19"))).hasSize(64);
     }
 
     @Test
@@ -41,22 +47,17 @@ class FaturaRowHasherTest {
         ParsedFaturaRow first = row(59, "2026-04-04", "SHOPEE *LarkSpComercio", "-55.19");
         ParsedFaturaRow sameRowLaterInTheFile = row(120, "2026-04-04", "SHOPEE  *LarkSpComercio ", "-55.19");
 
-        assertThat(hasher.hashAll("7866", List.of(first)))
-                .isEqualTo(hasher.hashAll("7866", List.of(sameRowLaterInTheFile)));
+        assertThat(ref("7866", first)).isEqualTo(ref("7866", sameRowLaterInTheFile));
     }
 
     @Test
     void hash_differsWhenAnyFieldDiffers() {
-        String base = hasher.hashAll("7866", List.of(row(1, "2026-04-04", "Loja", "-10.00"))).getFirst();
+        String base = ref("7866", row(1, "2026-04-04", "Loja", "-10.00"));
 
-        assertThat(hasher.hashAll("7866", List.of(row(1, "2026-04-05", "Loja", "-10.00"))).getFirst())
-                .isNotEqualTo(base);
-        assertThat(hasher.hashAll("7866", List.of(row(1, "2026-04-04", "Outra Loja", "-10.00"))).getFirst())
-                .isNotEqualTo(base);
-        assertThat(hasher.hashAll("7866", List.of(row(1, "2026-04-04", "Loja", "-10.01"))).getFirst())
-                .isNotEqualTo(base);
-        assertThat(hasher.hashAll("7866", List.of(installment(1, "2026-04-04", "Loja", "-10.00", 1, 2)))
-                .getFirst()).isNotEqualTo(base);
+        assertThat(ref("7866", row(1, "2026-04-05", "Loja", "-10.00"))).isNotEqualTo(base);
+        assertThat(ref("7866", row(1, "2026-04-04", "Outra Loja", "-10.00"))).isNotEqualTo(base);
+        assertThat(ref("7866", row(1, "2026-04-04", "Loja", "-10.01"))).isNotEqualTo(base);
+        assertThat(ref("7866", installment(1, "2026-04-04", "Loja", "-10.00", 1, 2))).isNotEqualTo(base);
     }
 
     @Test
@@ -64,16 +65,14 @@ class FaturaRowHasherTest {
         // Titular e adicional podem ter a mesma compra no mesmo dia. Se o usuário apontar
         // os dois grupos para o mesmo cartão cadastrado, a segunda não pode sumir como
         // duplicata da primeira.
-        List<String> holder = hasher.hashAll("7866", List.of(row(1, "2026-04-04", "Loja", "-10.00")));
-        List<String> additional = hasher.hashAll("4776", List.of(row(1, "2026-04-04", "Loja", "-10.00")));
-
-        assertThat(holder).isNotEqualTo(additional);
+        assertThat(ref("7866", row(1, "2026-04-04", "Loja", "-10.00")))
+                .isNotEqualTo(ref("4776", row(1, "2026-04-04", "Loja", "-10.00")));
     }
 
     @Test
     void hash_distinguishesIdenticalRowsInTheSameFatura() {
         // Duas compras iguais no mesmo dia são dois lançamentos, não uma duplicata.
-        List<String> hashes = hasher.hashAll("7866", List.of(
+        List<String> hashes = refs("7866", List.of(
                 row(1, "2026-07-15", "ANTHROPIC* CLAUDE SUB", "-110.00"),
                 row(2, "2026-07-15", "ANTHROPIC* CLAUDE SUB", "-110.00")));
 
@@ -88,7 +87,7 @@ class FaturaRowHasherTest {
 
         // Reimportar o mesmo PDF precisa produzir exatamente os mesmos dois hashes, ou o
         // par voltaria a entrar.
-        assertThat(hasher.hashAll("7866", rows)).isEqualTo(hasher.hashAll("7866", rows));
+        assertThat(refs("7866", rows)).isEqualTo(refs("7866", rows));
     }
 
     @Test
@@ -98,19 +97,44 @@ class FaturaRowHasherTest {
         ParsedFaturaRow spelledOut = installment(1, "2026-04-04", "Loja (Parcela 04 de 05)", "-55.19", 4, 5);
         ParsedFaturaRow bare = installment(1, "2026-04-04", "Loja", "-55.19", 4, 5);
 
-        assertThat(hasher.hashAll("7866", List.of(spelledOut)))
-                .isEqualTo(hasher.hashAll("7866", List.of(bare)));
+        assertThat(ref("7866", spelledOut)).isEqualTo(ref("7866", bare));
     }
 
     @Test
     void hash_separatesTheInstallmentsOfTheSamePurchase() {
-        // Cada parcela é um lançamento em uma fatura diferente. Se colidissem, gerar a
-        // parcela 5 junto com a 4 seria bloqueado como duplicata dela mesma.
-        List<String> hashes = hasher.hashAll("7866", List.of(
+        // Cada parcela é um lançamento próprio. Se colidissem, gerar a parcela 5 junto com
+        // a 4 seria bloqueado como duplicata dela mesma.
+        List<String> hashes = refs("7866", List.of(
                 installment(1, "2026-04-04", "Loja", "-55.19", 4, 5),
                 installment(2, "2026-04-04", "Loja", "-55.19", 5, 5)));
 
         assertThat(hashes).doesNotHaveDuplicates();
+    }
+
+    /**
+     * O emissor deixa o resto da divisão na primeira parcela: a fatura traz 48,28 e depois
+     * 48,26. Se o valor entrasse na identidade, a parcela 2 estimada hoje e a linha
+     * "Parcela 02 de 03" do mês que vem nunca se encontrariam, e a compra duplicaria.
+     */
+    @Test
+    void hash_ofAnInstallment_ignoresTheAmount() {
+        assertThat(ref("7866", installment(1, "2026-03-30", "EBN *TikTok Shop", "-48.28", 2, 3)))
+                .isEqualTo(ref("7866", installment(9, "2026-03-30", "EBN *TikTok Shop", "-48.26", 2, 3)));
+    }
+
+    /**
+     * O contrapeso de tirar o valor da identidade: duas compras parceladas iguais no mesmo
+     * dia passam a se distinguir só pela ordem no arquivo. Elas existem de verdade — a
+     * fatura de abril/2026 tem duas do mesmo estabelecimento, de R$ 85,11 e R$ 70,74.
+     */
+    @Test
+    void hash_separatesTwoParceledPurchasesThatOnlyDifferByAmount() {
+        List<RowKey> keys = hasher.hashAll("7866", List.of(
+                installment(1, "2026-03-02", "MERCADOLIVRE*2PRODUTO", "-85.11", 2, 3),
+                installment(2, "2026-03-02", "MERCADOLIVRE*2PRODUTO", "-70.74", 2, 3)));
+
+        assertThat(keys).extracting(RowKey::externalRef).doesNotHaveDuplicates();
+        assertThat(keys).extracting(RowKey::ordinal).containsExactly(0, 1);
     }
 
     /**
@@ -122,13 +146,34 @@ class FaturaRowHasherTest {
     @Test
     void hashInstallment_matchesTheRowThatTheNextFaturaWillBring() {
         String generatedNow = hasher.hashInstallment("7866", LocalDate.parse("2026-04-04"),
-                "SHOPEE *LarkSpComercio (Parcela 04 de 05)", new BigDecimal("55.19"), 5, 5);
+                "SHOPEE *LarkSpComercio (Parcela 04 de 05)", 5, 5, 0);
 
-        String readNextMonth = hasher.hashAll("7866", List.of(installment(
-                12, "2026-04-04", "SHOPEE *LarkSpComercio (Parcela 05 de 05)", "-55.19", 5, 5)))
-                .getFirst();
+        String readNextMonth = ref("7866", installment(
+                12, "2026-04-04", "SHOPEE *LarkSpComercio (Parcela 05 de 05)", "-55.19", 5, 5));
 
         assertThat(generatedNow).isEqualTo(readNextMonth);
+    }
+
+    /** E continua batendo quando o emissor cobra alguns centavos a menos na parcela. */
+    @Test
+    void hashInstallment_matchesEvenWhenTheNextInstallmentCostsLess() {
+        String generatedNow = hasher.hashInstallment("7866", LocalDate.parse("2026-03-30"),
+                "EBN *TikTok Shop (Parcela 01 de 03)", 2, 3, 0);
+
+        String readNextMonth = ref("7866", installment(
+                12, "2026-03-30", "EBN *TikTok Shop (Parcela 02 de 03)", "-48.26", 2, 3));
+
+        assertThat(generatedNow).isEqualTo(readNextMonth);
+    }
+
+    @Test
+    void hashInstallment_usesTheOrdinalOfTheRowItCameFrom() {
+        String fromFirst = hasher.hashInstallment("7866", LocalDate.parse("2026-03-02"),
+                "MERCADOLIVRE*2PRODUTO (Parcela 02 de 03)", 3, 3, 0);
+        String fromSecond = hasher.hashInstallment("7866", LocalDate.parse("2026-03-02"),
+                "MERCADOLIVRE*2PRODUTO (Parcela 02 de 03)", 3, 3, 1);
+
+        assertThat(fromFirst).isNotEqualTo(fromSecond);
     }
 
     @Test
@@ -137,5 +182,11 @@ class FaturaRowHasherTest {
                 .isEqualTo("SHOPEE *LarkSpComercio");
         assertThat(hasher.stripInstallmentSuffix("ANTHROPIC* CLAUDE SUB"))
                 .isEqualTo("ANTHROPIC* CLAUDE SUB");
+    }
+
+    @Test
+    void normalizedDescription_isTheFormThatGroupsTheInstallmentsOfAPurchase() {
+        assertThat(hasher.normalizedDescription("SHOPEE  *LarkSpComercio (Parcela 04 de 05) "))
+                .isEqualTo("shopee *larkspcomercio");
     }
 }

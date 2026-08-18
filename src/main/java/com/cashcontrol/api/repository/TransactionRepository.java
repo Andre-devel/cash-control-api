@@ -44,6 +44,26 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("accountId") UUID accountId,
             @Param("externalRefs") Collection<String> externalRefs);
 
+    /**
+     * As transações que já ocupam estas chaves na conta.
+     *
+     * <p>Escopo igual ao do índice único {@code uidx_transactions_external_ref}
+     * ({@code user_id, account_id, external_ref}), e não à fatura: a importação de fatura
+     * grava parcelas em faturas de meses diferentes, e checar duplicata por fatura deixa
+     * passar uma chave que já existe em outra — o insert então estoura no flush, com um
+     * erro que não diz ao usuário qual linha era.
+     *
+     * <p>Não filtra canceladas de propósito: o índice é parcial só em
+     * {@code external_ref IS NOT NULL}, então uma transação cancelada continua ocupando a
+     * chave.
+     */
+    @Query("SELECT t FROM Transaction t " +
+           "WHERE t.userId = :userId AND t.account.id = :accountId AND t.externalRef IN :externalRefs")
+    List<Transaction> findAllByExternalRefIn(
+            @Param("userId") UUID userId,
+            @Param("accountId") UUID accountId,
+            @Param("externalRefs") Collection<String> externalRefs);
+
     // TRANSFER amounts are stored signed: source leg = negative, destination leg = positive.
     // MANUAL_ADJUSTMENT amounts are also signed (positive = increase, negative = decrease).
     @Query("SELECT COALESCE(SUM(CASE " +

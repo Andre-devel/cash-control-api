@@ -4,6 +4,7 @@ import com.cashcontrol.api.config.PostgresTestContainerConfig;
 import com.cashcontrol.api.domain.entity.AccountType;
 import com.cashcontrol.api.domain.entity.CardBrand;
 import com.cashcontrol.api.domain.entity.InvoiceImportFormat;
+import com.cashcontrol.api.domain.entity.InvoiceStatus;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
@@ -189,6 +190,36 @@ class FaturaImportIntegrationTest {
         assertThat(accountService.computeBalance(accountId, userId)).isEqualByComparingTo("0.00");
     }
 
+    /**
+     * "Fatura já paga": importar um extrato antigo que já foi liquidado. A fatura do mês de
+     * referência de cada cartão entra PAGA (pago = total), as compras seguem PENDENTES e o
+     * saldo da conta não se move — só a fatura marca o pagamento.
+     */
+    @Test
+    void commit_withAlreadyPaid_marksTheReferenceMonthInvoicesPaidWithoutMovingTheAccount() {
+        FaturaImportResultResponse result = commitAlreadyPaid(preview());
+
+        // Uma fatura por cartão do PDF.
+        assertThat(result.markedPaidInvoices()).isEqualTo(2);
+
+        assertThat(invoiceOf(cardAId).status()).isEqualTo(InvoiceStatus.PAID);
+        assertThat(invoiceOf(cardAId).paidAmount()).isEqualByComparingTo(FaturaPdfFixture.CARD_A_TOTAL);
+        assertThat(invoiceOf(cardBId).status()).isEqualTo(InvoiceStatus.PAID);
+        assertThat(invoiceOf(cardBId).paidAmount()).isEqualByComparingTo(FaturaPdfFixture.CARD_B_TOTAL);
+
+        // Compras seguem pendentes e o saldo da conta não se moveu.
+        assertThat(transactionRepository.findAll().stream()
+                .filter(tx -> tx.getUserId().equals(userId)))
+                .isNotEmpty()
+                .allSatisfy(tx -> assertThat(tx.getStatus()).isEqualTo(TransactionStatus.PENDING));
+        assertThat(accountService.computeBalance(accountId, userId)).isEqualByComparingTo("0.00");
+
+        // As parcelas futuras caem em meses seguintes e continuam ABERTAS.
+        assertThat(creditCardService.getInvoice(
+                cardAId, FaturaPdfFixture.NEXT_REFERENCE_MONTH, userId, 0, 50).status())
+                .isEqualTo(InvoiceStatus.OPEN);
+    }
+
     @Test
     void commit_generatesTheRemainingInstallmentsOnTheFollowingInvoices() {
         FaturaImportResultResponse result = commit(preview());
@@ -324,13 +355,29 @@ class FaturaImportIntegrationTest {
             for (FaturaImportPreviewRow row : group.rows()) {
                 approved.add(new FaturaImportCommitRow(
                         row.lineNumber(), group.suggestedCreditCardId(), group.cardLast4(),
-                        row.externalRef(), row.date(), row.description(), row.description(),
-                        row.amount(), row.installmentNumber(), row.totalInstallments(),
-                        row.suggestedCategoryId()));
+                        row.externalRef(), row.ordinal(), row.date(), row.description(),
+                        row.description(), row.amount(), row.installmentNumber(),
+                        row.totalInstallments(), row.suggestedCategoryId()));
             }
         }
         return faturaImportService.commit(new FaturaImportCommitRequest(
                 InvoiceImportFormat.INTER_FATURA_PDF, preview.referenceMonth(), accountId, approved),
+                userId);
+    }
+
+    private FaturaImportResultResponse commitAlreadyPaid(FaturaImportPreviewResponse preview) {
+        List<FaturaImportCommitRow> approved = new ArrayList<>();
+        for (FaturaImportGroupPreview group : preview.groups()) {
+            for (FaturaImportPreviewRow row : group.rows()) {
+                approved.add(new FaturaImportCommitRow(
+                        row.lineNumber(), group.suggestedCreditCardId(), group.cardLast4(),
+                        row.externalRef(), row.ordinal(), row.date(), row.description(),
+                        row.description(), row.amount(), row.installmentNumber(),
+                        row.totalInstallments(), row.suggestedCategoryId()));
+            }
+        }
+        return faturaImportService.commit(new FaturaImportCommitRequest(
+                InvoiceImportFormat.INTER_FATURA_PDF, preview.referenceMonth(), accountId, approved, true),
                 userId);
     }
 

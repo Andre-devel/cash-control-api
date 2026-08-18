@@ -46,15 +46,18 @@ public interface InvoiceItemRepository extends JpaRepository<InvoiceItem, UUID> 
             @Param("externalRefs") Collection<String> externalRefs);
 
     /**
-     * Todas as chaves de importação de uma fatura.
+     * Os itens que já ocupam estas chaves, em qualquer fatura do usuário.
      *
-     * <p>A confirmação toca faturas de meses à frente para gerar as parcelas seguintes,
-     * e ali não existe uma lista de chaves conhecida de antemão para filtrar — a
-     * alternativa seria uma consulta por parcela. Uma fatura tem dezenas de itens.
+     * <p>Usada na conciliação: quando o PDF traz uma parcela que a importação do mês
+     * anterior já criou por estimativa, é este item que recebe o valor real. Sem escopo de
+     * fatura porque a parcela estimada foi gravada na fatura que a importação deduziu, que
+     * é justamente a que pode não ser a que o PDF de agora está descrevendo.
      */
-    @Query("SELECT ii.externalRef FROM InvoiceItem ii " +
-           "WHERE ii.userId = :userId AND ii.invoice.id = :invoiceId AND ii.externalRef IS NOT NULL")
-    List<String> findAllExternalRefs(@Param("userId") UUID userId, @Param("invoiceId") UUID invoiceId);
+    @Query("SELECT ii FROM InvoiceItem ii " +
+           "WHERE ii.userId = :userId AND ii.externalRef IN :externalRefs")
+    List<InvoiceItem> findAllByExternalRefIn(
+            @Param("userId") UUID userId,
+            @Param("externalRefs") Collection<String> externalRefs);
 
     @Query("SELECT ii.category.id, ii.category.name, SUM(ii.amount) as total " +
            "FROM InvoiceItem ii " +

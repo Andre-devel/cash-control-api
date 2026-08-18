@@ -15,6 +15,13 @@ public record FaturaImportPreviewRow(
         @Schema(description = "Hash da linha de origem. Devolver inalterado na confirmação.")
         String externalRef,
 
+        @Schema(description = """
+                Posição da linha dentro do grupo de linhas idênticas do arquivo (0 para a \
+                primeira). Devolver inalterado na confirmação: é com ele que a chave das \
+                parcelas futuras é gerada quando duas compras do mesmo dia são \
+                indistinguíveis uma da outra.""", example = "0")
+        int ordinal,
+
         @Schema(description = "Data da compra", example = "2026-04-04")
         LocalDate date,
 

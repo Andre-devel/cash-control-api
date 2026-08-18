@@ -41,5 +41,23 @@ public record FaturaImportCommitRequest(
         @NotNull UUID accountId,
 
         @Schema(description = "Lançamentos aprovados", requiredMode = Schema.RequiredMode.REQUIRED)
-        @NotEmpty @Valid List<FaturaImportCommitRow> rows
-) {}
+        @NotEmpty @Valid List<FaturaImportCommitRow> rows,
+
+        @Schema(description = """
+                A fatura deste mês já foi paga na vida real e deve entrar já quitada.
+
+                Quando verdadeiro, a fatura do mês de referência é marcada como PAGA \
+                (pago = total) ao fim da importação. As compras continuam PENDENTES, como \
+                em qualquer fatura do sistema: o saldo da conta só conta transações pagas, \
+                então marcar a fatura não movimenta a conta. As parcelas que caem em meses \
+                seguintes seguem em aberto — só a fatura atual é quitada.""",
+                requiredMode = Schema.RequiredMode.NOT_REQUIRED, example = "false")
+        boolean alreadyPaid
+) {
+
+    /** Forma curta para chamadas que não marcam a fatura como paga (o padrão). */
+    public FaturaImportCommitRequest(InvoiceImportFormat format, String referenceMonth,
+                                     UUID accountId, List<FaturaImportCommitRow> rows) {
+        this(format, referenceMonth, accountId, rows, false);
+    }
+}

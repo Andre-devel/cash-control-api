@@ -33,11 +33,24 @@ import java.util.regex.Pattern;
  * depender de como o PDF escreveu o sufixo. Sem separar, "Parcela 04 de 05" e
  * "Parcela 05 de 05" só se distinguiriam por dentro do texto livre.
  *
+ * <p><strong>O valor entra na identidade só nas compras à vista.</strong> Numa
+ * compra parcelada ele varia entre as parcelas: o emissor deixa o resto da
+ * divisão na primeira, e o que o PDF traz é 48,28 + 48,26 + 48,26. A parcela
+ * gerada hoje precisa nascer com a chave que a linha do mês que vem vai
+ * produzir — e essa linha vem com o valor <em>dela</em>. Amarrar a identidade ao
+ * valor faria as duas nunca se encontrarem, e toda compra parcelada com centavos
+ * de sobra duplicaria em silêncio na importação seguinte.
+ *
  * <p>O {@code ordinal} distingue linhas <em>idênticas</em> — duas compras do
  * mesmo valor no mesmo estabelecimento no mesmo dia são dois lançamentos, não
  * uma duplicata — e é contado dentro do grupo de linhas iguais da própria
  * fatura. Como o PDF de um mês sempre traz o mesmo conjunto de linhas, contar
- * dentro do arquivo é estável entre reimportações.
+ * dentro do arquivo é estável entre reimportações. Ele é o preço de tirar o
+ * valor da identidade: duas compras parceladas no mesmo dia, no mesmo lugar e
+ * com o mesmo número de parcelas passam a se distinguir só pela ordem no
+ * arquivo. É por isso que o ordinal acompanha a linha até a confirmação em vez
+ * de ser recontado lá — a confirmação recebe só as linhas que o usuário marcou,
+ * e recontar sobre um subconjunto daria outro número.
  */
 @Component
 public class FaturaRowHasher {
@@ -49,19 +62,29 @@ public class FaturaRowHasher {
             Pattern.compile("\\(\\s*Parcela\\s+\\d+\\s+de\\s+\\d+\\s*\\)", Pattern.CASE_INSENSITIVE);
 
     /**
+     * A chave de uma linha e a posição dela dentro do grupo de linhas iguais do arquivo.
+     *
+     * @param externalRef a chave de deduplicação
+     * @param ordinal     0 para a primeira ocorrência da identidade, 1 para a segunda, e assim
+     *                    por diante. Viaja para a confirmação junto com a linha porque é ele
+     *                    que dá a chave certa às parcelas geradas a partir dela
+     */
+    public record RowKey(String externalRef, int ordinal) {}
+
+    /**
      * @param cardLast4 seção de cartão a que as linhas pertencem. Entra na identidade para
      *                  que uma compra igual no titular e no adicional não vire duplicata caso
      *                  os dois grupos sejam apontados para o mesmo cartão cadastrado
-     * @return os hashes na mesma ordem das linhas recebidas
+     * @return as chaves na mesma ordem das linhas recebidas
      */
-    public List<String> hashAll(String cardLast4, List<ParsedFaturaRow> rows) {
+    public List<RowKey> hashAll(String cardLast4, List<ParsedFaturaRow> rows) {
         Map<String, Integer> seen = new HashMap<>();
         return rows.stream()
                 .map(row -> {
                     String identity = identityOf(cardLast4, row.date(), row.description(),
                             row.signedAmount(), row.installmentNumber(), row.totalInstallments());
                     int ordinal = seen.merge(identity, 1, Integer::sum) - 1;
-                    return sha256(identity + "|#" + ordinal);
+                    return new RowKey(sha256(identity + "|#" + ordinal), ordinal);
                 })
                 .toList();
     }
@@ -73,13 +96,16 @@ public class FaturaRowHasher {
      * parcela 5 criada agora precisa nascer com a chave que a linha "Parcela 05 de 05"
      * vai produzir no PDF do mês que vem, ou a importação seguinte duplicaria.
      *
-     * <p>O ordinal é sempre zero: uma parcela futura é gerada a partir de uma linha
-     * que já sobreviveu à deduplicação, então não há irmã idêntica para desempatar.
+     * <p>Não recebe valor: a parcela do mês que vem virá com o valor dela, e a identidade
+     * de uma compra parcelada não olha o valor justamente por isso.
+     *
+     * @param ordinal o ordinal da linha de origem, para que duas compras indistinguíveis
+     *                no mesmo dia gerem parcelas com chaves diferentes
      */
     public String hashInstallment(String cardLast4, LocalDate purchaseDate, String description,
-                                  BigDecimal amount, int installmentNumber, int totalInstallments) {
-        return sha256(identityOf(cardLast4, purchaseDate, description, amount,
-                installmentNumber, totalInstallments) + "|#0");
+                                  int installmentNumber, int totalInstallments, int ordinal) {
+        return sha256(identityOf(cardLast4, purchaseDate, description, null,
+                installmentNumber, totalInstallments) + "|#" + ordinal);
     }
 
     /**
@@ -93,17 +119,31 @@ public class FaturaRowHasher {
         return INSTALLMENT_SUFFIX.matcher(description).replaceAll("").trim();
     }
 
+    /**
+     * A descrição como ela entra na identidade: sem o sufixo de parcela, sem os espaços da
+     * diagramação e em caixa baixa.
+     *
+     * <p>Pública porque a confirmação agrupa as linhas da mesma compra por essa forma —
+     * e agrupar por uma normalização diferente da que gera a chave separaria linhas que a
+     * chave considera irmãs.
+     */
+    public String normalizedDescription(String description) {
+        return normalize(stripInstallmentSuffix(description));
+    }
+
+    /**
+     * @param amount ignorado quando a linha é parcelada; obrigatório quando não é
+     */
     private String identityOf(String cardLast4, LocalDate date, String description, BigDecimal amount,
                               Integer installmentNumber, Integer totalInstallments) {
+        boolean parceled = installmentNumber != null && totalInstallments != null;
         return cardLast4
                + "|" + date
                + "|" + normalize(stripInstallmentSuffix(description))
                // Valor absoluto: só despesas são hasheadas, e assim o sinal deixa de ser
                // um detalhe que o chamador precisa acertar.
-               + "|" + amount.abs().stripTrailingZeros().toPlainString()
-               + "|" + (installmentNumber != null && totalInstallments != null
-                        ? installmentNumber + "/" + totalInstallments
-                        : "");
+               + "|" + (parceled ? "" : amount.abs().stripTrailingZeros().toPlainString())
+               + "|" + (parceled ? installmentNumber + "/" + totalInstallments : "");
     }
 
     /**

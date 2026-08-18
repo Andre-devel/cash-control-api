@@ -7,6 +7,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
@@ -34,6 +35,17 @@ public record FaturaImportCommitRow(
         @Schema(description = "Hash devolvido pela prévia. É a chave de deduplicação.",
                 requiredMode = Schema.RequiredMode.REQUIRED)
         @NotBlank @Size(max = 64) String externalRef,
+
+        @Schema(description = """
+                A posição da linha dentro do grupo de linhas idênticas do arquivo, como \
+                devolvida pela prévia.
+
+                Faz parte da identidade da linha, junto com o final do cartão: duas compras \
+                parceladas no mesmo dia, no mesmo estabelecimento e com o mesmo número de \
+                parcelas só se distinguem por ele. Recontá-lo aqui daria outro número, \
+                porque a confirmação recebe só as linhas que o usuário marcou.""",
+                requiredMode = Schema.RequiredMode.REQUIRED, example = "0")
+        @PositiveOrZero int ordinal,
 
         @Schema(description = "Data da compra", requiredMode = Schema.RequiredMode.REQUIRED, example = "2026-04-04")
         @NotNull LocalDate date,

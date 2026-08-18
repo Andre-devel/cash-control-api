@@ -9,6 +9,7 @@ import com.cashcontrol.api.domain.entity.InstallmentSeries;
 import com.cashcontrol.api.domain.entity.Invoice;
 import com.cashcontrol.api.domain.entity.InvoiceImportFormat;
 import com.cashcontrol.api.domain.entity.InvoiceItem;
+import com.cashcontrol.api.domain.entity.InvoiceStatus;
 import com.cashcontrol.api.domain.entity.PaymentMethod;
 import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.Transaction;
@@ -34,6 +35,7 @@ import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.InvoiceCycleCalculator.InvoiceCycleInfo;
 import com.cashcontrol.api.service.fatura.FaturaParser;
 import com.cashcontrol.api.service.fatura.FaturaRowHasher;
+import com.cashcontrol.api.service.fatura.FaturaRowHasher.RowKey;
 import com.cashcontrol.api.service.fatura.ParsedCardSection;
 import com.cashcontrol.api.service.fatura.ParsedFatura;
 import com.cashcontrol.api.service.fatura.ParsedFaturaRow;
@@ -49,9 +51,10 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -101,12 +104,12 @@ public class FaturaImportServiceImpl implements FaturaImportService {
             excludedPayments += section.rows().size() - expenses.size();
 
             CreditCard suggested = suggestCard(section.cardLast4(), userId).orElse(null);
-            List<String> hashes = rowHasher.hashAll(section.cardLast4(), expenses);
-            Set<String> alreadyImported = findAlreadyImported(suggested, referenceMonth, hashes, userId);
+            List<RowKey> keys = rowHasher.hashAll(section.cardLast4(), expenses);
+            Set<String> alreadyImported = findAlreadyImported(suggested, referenceMonth, keys, userId);
 
             List<FaturaImportPreviewRow> rows = new ArrayList<>(expenses.size());
             for (int i = 0; i < expenses.size(); i++) {
-                rows.add(toPreviewRow(expenses.get(i), hashes.get(i), alreadyImported, rules));
+                rows.add(toPreviewRow(expenses.get(i), keys.get(i), alreadyImported, rules));
             }
 
             groups.add(new FaturaImportGroupPreview(
@@ -135,21 +138,47 @@ public class FaturaImportServiceImpl implements FaturaImportService {
                 fatura.errors());
     }
 
+    /**
+     * Grava o que o usuário aprovou na prévia.
+     *
+     * <p>A confirmação é organizada por <em>compra</em>, não por linha, porque uma compra
+     * parcelada pode aparecer no PDF como várias linhas: o emissor às vezes estorna a compra
+     * e relança as três parcelas na mesma fatura. Tratando linha a linha, a linha
+     * "Parcela 01 de 03" geraria as parcelas 2 e 3 nos meses seguintes e as linhas
+     * "Parcela 02" e "Parcela 03" do próprio arquivo gravariam as mesmas chaves na fatura
+     * atual — duas transações com o mesmo {@code external_ref} na mesma conta, o que o
+     * índice único recusa no flush.
+     *
+     * <p>Agrupando, o arquivo manda: só é gerado o que ele não traz.
+     */
     @Override
     @Transactional
     public FaturaImportResultResponse commit(FaturaImportCommitRequest request, UUID userId) {
-        CommitContext context = new CommitContext(
-                requireImportableAccount(request.accountId(), userId),
-                transactionService.resolvePaymentMethod(PaymentMethodSlug.CREDIT_CARD),
-                parseReferenceMonth(request.referenceMonth()),
-                loadVisibleCategories(request.rows(), userId),
-                userId);
+        Account account = requireImportableAccount(request.accountId(), userId);
+        YearMonth referenceMonth = parseReferenceMonth(request.referenceMonth());
 
         CommitTally tally = new CommitTally();
+        List<FaturaImportCommitRow> rows = withoutRepeatedRows(request.rows(), tally);
 
-        for (Map.Entry<UUID, List<FaturaImportCommitRow>> group : groupByCard(request.rows()).entrySet()) {
-            List<FaturaImportCommitRow> rows = group.getValue();
+        Map<UUID, List<PurchaseGroup>> purchasesByCard = new LinkedHashMap<>();
+        groupByCard(rows).forEach((cardId, cardRows) ->
+                purchasesByCard.put(cardId, groupByPurchase(cardRows)));
 
+        CommitContext context = new CommitContext(
+                account,
+                transactionService.resolvePaymentMethod(PaymentMethodSlug.CREDIT_CARD),
+                referenceMonth,
+                loadVisibleCategories(rows, userId),
+                loadExistingCharges(purchasesByCard, account, userId),
+                userId);
+        tally.claimed.addAll(context.existing().refs());
+
+        // A fatura do mês de referência de cada cartão — uma por seção do PDF. Só estas são
+        // quitadas quando o usuário marca "fatura já paga"; as parcelas futuras vivem em
+        // outros meses e continuam abertas.
+        List<Invoice> currentInvoices = new ArrayList<>();
+
+        for (Map.Entry<UUID, List<PurchaseGroup>> group : purchasesByCard.entrySet()) {
             CreditCard card;
             Invoice invoice;
             try {
@@ -158,25 +187,14 @@ public class FaturaImportServiceImpl implements FaturaImportService {
             } catch (BusinessRuleException | ResourceNotFoundException e) {
                 // O cartão inteiro cai, mas os demais grupos do mesmo PDF continuam:
                 // uma fatura já paga não pode invalidar a importação do outro cartão.
-                rows.forEach(row -> tally.errors.add(new ImportRowError(row.lineNumber(), e.getMessage())));
+                group.getValue().stream().flatMap(purchase -> purchase.rows().stream())
+                        .forEach(row -> tally.errors.add(new ImportRowError(row.lineNumber(), e.getMessage())));
                 continue;
             }
 
-            // Duas fontes de duplicata, como no extrato: o que já está no banco e o que
-            // veio repetido no próprio payload. Sem a segunda, o índice único estouraria
-            // no flush com um erro que não diz ao usuário qual linha era.
-            Set<String> blocked = blockedRefsOf(invoice, context, tally);
-
-            for (FaturaImportCommitRow row : rows) {
-                if (!blocked.add(row.externalRef())) {
-                    tally.skippedDuplicates++;
-                    continue;
-                }
-                try {
-                    importRow(row, card, invoice, context, tally);
-                } catch (BusinessRuleException | ResourceNotFoundException e) {
-                    tally.errors.add(new ImportRowError(row.lineNumber(), e.getMessage()));
-                }
+            currentInvoices.add(invoice);
+            for (PurchaseGroup purchase : group.getValue()) {
+                importPurchase(purchase, card, invoice, context, tally);
             }
         }
 
@@ -185,19 +203,44 @@ public class FaturaImportServiceImpl implements FaturaImportService {
             invoiceRepository.save(invoice);
         });
 
+        int markedPaid = request.alreadyPaid() ? markInvoicesPaid(currentInvoices) : 0;
+
         return new FaturaImportResultResponse(tally.imported, tally.futureInstallments,
-                tally.skippedDuplicates, tally.errors.size(), tally.errors);
+                tally.skippedDuplicates, tally.errors.size(), markedPaid, tally.errors);
+    }
+
+    /**
+     * Quita as faturas do mês, para o caso de importar uma fatura que já foi paga na vida real.
+     *
+     * <p>Marca só a fatura: {@code paidAmount = totalAmount} e status PAGO. As compras
+     * continuam PENDENTES — é o próprio modelo do sistema, em que a fatura é a fonte de
+     * verdade do "pago" e o {@code payInvoice} normal também não mexe nas transações. Como
+     * o saldo da conta soma apenas transações PAGAS, quitar aqui não movimenta a conta,
+     * exatamente o combinado para o histórico já liquidado.
+     *
+     * <p>O total já foi consolidado antes desta chamada, então {@code getTotalAmount()} é o
+     * valor final da fatura. Faturas que já tinham pagamento nem chegam aqui: a
+     * {@link #resolveInvoice} recusa importar sobre elas.
+     */
+    private int markInvoicesPaid(List<Invoice> invoices) {
+        for (Invoice invoice : invoices) {
+            invoice.setPaidAmount(invoice.getTotalAmount());
+            invoice.setStatus(InvoiceStatus.PAID);
+            invoiceRepository.save(invoice);
+        }
+        return invoices.size();
     }
 
     // ── Prévia ────────────────────────────────────────────────────────────────
 
-    private FaturaImportPreviewRow toPreviewRow(ParsedFaturaRow row, String externalRef,
+    private FaturaImportPreviewRow toPreviewRow(ParsedFaturaRow row, RowKey key,
                                                 Set<String> alreadyImported, List<CategoryRule> rules) {
         Optional<CategoryRule> rule = categoryRuleMatcher.match(rules, row.description());
 
         return new FaturaImportPreviewRow(
                 row.lineNumber(),
-                externalRef,
+                key.externalRef(),
+                key.ordinal(),
                 row.date(),
                 truncateDescription(row.description()),
                 row.signedAmount().abs(),
@@ -205,7 +248,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
                 row.totalInstallments(),
                 rule.map(r -> r.getCategory().getId()).orElse(null),
                 rule.map(r -> r.getCategory().getName()).orElse(null),
-                alreadyImported.contains(externalRef));
+                alreadyImported.contains(key.externalRef()));
     }
 
     /**
@@ -231,13 +274,14 @@ public class FaturaImportServiceImpl implements FaturaImportService {
      * mas não abre buraco — a confirmação refaz a checagem contra a fatura de verdade.
      */
     private Set<String> findAlreadyImported(CreditCard card, String referenceMonth,
-                                            List<String> hashes, UUID userId) {
-        if (card == null || hashes.isEmpty()) {
+                                            List<RowKey> keys, UUID userId) {
+        if (card == null || keys.isEmpty()) {
             return Set.of();
         }
+        List<String> refs = keys.stream().map(RowKey::externalRef).toList();
         return invoiceRepository.findByCreditCard_IdAndReferenceMonth(card.getId(), referenceMonth)
                 .map(invoice -> Set.copyOf(
-                        invoiceItemRepository.findExistingExternalRefs(userId, invoice.getId(), hashes)))
+                        invoiceItemRepository.findExistingExternalRefs(userId, invoice.getId(), refs)))
                 .orElseGet(Set::of);
     }
 
@@ -253,19 +297,94 @@ public class FaturaImportServiceImpl implements FaturaImportService {
 
     // ── Confirmação ───────────────────────────────────────────────────────────
 
-    /** O que não muda de linha para linha, para não passar cinco parâmetros por método. */
+    /** O que não muda de linha para linha, para não passar sete parâmetros por método. */
     private record CommitContext(Account account, PaymentMethod paymentMethod, YearMonth referenceMonth,
-                                 Map<UUID, Category> categories, UUID userId) {}
+                                 Map<UUID, Category> categories, ExistingCharges existing, UUID userId) {}
+
+    /**
+     * As cobranças que já ocupam alguma das chaves que esta importação vai tocar.
+     *
+     * <p>Carregadas de uma vez, antes de gravar qualquer coisa, e com o mesmo alcance do
+     * índice único que protegem: a conta inteira para as transações, o usuário inteiro para
+     * os itens de fatura. Checar por fatura — como era antes — deixa passar a chave que já
+     * existe em outro mês.
+     *
+     * @param transactions transação por {@code external_ref}
+     * @param items        item de fatura por {@code external_ref}. Pode existir sem a
+     *                     transação: excluir um lançamento de cartão desvincula o item e
+     *                     mantém a chave nele
+     */
+    private record ExistingCharges(Map<String, Transaction> transactions, Map<String, InvoiceItem> items) {
+
+        static ExistingCharges empty() {
+            return new ExistingCharges(Map.of(), Map.of());
+        }
+
+        /** A união das duas fontes: é o conjunto de chaves que não pode ser gravado de novo. */
+        Set<String> refs() {
+            Set<String> all = new HashSet<>(transactions.keySet());
+            all.addAll(items.keySet());
+            return all;
+        }
+    }
+
+    /**
+     * As linhas do arquivo que descrevem a mesma compra parcelada, e as parcelas que faltam.
+     *
+     * @param rows        as linhas aprovadas dessa compra, na ordem do arquivo
+     * @param total       o total de parcelas declarado pelo PDF
+     * @param lastNumber  a maior parcela que o arquivo traz. As seguintes é que são geradas,
+     *                    e o deslocamento delas conta a partir daqui — não a partir de cada
+     *                    linha, ou a fatura que já contém as parcelas 1 a 3 geraria a 4 três
+     *                    vezes, em três meses diferentes
+     */
+    private record PurchaseGroup(List<FaturaImportCommitRow> rows, int total, int lastNumber) {
+
+        static PurchaseGroup of(List<FaturaImportCommitRow> rows) {
+            int total = rows.stream().mapToInt(row -> numberOf(row.totalInstallments())).max().orElse(1);
+            int last = rows.stream().mapToInt(row -> numberOf(row.installmentNumber())).max().orElse(1);
+            return new PurchaseGroup(rows, total, last);
+        }
+
+        private static int numberOf(Integer value) {
+            return value != null ? value : 1;
+        }
+
+        /** A linha de maior parcela: é dela que saem descrição e valor das que serão geradas. */
+        FaturaImportCommitRow representative() {
+            return rows.stream()
+                    .max(Comparator.comparingInt(row -> numberOf(row.installmentNumber())))
+                    .orElseThrow();
+        }
+    }
 
     /** Acumuladores da confirmação. */
     private static final class CommitTally {
         private final List<ImportRowError> errors = new ArrayList<>();
-        /** Quanto cada fatura tocada cresce, somado no fim para não gravá-la uma vez por linha. */
+        /** Quanto cada fatura tocada varia, somado no fim para não gravá-la uma vez por linha. */
         private final Map<Invoice, BigDecimal> addedByInvoice = new LinkedHashMap<>();
-        private final Map<UUID, Set<String>> blockedRefsByInvoice = new HashMap<>();
+        /** Chaves já ocupadas: as que vieram do banco e as que esta confirmação gravou. */
+        private final Set<String> claimed = new HashSet<>();
         private int imported;
         private int futureInstallments;
         private int skippedDuplicates;
+    }
+
+    /**
+     * O mesmo {@code externalRef} duas vezes no payload é a mesma linha, não duas.
+     *
+     * <p>Descartar aqui, antes do agrupamento, evita que a repetição infle o total da série
+     * e conte a compra duas vezes.
+     */
+    private List<FaturaImportCommitRow> withoutRepeatedRows(List<FaturaImportCommitRow> rows,
+                                                            CommitTally tally) {
+        Map<String, FaturaImportCommitRow> unique = new LinkedHashMap<>();
+        for (FaturaImportCommitRow row : rows) {
+            if (unique.putIfAbsent(row.externalRef(), row) != null) {
+                tally.skippedDuplicates++;
+            }
+        }
+        return List.copyOf(unique.values());
     }
 
     private Map<UUID, List<FaturaImportCommitRow>> groupByCard(List<FaturaImportCommitRow> rows) {
@@ -274,73 +393,197 @@ public class FaturaImportServiceImpl implements FaturaImportService {
     }
 
     /**
-     * Um lançamento do PDF e as parcelas que ainda faltam dele.
+     * Junta as linhas que são parcelas da mesma compra.
      *
-     * <p>Só para frente: a linha "Parcela 04 de 05" gera a 4 (na fatura do PDF) e a 5 (na
-     * do mês seguinte). As parcelas 1 a 3 não são criadas — cairiam em faturas que o
-     * sistema não importou, e inventar uma fatura de abril contendo só essa parcela
-     * mostraria um mês inteiro errado. Quem quiser o histórico importa os PDFs antigos,
-     * onde cada parcela vem como linha de verdade.
+     * <p>A chave é tudo que a identidade da linha tem menos a posição da parcela — cartão,
+     * data da compra, descrição normalizada, total de parcelas e o ordinal. O ordinal vem da
+     * prévia justamente para isto: sem ele, duas compras parceladas no mesmo dia, no mesmo
+     * estabelecimento e com o mesmo número de parcelas cairiam no mesmo grupo.
      */
-    private void importRow(FaturaImportCommitRow row, CreditCard card, Invoice invoice,
-                           CommitContext context, CommitTally tally) {
-        // Resolvida antes de qualquer save: é a última validação que ainda pode falhar, e
-        // uma linha rejeitada não pode deixar transação órfã na transação do banco.
-        Category category = resolveCategory(row.categoryId(), context.categories());
-        String description = truncateDescription(rowHasher.stripInstallmentSuffix(row.description()));
-
-        int number = row.installmentNumber() != null ? row.installmentNumber() : 1;
-        int total = row.totalInstallments() != null ? row.totalInstallments() : 1;
-        if (number > total) {
-            throw new BusinessRuleException(
-                    "Parcela " + number + " de " + total + " é inconsistente.");
+    private List<PurchaseGroup> groupByPurchase(List<FaturaImportCommitRow> rows) {
+        Map<String, List<FaturaImportCommitRow>> byPurchase = new LinkedHashMap<>();
+        for (FaturaImportCommitRow row : rows) {
+            byPurchase.computeIfAbsent(purchaseKeyOf(row), key -> new ArrayList<>()).add(row);
         }
+        return byPurchase.values().stream().map(PurchaseGroup::of).toList();
+    }
 
-        InstallmentSeries series = total > 1
-                ? newSeries(row, card, category, description, number, total, context)
-                : null;
-
-        saveCharge(invoice, row.externalRef(), competenceDateFor(row.date(), number), row.amount(),
-                description, card, category, series, number, total, context, tally);
-        tally.imported++;
-
-        for (int next = number + 1; next <= total; next++) {
-            saveFutureInstallment(row, card, category, description, series, number, next, total, context, tally);
+    private String purchaseKeyOf(FaturaImportCommitRow row) {
+        if (row.totalInstallments() == null || row.totalInstallments() <= 1) {
+            // Compra à vista não tem irmãs: a própria chave da linha isola o grupo.
+            return row.externalRef();
         }
+        return row.cardLast4()
+               + "|" + row.date()
+               + "|" + rowHasher.normalizedDescription(row.originalDescription())
+               + "|" + row.totalInstallments()
+               + "|#" + row.ordinal();
     }
 
     /**
-     * @param baseNumber a parcela que veio no PDF; a distância até ela é a distância entre a
-     *                   fatura do arquivo e a fatura que recebe esta parcela
+     * A chave que a parcela {@code number} desta compra terá — a mesma que a linha
+     * "Parcela N de T" vai produzir no PDF do mês que vem.
      */
-    private void saveFutureInstallment(FaturaImportCommitRow row, CreditCard card, Category category,
-                                       String description, InstallmentSeries series, int baseNumber,
-                                       int number, int total, CommitContext context, CommitTally tally) {
+    private String generatedRefOf(PurchaseGroup purchase, int number) {
+        FaturaImportCommitRow row = purchase.representative();
+        return rowHasher.hashInstallment(row.cardLast4(), row.date(), row.originalDescription(),
+                number, purchase.total(), row.ordinal());
+    }
+
+    private ExistingCharges loadExistingCharges(Map<UUID, List<PurchaseGroup>> purchasesByCard,
+                                                Account account, UUID userId) {
+        Set<String> refs = new LinkedHashSet<>();
+        for (List<PurchaseGroup> purchases : purchasesByCard.values()) {
+            for (PurchaseGroup purchase : purchases) {
+                purchase.rows().forEach(row -> refs.add(row.externalRef()));
+                for (int number = purchase.lastNumber() + 1; number <= purchase.total(); number++) {
+                    refs.add(generatedRefOf(purchase, number));
+                }
+            }
+        }
+        if (refs.isEmpty()) {
+            return ExistingCharges.empty();
+        }
+        return new ExistingCharges(
+                byExternalRef(transactionRepository.findAllByExternalRefIn(userId, account.getId(), refs),
+                        Transaction::getExternalRef),
+                byExternalRef(invoiceItemRepository.findAllByExternalRefIn(userId, refs),
+                        InvoiceItem::getExternalRef));
+    }
+
+    private <T> Map<String, T> byExternalRef(List<T> values, Function<T, String> refOf) {
+        return values.stream().collect(Collectors.toMap(refOf, Function.identity(), (a, b) -> a));
+    }
+
+    /**
+     * Grava uma compra: as linhas que o arquivo traz e só as parcelas que ele não traz.
+     *
+     * <p>Não há backfill: a linha "Parcela 04 de 05" gera a 5, nunca as 1 a 3. Elas cairiam
+     * em faturas que o sistema não importou, e inventar uma fatura de abril contendo só essa
+     * parcela mostraria um mês inteiro errado. Quem quiser o histórico importa os PDFs
+     * antigos, onde cada parcela vem como linha de verdade.
+     */
+    private void importPurchase(PurchaseGroup purchase, CreditCard card, Invoice invoice,
+                                CommitContext context, CommitTally tally) {
+        SeriesHolder series = new SeriesHolder(purchase, card, context);
+        boolean anyImported = false;
+
+        for (FaturaImportCommitRow row : purchase.rows()) {
+            try {
+                anyImported |= importRow(row, purchase, series, card, invoice, context, tally);
+            } catch (BusinessRuleException | ResourceNotFoundException e) {
+                tally.errors.add(new ImportRowError(row.lineNumber(), e.getMessage()));
+            }
+        }
+
+        // Sem nenhuma linha nova, a compra já estava no sistema e as parcelas seguintes dela
+        // também — gerá-las de novo só produziria trabalho que o `claimed` descartaria.
+        if (!anyImported) {
+            return;
+        }
+        for (int number = purchase.lastNumber() + 1; number <= purchase.total(); number++) {
+            try {
+                saveFutureInstallment(purchase, series, number, card, context, tally);
+            } catch (BusinessRuleException | ResourceNotFoundException e) {
+                tally.errors.add(new ImportRowError(
+                        purchase.representative().lineNumber(), e.getMessage()));
+            }
+        }
+    }
+
+    /** @return true quando a linha virou lançamento novo */
+    private boolean importRow(FaturaImportCommitRow row, PurchaseGroup purchase, SeriesHolder series,
+                              CreditCard card, Invoice invoice, CommitContext context, CommitTally tally) {
+        // Resolvida antes de qualquer save: é a última validação que ainda pode falhar, e
+        // uma linha rejeitada não pode deixar transação órfã na transação do banco.
+        Category category = resolveCategory(row.categoryId(), context.categories());
+
+        int number = row.installmentNumber() != null ? row.installmentNumber() : 1;
+        if (number > purchase.total()) {
+            throw new BusinessRuleException(
+                    "Parcela " + number + " de " + purchase.total() + " é inconsistente.");
+        }
+
+        if (!tally.claimed.add(row.externalRef())) {
+            reconcileAmount(row, context, tally);
+            tally.skippedDuplicates++;
+            return false;
+        }
+
+        String description = truncateDescription(rowHasher.stripInstallmentSuffix(row.description()));
+        saveCharge(invoice, row.externalRef(), competenceDateFor(row.date(), context.referenceMonth(), card),
+                row.amount(), description, card, category,
+                series.resolve(category, description), number, purchase.total(), context, tally);
+        tally.imported++;
+        return true;
+    }
+
+    /**
+     * A parcela {@code number}, que o arquivo não traz, na fatura que vai recebê-la.
+     *
+     * <p>O valor é o da última parcela do arquivo — é a melhor estimativa disponível, e o
+     * emissor costuma deixar o resto da divisão na primeira parcela, não nas seguintes.
+     * Quando o PDF do mês que vem chegar com o valor real, {@link #reconcileAmount} ajusta.
+     */
+    private void saveFutureInstallment(PurchaseGroup purchase, SeriesHolder series, int number,
+                                       CreditCard card, CommitContext context, CommitTally tally) {
+        FaturaImportCommitRow row = purchase.representative();
+        String externalRef = generatedRefOf(purchase, number);
+        if (!tally.claimed.add(externalRef)) {
+            // Já criada por uma importação anterior desta mesma compra. Não conta como
+            // duplicata do arquivo: não veio de linha nenhuma dele.
+            return;
+        }
+
+        YearMonth targetMonth = context.referenceMonth().plusMonths((long) number - purchase.lastNumber());
         Invoice invoice;
         try {
-            invoice = resolveInvoice(card, context.referenceMonth().plusMonths((long) number - baseNumber));
+            invoice = resolveInvoice(card, targetMonth);
         } catch (BusinessRuleException | ResourceNotFoundException e) {
-            // A parcela do PDF já entrou; só esta não coube. Reportar é melhor que
-            // derrubar a linha inteira e deixar a fatura do mês sem o lançamento.
+            // As linhas do PDF já entraram; só esta parcela não coube. Reportar é melhor que
+            // derrubar a compra inteira e deixar a fatura do mês sem o lançamento.
             tally.errors.add(new ImportRowError(row.lineNumber(),
-                    "Parcela " + number + "/" + total + ": " + e.getMessage()));
+                    "Parcela " + number + "/" + purchase.total() + ": " + e.getMessage()));
             return;
         }
 
-        // A chave é a que a linha "Parcela N de T" vai produzir no PDF do mês que vem — é
-        // assim que a importação seguinte reconhece esta parcela em vez de duplicá-la. Por
-        // isso sai da descrição original: o PDF não sabe nada da que o usuário escolheu.
-        String externalRef = rowHasher.hashInstallment(
-                row.cardLast4(), row.date(), row.originalDescription(), row.amount(), number, total);
-        if (!blockedRefsOf(invoice, context, tally).add(externalRef)) {
-            // Já criada por uma importação anterior desta mesma compra. Não conta como
-            // duplicata do arquivo: não veio de linha nenhuma do PDF.
-            return;
-        }
-
-        saveCharge(invoice, externalRef, competenceDateFor(row.date(), number), row.amount(),
-                description, card, category, series, number, total, context, tally);
+        Category category = resolveCategory(row.categoryId(), context.categories());
+        String description = truncateDescription(rowHasher.stripInstallmentSuffix(row.description()));
+        saveCharge(invoice, externalRef, competenceDateFor(row.date(), targetMonth, card), row.amount(),
+                description, card, category, series.resolve(category, description),
+                number, purchase.total(), context, tally);
         tally.futureInstallments++;
+    }
+
+    /**
+     * Ajusta o valor de uma cobrança que já existe para o que o PDF está dizendo.
+     *
+     * <p>O caso que importa é a parcela criada por estimativa no mês anterior: o emissor
+     * deixa o resto da divisão na primeira parcela — 48,28 + 48,26 + 48,26 —, e a parcela 2
+     * nasceu valendo 48,28. Agora o PDF traz o valor real dela, e o PDF é a autoridade.
+     *
+     * <p>Só o valor. Descrição e categoria podem ter sido editadas pelo usuário depois da
+     * importação, e sobrescrevê-las apagaria a escolha dele.
+     */
+    private void reconcileAmount(FaturaImportCommitRow row, CommitContext context, CommitTally tally) {
+        Transaction tx = context.existing().transactions().get(row.externalRef());
+        if (tx != null && tx.getAmount().compareTo(row.amount()) != 0) {
+            tx.setAmount(row.amount());
+            transactionRepository.save(tx);
+        }
+
+        InvoiceItem item = context.existing().items().get(row.externalRef());
+        if (item == null || item.getAmount().compareTo(row.amount()) == 0) {
+            return;
+        }
+        BigDecimal delta = row.amount().subtract(item.getAmount());
+        item.setAmount(row.amount());
+        invoiceItemRepository.save(item);
+        if (item.getCancelledAt() == null) {
+            // Um item cancelado já foi subtraído do total da fatura; somar a diferença nele
+            // devolveria à fatura um valor que ela não cobra mais.
+            tally.addedByInvoice.merge(item.getInvoice(), delta, BigDecimal::add);
+        }
     }
 
     /**
@@ -399,50 +642,89 @@ public class FaturaImportServiceImpl implements FaturaImportService {
     }
 
     /**
-     * A série que agrupa o parcelamento na tela de Parcelamentos.
+     * A série que agrupa o parcelamento na tela de Parcelamentos — uma por compra, criada na
+     * primeira parcela que de fato for gravada.
      *
-     * <p>{@code totalInstallments} é o da compra (5 de 5, como está no PDF), mas
-     * {@code totalAmount} é só o que ainda será lançado — as parcelas anteriores à do PDF
-     * não existem no sistema, e declarar o valor cheio prometeria transações que não vão
-     * aparecer.
+     * <p>Uma por compra, e não uma por linha: quando o emissor lança as três parcelas na
+     * mesma fatura, criar uma série por linha mostraria três parcelamentos de uma parcela
+     * cada no lugar de um de três.
+     *
+     * <p>Preguiçosa porque uma compra cujas linhas são todas duplicatas não pode deixar uma
+     * série vazia para trás.
      */
-    private InstallmentSeries newSeries(FaturaImportCommitRow row, CreditCard card, Category category,
-                                        String description, int number, int total, CommitContext context) {
-        InstallmentSeries series = new InstallmentSeries();
-        series.setUserId(context.userId());
-        series.setAccount(context.account());
-        series.setCreditCard(card);
-        series.setPaymentMethod(context.paymentMethod());
-        series.setType(TransactionType.EXPENSE);
-        series.setDescription(description);
-        series.setTotalAmount(row.amount().multiply(BigDecimal.valueOf(total - number + 1L)));
-        series.setTotalInstallments(total);
-        series.setFirstPaymentDate(competenceDateFor(row.date(), number));
-        series.setCategory(category);
-        return installmentSeriesRepository.save(series);
+    private final class SeriesHolder {
+
+        private final PurchaseGroup purchase;
+        private final CreditCard card;
+        private final CommitContext context;
+        private InstallmentSeries series;
+
+        private SeriesHolder(PurchaseGroup purchase, CreditCard card, CommitContext context) {
+            this.purchase = purchase;
+            this.card = card;
+            this.context = context;
+        }
+
+        private InstallmentSeries resolve(Category category, String description) {
+            if (purchase.total() <= 1) {
+                return null;
+            }
+            if (series == null) {
+                series = create(category, description);
+            }
+            return series;
+        }
+
+        /**
+         * {@code totalInstallments} é o da compra (5 de 5, como está no PDF), mas
+         * {@code totalAmount} é só o que esta importação vai lançar — as parcelas anteriores
+         * às do arquivo não existem no sistema, e declarar o valor cheio prometeria
+         * transações que não vão aparecer.
+         */
+        private InstallmentSeries create(Category category, String description) {
+            FaturaImportCommitRow first = purchase.rows().getFirst();
+            BigDecimal fromFile = purchase.rows().stream()
+                    .map(FaturaImportCommitRow::amount)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal generated = purchase.representative().amount()
+                    .multiply(BigDecimal.valueOf((long) purchase.total() - purchase.lastNumber()));
+
+            InstallmentSeries created = new InstallmentSeries();
+            created.setUserId(context.userId());
+            created.setAccount(context.account());
+            created.setCreditCard(card);
+            created.setPaymentMethod(context.paymentMethod());
+            created.setType(TransactionType.EXPENSE);
+            created.setDescription(description);
+            created.setTotalAmount(fromFile.add(generated));
+            created.setTotalInstallments(purchase.total());
+            created.setFirstPaymentDate(
+                    competenceDateFor(first.date(), context.referenceMonth(), card));
+            created.setCategory(category);
+            return installmentSeriesRepository.save(created);
+        }
     }
 
     /**
-     * A competência da parcela {@code number} de uma compra feita em {@code purchaseDate}.
+     * A competência de uma cobrança que o PDF colocou na fatura {@code invoiceMonth}.
      *
      * <p>A fatura repete a data da compra em toda parcela — a 4 de 5 de uma compra de abril
-     * continua datada de abril. Usar isso como competência empilharia as cinco parcelas no
-     * mesmo mês. O deslocamento mensal é o mesmo de {@code InstallmentService}, que data a
-     * parcela {@code i} em {@code firstPaymentDate.plusMonths(i)}.
-     */
-    private LocalDate competenceDateFor(LocalDate purchaseDate, int number) {
-        return purchaseDate.plusMonths(number - 1L);
-    }
-
-    /**
-     * As chaves já ocupadas na fatura, carregadas uma vez por fatura tocada.
+     * continua datada de abril —, então a competência tem de ser deslocada. O deslocamento
+     * sai da <em>fatura de destino</em>, não do número da parcela: quando o emissor lança as
+     * três parcelas na mesma fatura, contar pelo número jogaria a terceira dois meses à
+     * frente do mês em que ela está sendo cobrada.
      *
-     * <p>É o mesmo conjunto para as linhas do PDF e para as parcelas futuras, o que faz uma
-     * parcela gerada agora bloquear a mesma parcela vinda de outra linha do arquivo.
+     * <p>O dia é o da compra, e o mês é escolhido para que
+     * {@link InvoiceCycleCalculator#calculateForCharge} devolva exatamente
+     * {@code invoiceMonth}. Sem isso, qualquer edição posterior do lançamento faria
+     * {@code syncInvoiceItemForTransaction} recalcular o ciclo pela competência e mudar o
+     * item de fatura.
      */
-    private Set<String> blockedRefsOf(Invoice invoice, CommitContext context, CommitTally tally) {
-        return tally.blockedRefsByInvoice.computeIfAbsent(invoice.getId(),
-                id -> new HashSet<>(invoiceItemRepository.findAllExternalRefs(context.userId(), id)));
+    private LocalDate competenceDateFor(LocalDate purchaseDate, YearMonth invoiceMonth, CreditCard card) {
+        YearMonth chargeMonth = purchaseDate.getDayOfMonth() <= card.getClosingDay()
+                ? invoiceMonth
+                : invoiceMonth.minusMonths(1);
+        return chargeMonth.atDay(Math.min(purchaseDate.getDayOfMonth(), chargeMonth.lengthOfMonth()));
     }
 
     private Category resolveCategory(UUID categoryId, Map<UUID, Category> categories) {

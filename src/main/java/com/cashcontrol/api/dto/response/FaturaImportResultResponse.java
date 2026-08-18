@@ -24,6 +24,14 @@ public record FaturaImportResultResponse(
         @Schema(description = "Linhas rejeitadas na validação", example = "0")
         int failed,
 
+        @Schema(description = """
+                Faturas marcadas como pagas ao fim da importação.
+
+                Só é diferente de zero quando o usuário pediu "fatura já paga": uma por \
+                cartão do PDF, todas no mês de referência.""",
+                example = "0")
+        int markedPaidInvoices,
+
         @Schema(description = "Motivo de cada linha rejeitada")
         List<ImportRowError> errors
 ) {}
