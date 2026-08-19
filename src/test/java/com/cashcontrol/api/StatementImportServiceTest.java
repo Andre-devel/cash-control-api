@@ -5,6 +5,7 @@ import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.AccountType;
 import com.cashcontrol.api.domain.entity.Category;
 import com.cashcontrol.api.domain.entity.CategoryRule;
+import com.cashcontrol.api.domain.entity.MerchantAlias;
 import com.cashcontrol.api.domain.entity.PaymentMethod;
 import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.StatementFormat;
@@ -22,10 +23,12 @@ import com.cashcontrol.api.dto.response.SuggestionSource;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CategoryRuleRepository;
+import com.cashcontrol.api.repository.MerchantAliasRepository;
 import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.CategoryRuleMatcher;
 import com.cashcontrol.api.service.CategorySuggester;
+import com.cashcontrol.api.service.MerchantAliasService;
 import com.cashcontrol.api.service.StatementImportServiceImpl;
 import com.cashcontrol.api.service.statement.InterCsvStatementParser;
 import com.cashcontrol.api.service.statement.StatementHistoryMapper;
@@ -66,6 +69,7 @@ class StatementImportServiceTest {
     @Mock private AccountRepository accountRepository;
     @Mock private CategoryRepository categoryRepository;
     @Mock private CategoryRuleRepository categoryRuleRepository;
+    @Mock private MerchantAliasRepository merchantAliasRepository;
     @Mock private PaymentMethodRepository paymentMethodRepository;
 
     private StatementImportServiceImpl service;
@@ -95,6 +99,7 @@ class StatementImportServiceTest {
                 categoryRuleRepository,
                 paymentMethodRepository,
                 new CategorySuggester(transactionRepository, new CategoryRuleMatcher()),
+                new MerchantAliasService(merchantAliasRepository),
                 new StatementHistoryMapper(),
                 new StatementRowHasher(),
                 List.of(new InterCsvStatementParser()),
@@ -185,7 +190,7 @@ class StatementImportServiceTest {
         givenNoExistingImports();
         givenNoCategoryRules();
         Category market = category("Mercado");
-        when(transactionRepository.findCategoryHistoryByMerchantKeys(eq(userId), any())).thenReturn(List.<Object[]>of(
+        when(transactionRepository.findCategoryHistoryByMerchantKeysOrTokenPattern(eq(userId), any(), any())).thenReturn(List.<Object[]>of(
                 new Object[]{"pix marketplace", market.getId(), market.getName(), null, null, 2L}));
 
         ImportPreviewResponse preview = service.preview(fixture(), StatementFormat.INTER_CSV, accountId, userId);
@@ -207,7 +212,7 @@ class StatementImportServiceTest {
         rule.setCategory(food);
         when(categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId))
                 .thenReturn(List.of(rule));
-        when(transactionRepository.findCategoryHistoryByMerchantKeys(eq(userId), any())).thenReturn(List.<Object[]>of(
+        when(transactionRepository.findCategoryHistoryByMerchantKeysOrTokenPattern(eq(userId), any(), any())).thenReturn(List.<Object[]>of(
                 new Object[]{"cafe do ponto", market.getId(), market.getName(), null, null, 5L}));
 
         ImportPreviewResponse preview = service.preview(fixture(), StatementFormat.INTER_CSV, accountId, userId);
@@ -245,6 +250,71 @@ class StatementImportServiceTest {
 
         ImportPreviewRow row = rowWithDescription(preview, "Pix Marketplace");
         assertThat(row.merchantKey()).isEqualTo(com.cashcontrol.api.service.MerchantKey.of(row.description()));
+    }
+
+    @Test
+    void preview_prefillsTheDescriptionTheUserChoseForThatMerchantBefore() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenNoCategoryRules();
+        MerchantAlias alias = new MerchantAlias();
+        alias.setUserId(userId);
+        alias.setMerchantKey(com.cashcontrol.api.service.MerchantKey.of("Pix Marketplace"));
+        alias.setDisplayName("Marketplace - assinatura");
+        alias.setUpdatedAt(Instant.now());
+        when(merchantAliasRepository.findAllByUserId(userId)).thenReturn(List.of(alias));
+
+        ImportPreviewResponse preview = service.preview(fixture(), StatementFormat.INTER_CSV, accountId, userId);
+
+        ImportPreviewRow row = rowWithDescription(preview, "Pix Marketplace");
+        // O texto do arquivo continua na descrição; o apelido vem ao lado, para a tela poder
+        // mostrar os dois.
+        assertThat(row.suggestedDescription()).isEqualTo("Marketplace - assinatura");
+        assertThat(row.description()).isEqualTo("Pix Marketplace");
+    }
+
+    @Test
+    void preview_leavesTheDescriptionSuggestionEmptyForAMerchantNeverRenamed() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenNoCategoryRules();
+        when(merchantAliasRepository.findAllByUserId(userId)).thenReturn(List.of());
+
+        ImportPreviewResponse preview = service.preview(fixture(), StatementFormat.INTER_CSV, accountId, userId);
+
+        assertThat(rowWithDescription(preview, "Pix Marketplace").suggestedDescription()).isNull();
+    }
+
+    @Test
+    void commit_remembersTheDescriptionTheUserRewroteOnTheRow() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenPaymentMethods();
+
+        service.commit(request(new ImportCommitRow(1, "ref-1", LocalDate.parse("2026-08-04"),
+                "Marketplace - assinatura", "Pix Marketplace", new BigDecimal("144.06"),
+                TransactionType.EXPENSE, PaymentMethodSlug.PIX, null)), userId);
+
+        ArgumentCaptor<MerchantAlias> saved = ArgumentCaptor.forClass(MerchantAlias.class);
+        verify(merchantAliasRepository).save(saved.capture());
+        assertThat(saved.getValue().getDisplayName()).isEqualTo("Marketplace - assinatura");
+        assertThat(saved.getValue().getMerchantKey())
+                .isEqualTo(com.cashcontrol.api.service.MerchantKey.of("Pix Marketplace"));
+    }
+
+    @Test
+    void commit_withoutTheOriginalDescriptionRemembersNothing() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenPaymentMethods();
+
+        // Cliente antigo, que não manda o campo: sem saber o que a descrição substitui, a
+        // única leitura segura é que nada foi renomeado.
+        service.commit(request(new ImportCommitRow(1, "ref-1", LocalDate.parse("2026-08-04"),
+                "Marketplace - assinatura", null, new BigDecimal("144.06"),
+                TransactionType.EXPENSE, PaymentMethodSlug.PIX, null)), userId);
+
+        verify(merchantAliasRepository, never()).save(any());
     }
 
     @Test
@@ -344,6 +414,7 @@ class StatementImportServiceTest {
         StatementImportServiceImpl withoutParsers = new StatementImportServiceImpl(
                 transactionRepository, accountRepository, categoryRepository, categoryRuleRepository,
                 paymentMethodRepository, new CategorySuggester(transactionRepository, new CategoryRuleMatcher()),
+                new MerchantAliasService(merchantAliasRepository),
                 new StatementHistoryMapper(), new StatementRowHasher(), List.of(), new AppProperties());
 
         assertThatThrownBy(() -> withoutParsers.preview(fixture(), StatementFormat.INTER_CSV, accountId, userId))
@@ -555,7 +626,7 @@ class StatementImportServiceTest {
 
     private ImportCommitRow commitRow(String externalRef, String date, String description, String amount,
                                       TransactionType type, PaymentMethodSlug paymentMethod, UUID categoryId) {
-        return new ImportCommitRow(1, externalRef, LocalDate.parse(date), description,
+        return new ImportCommitRow(1, externalRef, LocalDate.parse(date), description, description,
                 new BigDecimal(amount), type, paymentMethod, categoryId);
     }
 
@@ -591,6 +662,7 @@ class StatementImportServiceTest {
                 categoryRuleRepository,
                 paymentMethodRepository,
                 new CategorySuggester(transactionRepository, new CategoryRuleMatcher()),
+                new MerchantAliasService(merchantAliasRepository),
                 new StatementHistoryMapper(),
                 new StatementRowHasher(),
                 List.of(new InterCsvStatementParser()),

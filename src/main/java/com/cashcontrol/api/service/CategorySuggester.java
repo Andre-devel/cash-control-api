@@ -17,11 +17,15 @@ import java.util.stream.Collectors;
 
 /**
  * Resolve a categoria sugerida para uma linha de importação, na ordem
- * RULE → HISTORY → NONE.
+ * RULE → HISTORY (chave exata) → HISTORY (token) → NONE.
  *
  * <p>RULE vem de {@link CategoryRuleMatcher}: intenção declarada pelo usuário, sempre
  * prioritária, inclusive sobre uma memória mais numerosa. HISTORY é a categoria mais usada
- * pelo próprio usuário para o {@code merchantKey} daquela linha — ver {@link #loadHistory}.
+ * pelo próprio usuário para o estabelecimento daquela linha — ver {@link #loadHistory}.
+ * Primeiro por {@code merchantKey} igual; sem isso, por uma palavra em comum com uma chave já
+ * vista (o emissor do cartão manda a mesma assinatura com grafias diferentes de um mês para o
+ * outro — {@code ANTHROPIC}, {@code CLAUDE.AI SUBSCRIPTION}, {@code ANTHROPIC* CLAUDE SUB} —
+ * e {@link MerchantKey#of} só normaliza formatação, não sabe que são o mesmo comerciante).
  * Sem nenhuma das duas, NONE: propositalmente sem fallback por frequência global, que
  * pré-preencheria a fatura inteira com um palpite sem relação com a linha (ver
  * {@code CategoryServiceImpl.suggestCategory}, que é esse fallback e continua existindo só
@@ -45,45 +49,64 @@ public class CategorySuggester {
     }
 
     /**
-     * A categoria mais frequente do histórico do usuário para cada {@code merchantKey}
-     * encontrado nas descrições informadas — uma consulta para o arquivo inteiro, não uma
-     * por linha.
-     *
-     * <p>A contagem que decide o vencedor de cada chave vem de
-     * {@link TransactionRepository#findCategoryHistoryByMerchantKeys}, que conta uma série de
-     * parcelas como uma decisão só: sem isso, uma compra em 12x dominaria o voto de doze
-     * compras à vista no mesmo estabelecimento.
+     * Histórico do arquivo inteiro, indexado das duas formas que {@link #suggest} consulta:
+     * por {@code merchantKey} exato e por token significativo.
      */
-    public Map<String, Suggestion> loadHistory(UUID userId, Collection<String> descriptions) {
+    public record History(Map<String, Suggestion> byMerchantKey, Map<String, Suggestion> byToken) {
+
+        static final History EMPTY = new History(Map.of(), Map.of());
+    }
+
+    /**
+     * A categoria mais frequente do histórico do usuário para cada {@code merchantKey}
+     * encontrado nas descrições informadas, e para cada token significativo dessas chaves —
+     * uma consulta para o arquivo inteiro, não uma por linha.
+     *
+     * <p>A contagem que decide o vencedor de cada chave/token vem de
+     * {@link TransactionRepository#findCategoryHistoryByMerchantKeysOrTokenPattern}, que conta
+     * uma série de parcelas como uma decisão só: sem isso, uma compra em 12x dominaria o voto
+     * de doze compras à vista no mesmo estabelecimento.
+     */
+    public History loadHistory(UUID userId, Collection<String> descriptions) {
         Set<String> merchantKeys = descriptions.stream()
                 .map(MerchantKey::of)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         if (merchantKeys.isEmpty()) {
-            return Map.of();
+            return History.EMPTY;
         }
 
-        Map<String, Suggestion> best = new HashMap<>();
-        Map<String, Long> bestCount = new HashMap<>();
-        for (Object[] row : transactionRepository.findCategoryHistoryByMerchantKeys(userId, merchantKeys)) {
+        Set<String> tokens = merchantKeys.stream()
+                .flatMap(key -> MerchantKey.significantTokens(key).stream())
+                .collect(Collectors.toSet());
+        String tokenPattern = tokens.isEmpty() ? "^$" : "\\y(" + String.join("|", tokens) + ")\\y";
+
+        Map<String, Suggestion> byMerchantKey = new HashMap<>();
+        Map<String, Long> byMerchantKeyCount = new HashMap<>();
+        Map<String, Suggestion> byToken = new HashMap<>();
+        Map<String, Long> byTokenCount = new HashMap<>();
+
+        for (Object[] row : transactionRepository.findCategoryHistoryByMerchantKeysOrTokenPattern(
+                userId, merchantKeys, tokenPattern)) {
             String merchantKey = (String) row[0];
             long count = (Long) row[5];
-            Long current = bestCount.get(merchantKey);
-            if (current != null && current >= count) {
-                continue;
+            Suggestion candidate = new Suggestion(
+                    (UUID) row[1], (String) row[2], (UUID) row[3], (String) row[4], SuggestionSource.HISTORY);
+
+            recordCandidate(byMerchantKey, byMerchantKeyCount, merchantKey, candidate, count);
+            for (String token : MerchantKey.significantTokens(merchantKey)) {
+                recordCandidate(byToken, byTokenCount, token, candidate, count);
             }
-            bestCount.put(merchantKey, count);
-            best.put(merchantKey, new Suggestion(
-                    (UUID) row[1], (String) row[2], (UUID) row[3], (String) row[4], SuggestionSource.HISTORY));
         }
-        return best;
+        return new History(byMerchantKey, byToken);
     }
 
     /**
-     * A sugestão para uma linha: a regra do usuário primeiro, depois o histórico já
-     * carregado por {@link #loadHistory} para o arquivo inteiro.
+     * A sugestão para uma linha: a regra do usuário primeiro, depois a chave exata do
+     * histórico já carregado por {@link #loadHistory}, depois — só na ausência das duas — o
+     * token mais específico (mais longo) em comum com alguma chave já vista.
      */
-    public Suggestion suggest(String description, List<CategoryRule> rules, Map<String, Suggestion> history) {
+    public Suggestion suggest(String description, List<CategoryRule> rules, History history) {
         Optional<CategoryRule> rule = categoryRuleMatcher.match(rules, description);
         if (rule.isPresent()) {
             CategoryRule matched = rule.get();
@@ -95,7 +118,31 @@ public class CategorySuggester {
         }
 
         String merchantKey = MerchantKey.of(description);
-        Suggestion fromHistory = merchantKey != null ? history.get(merchantKey) : null;
-        return fromHistory != null ? fromHistory : Suggestion.NONE;
+        if (merchantKey == null) {
+            return Suggestion.NONE;
+        }
+
+        Suggestion exact = history.byMerchantKey().get(merchantKey);
+        if (exact != null) {
+            return exact;
+        }
+
+        for (String token : MerchantKey.significantTokens(merchantKey)) {
+            Suggestion fromToken = history.byToken().get(token);
+            if (fromToken != null) {
+                return fromToken;
+            }
+        }
+        return Suggestion.NONE;
+    }
+
+    private static void recordCandidate(Map<String, Suggestion> best, Map<String, Long> bestCount,
+                                         String key, Suggestion candidate, long count) {
+        Long current = bestCount.get(key);
+        if (current != null && current >= count) {
+            return;
+        }
+        bestCount.put(key, count);
+        best.put(key, candidate);
     }
 }

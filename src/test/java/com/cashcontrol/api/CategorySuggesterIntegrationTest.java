@@ -90,7 +90,7 @@ class CategorySuggesterIntegrationTest {
      * categorização para a série inteira.
      */
     @Test
-    void findCategoryHistoryByMerchantKeys_countsAnInstallmentSeriesAsOneDecision() {
+    void findCategoryHistoryByMerchantKeysOrTokenPattern_countsAnInstallmentSeriesAsOneDecision() {
         Category categoryA = category("Categoria A");
         Category categoryB = category("Categoria B");
 
@@ -104,8 +104,8 @@ class CategorySuggesterIntegrationTest {
 
         transactionRepository.flush();
 
-        List<Object[]> rows = transactionRepository.findCategoryHistoryByMerchantKeys(
-                userId, Set.of("loja parcelada"));
+        List<Object[]> rows = transactionRepository.findCategoryHistoryByMerchantKeysOrTokenPattern(
+                userId, Set.of("loja parcelada"), "^$");
 
         Map<UUID, Long> countByCategory = rows.stream()
                 .collect(java.util.stream.Collectors.toMap(
@@ -131,10 +131,10 @@ class CategorySuggesterIntegrationTest {
 
         transactionRepository.flush();
 
-        Map<String, CategorySuggester.Suggestion> history =
+        CategorySuggester.History history =
                 categorySuggester.loadHistory(userId, List.of(MERCHANT_DESCRIPTION));
 
-        CategorySuggester.Suggestion suggestion = history.get("loja parcelada");
+        CategorySuggester.Suggestion suggestion = history.byMerchantKey().get("loja parcelada");
         assertThat(suggestion).isNotNull();
         assertThat(suggestion.categoryId()).isEqualTo(categoryB.getId());
         assertThat(suggestion.source()).isEqualTo(SuggestionSource.HISTORY);

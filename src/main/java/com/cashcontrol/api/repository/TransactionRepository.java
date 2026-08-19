@@ -328,27 +328,40 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             org.springframework.data.domain.Pageable pageable);
 
     /**
-     * Por {@code merchantKey}, cada categoria já usada pelo usuário e quantas vezes — a
+     * Por {@code merchant_key}, cada categoria já usada pelo usuário e quantas vezes — a
      * matéria-prima da sugestão por histórico da importação (ver {@code CategorySuggester}).
+     * Traz duas populações de linha: {@code merchant_key} igual a uma das chaves do arquivo
+     * (match exato) e {@code merchant_key} que contém, como palavra inteira, um dos tokens
+     * significativos extraídos dessas chaves (match por token — ver
+     * {@code CategorySuggester#suggest}, que usa o exato primeiro e só cai pro token quando
+     * não há chave igual).
      *
-     * <p>Conta {@code COUNT(DISTINCT COALESCE(installmentSeries.id, id))}, não
-     * {@code COUNT(t)}: uma série de parcelas é <em>uma</em> decisão de categorização, não
+     * <p>Nativa porque o match por palavra depende do operador de regex do Postgres
+     * ({@code \y...\y}, fronteira de palavra), sem equivalente em JPQL. {@code tokenPattern}
+     * já chega pronto do Java como {@code \y(tok1|tok2|...)\y}, ou {@code ^$} (nunca casa,
+     * porque {@code merchant_key} nunca é string vazia — ver {@code MerchantKey#of}) quando o
+     * arquivo não tem nenhum token significativo.
+     *
+     * <p>Conta {@code COUNT(DISTINCT COALESCE(installment_series_id, id))}, não
+     * {@code COUNT(*)}: uma série de parcelas é <em>uma</em> decisão de categorização, não
      * uma por parcela. Sem isso, uma compra em 12x dominaria o voto de doze compras à vista
      * no mesmo comerciante.
      *
-     * <p>{@code LEFT JOIN} explícito na subcategoria: ela é opcional, e um join implícito
-     * de {@code t.subcategory.name} vira {@code INNER JOIN} — descartaria toda linha sem
-     * subcategoria, que é a maioria.
+     * <p>{@code LEFT JOIN} na subcategoria: ela é opcional, e um join interno descartaria
+     * toda linha sem subcategoria, que é a maioria.
      */
-    @Query("SELECT t.merchantKey, c.id, c.name, sc.id, sc.name, " +
-           "COUNT(DISTINCT COALESCE(t.installmentSeries.id, t.id)) " +
-           "FROM Transaction t " +
-           "JOIN t.category c " +
-           "LEFT JOIN t.subcategory sc " +
-           "WHERE t.userId = :userId AND t.merchantKey IN :merchantKeys " +
-           "AND t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED " +
-           "GROUP BY t.merchantKey, c.id, c.name, sc.id, sc.name")
-    List<Object[]> findCategoryHistoryByMerchantKeys(
+    @Query(value =
+            "SELECT t.merchant_key, t.category_id, c.name, t.subcategory_id, sc.name, " +
+            "       COUNT(DISTINCT COALESCE(t.installment_series_id, t.id)) " +
+            "FROM transactions t " +
+            "JOIN categories c ON c.id = t.category_id " +
+            "LEFT JOIN categories sc ON sc.id = t.subcategory_id " +
+            "WHERE t.user_id = :userId AND t.status <> 'CANCELLED' " +
+            "AND (t.merchant_key IN (:merchantKeys) OR t.merchant_key ~ :tokenPattern) " +
+            "GROUP BY t.merchant_key, t.category_id, c.name, t.subcategory_id, sc.name",
+            nativeQuery = true)
+    List<Object[]> findCategoryHistoryByMerchantKeysOrTokenPattern(
             @Param("userId") UUID userId,
-            @Param("merchantKeys") Collection<String> merchantKeys);
+            @Param("merchantKeys") Collection<String> merchantKeys,
+            @Param("tokenPattern") String tokenPattern);
 }

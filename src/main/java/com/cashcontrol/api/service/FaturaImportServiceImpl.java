@@ -78,6 +78,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
     private final CategoryRepository categoryRepository;
     private final CategoryRuleRepository categoryRuleRepository;
     private final CategorySuggester categorySuggester;
+    private final MerchantAliasService merchantAliasService;
     private final CreditCardService creditCardService;
     private final TransactionService transactionService;
     private final InvoiceCycleCalculator cycleCalculator;
@@ -95,9 +96,11 @@ public class FaturaImportServiceImpl implements FaturaImportService {
         List<CategoryRule> rules = categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId);
         // Uma consulta de histórico para o arquivo inteiro, não uma por linha nem uma por
         // seção de cartão.
-        Map<String, CategorySuggester.Suggestion> history = categorySuggester.loadHistory(userId,
+        CategorySuggester.History history = categorySuggester.loadHistory(userId,
                 fatura.cardSections().stream().flatMap(section -> section.rows().stream())
                         .map(ParsedFaturaRow::description).toList());
+        // Idem para os apelidos: a tabela inteira do usuário, uma vez, indexada em memória.
+        MerchantAliasService.Aliases aliases = merchantAliasService.load(userId);
 
         List<FaturaImportGroupPreview> groups = new ArrayList<>(fatura.cardSections().size());
         int excludedPayments = 0;
@@ -119,7 +122,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
 
             List<FaturaImportPreviewRow> rows = new ArrayList<>(expenses.size());
             for (int i = 0; i < expenses.size(); i++) {
-                rows.add(toPreviewRow(expenses.get(i), keys.get(i), alreadyImported, rules, history));
+                rows.add(toPreviewRow(expenses.get(i), keys.get(i), alreadyImported, rules, history, aliases));
             }
 
             groups.add(new FaturaImportGroupPreview(
@@ -169,6 +172,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
 
         CommitTally tally = new CommitTally();
         List<FaturaImportCommitRow> rows = withoutRepeatedRows(request.rows(), tally);
+        rememberMerchantAliases(rows, userId);
 
         Map<UUID, List<PurchaseGroup>> purchasesByCard = new LinkedHashMap<>();
         groupByCard(rows).forEach((cardId, cardRows) ->
@@ -244,8 +248,10 @@ public class FaturaImportServiceImpl implements FaturaImportService {
     // ── Prévia ────────────────────────────────────────────────────────────────
 
     private FaturaImportPreviewRow toPreviewRow(ParsedFaturaRow row, RowKey key, Set<String> alreadyImported,
-                                                List<CategoryRule> rules, Map<String, CategorySuggester.Suggestion> history) {
+                                                List<CategoryRule> rules, CategorySuggester.History history,
+                                                MerchantAliasService.Aliases aliases) {
         CategorySuggester.Suggestion suggestion = categorySuggester.suggest(row.description(), rules, history);
+        String alias = merchantAliasService.suggest(row.description(), aliases);
 
         return new FaturaImportPreviewRow(
                 row.lineNumber(),
@@ -257,6 +263,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
                 row.installmentNumber(),
                 row.totalInstallments(),
                 MerchantKey.of(row.description()),
+                alias != null ? truncateDescription(alias) : null,
                 suggestion.categoryId(),
                 suggestion.categoryName(),
                 suggestion.subcategoryId(),
@@ -526,6 +533,21 @@ public class FaturaImportServiceImpl implements FaturaImportService {
                 tally.errors.add(new ImportRowError(
                         purchase.representative().lineNumber(), e.getMessage()));
             }
+        }
+    }
+
+    /**
+     * Guarda como o usuário quer ver cada estabelecimento desta importação.
+     *
+     * <p>Aqui, e não dentro de {@link #importRow}, porque o que interessa é o que o usuário
+     * revisou, não o que virou lançamento: uma linha descartada como duplicata sai de
+     * {@code importRow} antes de qualquer save, e ainda assim o nome que ele deixou nela é
+     * uma decisão sobre aquele estabelecimento. Parcelas futuras não passam por aqui de
+     * propósito — herdam a descrição da compra, não são uma decisão nova.
+     */
+    private void rememberMerchantAliases(List<FaturaImportCommitRow> rows, UUID userId) {
+        for (FaturaImportCommitRow row : rows) {
+            merchantAliasService.remember(userId, row.originalDescription(), row.description());
         }
     }
 

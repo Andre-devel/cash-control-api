@@ -28,6 +28,17 @@ public record ImportCommitRow(
         @Schema(description = "Descrição da transação", requiredMode = Schema.RequiredMode.REQUIRED, example = "Pix Marketplace")
         @NotBlank @Size(max = 255) String description,
 
+        @Schema(description = """
+                A descrição como o arquivo a trouxe, sem edição.
+
+                Não vai para o lançamento: é a identidade do estabelecimento para a memória \
+                de apelido (ver MerchantAliasService). Sem ela o servidor só veria o texto \
+                renomeado e não teria como saber o que ele substitui. Opcional por \
+                compatibilidade — quando ausente, a descrição enviada é tratada como a \
+                original, ou seja, como se o usuário não tivesse renomeado nada.""",
+                example = "ANTHROPIC* CLAUDE SUB")
+        @Size(max = 255) String originalDescription,
+
         @Schema(description = "Valor positivo. A direção vem de type.", requiredMode = Schema.RequiredMode.REQUIRED, example = "144.06")
         @NotNull @DecimalMin("0.01") @Digits(integer = 17, fraction = 2) BigDecimal amount,
 

@@ -64,6 +64,7 @@ public class StatementImportServiceImpl implements StatementImportService {
     private final CategoryRuleRepository categoryRuleRepository;
     private final PaymentMethodRepository paymentMethodRepository;
     private final CategorySuggester categorySuggester;
+    private final MerchantAliasService merchantAliasService;
     private final StatementHistoryMapper historyMapper;
     private final StatementRowHasher rowHasher;
     private final List<StatementParser> parsers;
@@ -88,12 +89,13 @@ public class StatementImportServiceImpl implements StatementImportService {
                 : new HashSet<>(transactionRepository.findExistingExternalRefs(userId, account.getId(), hashes));
 
         List<CategoryRule> rules = categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId);
-        Map<String, CategorySuggester.Suggestion> history = categorySuggester.loadHistory(
+        CategorySuggester.History history = categorySuggester.loadHistory(
                 userId, statement.rows().stream().map(ParsedStatementRow::description).toList());
+        MerchantAliasService.Aliases aliases = merchantAliasService.load(userId);
 
         List<ImportPreviewRow> rows = new ArrayList<>(statement.rows().size());
         for (int i = 0; i < statement.rows().size(); i++) {
-            rows.add(toPreviewRow(statement.rows().get(i), hashes.get(i), alreadyImported, rules, history));
+            rows.add(toPreviewRow(statement.rows().get(i), hashes.get(i), alreadyImported, rules, history, aliases));
         }
 
         int duplicateCount = (int) rows.stream().filter(ImportPreviewRow::duplicate).count();
@@ -138,6 +140,10 @@ public class StatementImportServiceImpl implements StatementImportService {
         int skippedDuplicates = 0;
 
         for (ImportCommitRow row : request.rows()) {
+            // Antes do desvio de duplicata de propósito: o nome que o usuário deixou na
+            // linha é decisão dele sobre o estabelecimento, tenha a linha virado lançamento
+            // novo ou não.
+            merchantAliasService.remember(userId, originalDescriptionOf(row), row.description());
             if (!blocked.add(row.externalRef())) {
                 skippedDuplicates++;
                 continue;
@@ -157,9 +163,11 @@ public class StatementImportServiceImpl implements StatementImportService {
     // ── Prévia ────────────────────────────────────────────────────────────────
 
     private ImportPreviewRow toPreviewRow(ParsedStatementRow row, String externalRef, Set<String> alreadyImported,
-                                          List<CategoryRule> rules, Map<String, CategorySuggester.Suggestion> history) {
+                                          List<CategoryRule> rules, CategorySuggester.History history,
+                                          MerchantAliasService.Aliases aliases) {
         StatementHistoryMapper.Mapping mapping = historyMapper.map(row.rawHistory(), row.signedAmount());
         CategorySuggester.Suggestion suggestion = categorySuggester.suggest(row.description(), rules, history);
+        String alias = merchantAliasService.suggest(row.description(), aliases);
 
         return new ImportPreviewRow(
                 row.lineNumber(),
@@ -171,6 +179,7 @@ public class StatementImportServiceImpl implements StatementImportService {
                 mapping.type(),
                 mapping.paymentMethod(),
                 MerchantKey.of(row.description()),
+                alias != null ? truncateDescription(alias) : null,
                 suggestion.categoryId(),
                 suggestion.categoryName(),
                 suggestion.subcategoryId(),
@@ -178,6 +187,17 @@ public class StatementImportServiceImpl implements StatementImportService {
                 suggestion.source(),
                 alreadyImported.contains(externalRef),
                 mapping.unknownHistory());
+    }
+
+    /**
+     * A descrição como o arquivo a trouxe.
+     *
+     * <p>O campo é opcional no payload: um cliente que não o envie está dizendo, na prática,
+     * que não renomeou nada — e tratar a descrição enviada como original faz
+     * {@code MerchantAliasService.remember} não gravar apelido nenhum, que é o que se quer.
+     */
+    private static String originalDescriptionOf(ImportCommitRow row) {
+        return row.originalDescription() != null ? row.originalDescription() : row.description();
     }
 
     /** {@code transactions.description} é VARCHAR(255); extratos raramente chegam perto, mas não é garantido. */

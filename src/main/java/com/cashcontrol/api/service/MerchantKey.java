@@ -1,7 +1,11 @@
 package com.cashcontrol.api.service;
 
 import java.text.Normalizer;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -80,6 +84,20 @@ public final class MerchantKey {
             "(?:\\s+(?:ac|al|ap|am|ba|ce|df|es|go|ma|mt|ms|mg|pa|pb|pr|pe|pi|rj|rn|rs|ro|rr"
             + "|sc|sp|se|to|br|bra))+$");
 
+    /**
+     * Piso de tamanho para um token contar como identidade de estabelecimento. Abaixo
+     * disso o token é comum demais em português/inglês (conectivos, siglas curtas) para
+     * identificar alguém — casaria coisas sem relação.
+     */
+    private static final int MIN_TOKEN_LENGTH = 4;
+
+    /**
+     * Sufixos de razão social que aparecem em incontáveis descrições sem relação entre si.
+     * Não são conectivos curtos (o piso de tamanho já filtra esses), são palavras "de verdade"
+     * que passariam no piso e ainda assim não identificam ninguém.
+     */
+    private static final Set<String> STOPWORD_TOKENS = Set.of("ltda", "eireli");
+
     private MerchantKey() {}
 
     /**
@@ -119,5 +137,32 @@ public final class MerchantKey {
      */
     public static String stripInstallmentSuffix(String description) {
         return INSTALLMENT_SUFFIX.matcher(description).replaceAll("").trim();
+    }
+
+    /**
+     * Os tokens de uma chave que valem como identidade de estabelecimento, do mais
+     * específico (mais longo) para o menos.
+     *
+     * <p>Existe porque {@link #of} só normaliza formatação: o emissor manda a mesma
+     * assinatura com grafias diferentes de um mês para o outro ({@code ANTHROPIC},
+     * {@code CLAUDE.AI SUBSCRIPTION}, {@code ANTHROPIC* CLAUDE SUB}) e nenhuma delas
+     * reduz à chave da outra. Quem consulta a memória por estabelecimento — categoria
+     * ({@code CategorySuggester}) e apelido ({@code MerchantAliasService}) — cai neste
+     * casamento por palavra quando a chave exata não bate, e precisa dos dois usando a
+     * mesma heurística: duas cópias seriam duas chances de divergir sobre o que conta
+     * como token significativo.
+     *
+     * <p>A ordem (mais longo primeiro) é o critério de desempate quando mais de um token
+     * da linha tem entrada na memória: o token mais longo é o mais específico.
+     */
+    public static List<String> significantTokens(String merchantKey) {
+        if (merchantKey == null) {
+            return List.of();
+        }
+        return Arrays.stream(merchantKey.split(" "))
+                .filter(token -> token.length() >= MIN_TOKEN_LENGTH && !STOPWORD_TOKENS.contains(token))
+                .distinct()
+                .sorted(Comparator.comparingInt(String::length).reversed())
+                .toList();
     }
 }

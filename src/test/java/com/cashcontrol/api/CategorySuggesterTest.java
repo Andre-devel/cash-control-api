@@ -43,9 +43,10 @@ class CategorySuggesterTest {
     void suggest_prefersTheRuleOverTheHistory_evenWhenTheHistoryIsMoreNumerous() {
         Category food = category("Alimentação");
         Category market = category("Mercado");
-        Map<String, CategorySuggester.Suggestion> history = Map.of(
+        CategorySuggester.History history = new CategorySuggester.History(Map.of(
                 "loja de teste", new CategorySuggester.Suggestion(
-                        market.getId(), market.getName(), null, null, SuggestionSource.HISTORY));
+                        market.getId(), market.getName(), null, null, SuggestionSource.HISTORY)),
+                Map.of());
 
         CategorySuggester.Suggestion suggestion = suggester.suggest(
                 "LOJA DE TESTE", List.of(rule("loja de teste", food)), history);
@@ -58,10 +59,11 @@ class CategorySuggesterTest {
     void suggest_fallsBackToTheHistoryWhenNoRuleMatches() {
         Category market = category("Mercado");
         Category marketSub = category("Hortifruti");
-        Map<String, CategorySuggester.Suggestion> history = Map.of(
+        CategorySuggester.History history = new CategorySuggester.History(Map.of(
                 "mercado novo", new CategorySuggester.Suggestion(
                         market.getId(), market.getName(), marketSub.getId(), marketSub.getName(),
-                        SuggestionSource.HISTORY));
+                        SuggestionSource.HISTORY)),
+                Map.of());
 
         CategorySuggester.Suggestion suggestion = suggester.suggest("MERCADO NOVO", List.of(), history);
 
@@ -72,7 +74,7 @@ class CategorySuggesterTest {
 
     @Test
     void suggest_isNoneWhenNeitherARuleNorTheHistoryMatch() {
-        CategorySuggester.Suggestion suggestion = suggester.suggest("ALGO NUNCA VISTO", List.of(), Map.of());
+        CategorySuggester.Suggestion suggestion = suggester.suggest("ALGO NUNCA VISTO", List.of(), new CategorySuggester.History(Map.of(), Map.of()));
 
         assertThat(suggestion.source()).isEqualTo(SuggestionSource.NONE);
         assertThat(suggestion.categoryId()).isNull();
@@ -82,16 +84,17 @@ class CategorySuggesterTest {
     void suggest_doesNotFallBackToFrequencyGlobally_unlikeThePickersSuggestCategory() {
         // Sem entrada em history para essa chave: nem regra, nem histórico do
         // estabelecimento. NONE é o esperado, não a categoria mais frequente do usuário.
-        CategorySuggester.Suggestion suggestion = suggester.suggest("ESTABELECIMENTO NOVO", List.of(), Map.of());
+        CategorySuggester.Suggestion suggestion = suggester.suggest("ESTABELECIMENTO NOVO", List.of(), new CategorySuggester.History(Map.of(), Map.of()));
 
         assertThat(suggestion.source()).isEqualTo(SuggestionSource.NONE);
     }
 
     @Test
     void loadHistory_ignoresDescriptionsThatYieldNoMerchantKey() {
-        Map<String, CategorySuggester.Suggestion> history = suggester.loadHistory(userId, List.of("123", "***"));
+        CategorySuggester.History history = suggester.loadHistory(userId, List.of("123", "***"));
 
-        assertThat(history).isEmpty();
+        assertThat(history.byMerchantKey()).isEmpty();
+        assertThat(history.byToken()).isEmpty();
     }
 
     @Test
@@ -99,14 +102,44 @@ class CategorySuggesterTest {
         Category food = category("Alimentação");
         Category market = category("Mercado");
         // A mesma chave, duas categorias concorrendo: "food" venceu duas vezes contra uma.
-        when(transactionRepository.findCategoryHistoryByMerchantKeys(any(), any())).thenReturn(List.of(
+        when(transactionRepository.findCategoryHistoryByMerchantKeysOrTokenPattern(any(), any(), any())).thenReturn(List.of(
                 new Object[]{"padaria sao joao", market.getId(), market.getName(), null, null, 1L},
                 new Object[]{"padaria sao joao", food.getId(), food.getName(), null, null, 2L}));
 
-        Map<String, CategorySuggester.Suggestion> history = suggester.loadHistory(userId, List.of("Padaria Sao Joao"));
+        CategorySuggester.History history = suggester.loadHistory(userId, List.of("Padaria Sao Joao"));
 
-        assertThat(history.get("padaria sao joao").categoryId()).isEqualTo(food.getId());
-        assertThat(history.get("padaria sao joao").source()).isEqualTo(SuggestionSource.HISTORY);
+        assertThat(history.byMerchantKey().get("padaria sao joao").categoryId()).isEqualTo(food.getId());
+        assertThat(history.byMerchantKey().get("padaria sao joao").source()).isEqualTo(SuggestionSource.HISTORY);
+    }
+
+    @Test
+    void suggest_fallsBackToATokenSharedWithAHistoryKeyWhenNoExactKeyMatches() {
+        Category ai = category("Assinaturas");
+        // Histórico só tem "claude ai subscription"; a linha nova é "anthropic* claude sub" —
+        // chaves diferentes, mas "claude" é uma palavra em comum entre as duas.
+        when(transactionRepository.findCategoryHistoryByMerchantKeysOrTokenPattern(any(), any(), any()))
+                .thenReturn(List.<Object[]>of(new Object[]{
+                        "claude ai subscription", ai.getId(), ai.getName(), null, null, 1L}));
+
+        CategorySuggester.History history = suggester.loadHistory(userId, List.of("ANTHROPIC* CLAUDE SUB"));
+        CategorySuggester.Suggestion suggestion =
+                suggester.suggest("ANTHROPIC* CLAUDE SUB", List.of(), history);
+
+        assertThat(suggestion.source()).isEqualTo(SuggestionSource.HISTORY);
+        assertThat(suggestion.categoryId()).isEqualTo(ai.getId());
+    }
+
+    @Test
+    void suggest_doesNotTokenMatchOnWordsShorterThanTheMinimumLength() {
+        Category market = category("Mercado");
+        // "sub" tem 3 letras, abaixo do piso de token — não pode virar a identidade sozinho.
+        when(transactionRepository.findCategoryHistoryByMerchantKeysOrTokenPattern(any(), any(), any()))
+                .thenReturn(List.<Object[]>of(new Object[]{"algo sub", market.getId(), market.getName(), null, null, 1L}));
+
+        CategorySuggester.History history = suggester.loadHistory(userId, List.of("outra coisa sub"));
+        CategorySuggester.Suggestion suggestion = suggester.suggest("outra coisa sub", List.of(), history);
+
+        assertThat(suggestion.source()).isEqualTo(SuggestionSource.NONE);
     }
 
     private Category category(String name) {

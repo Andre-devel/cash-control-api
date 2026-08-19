@@ -190,7 +190,7 @@ class StatementImportIntegrationTest {
     private ImportResultResponse commit(List<ImportPreviewRow> rows) {
         List<ImportCommitRow> approved = rows.stream()
                 .map(row -> new ImportCommitRow(
-                        row.lineNumber(), row.externalRef(), row.date(), row.description(),
+                        row.lineNumber(), row.externalRef(), row.date(), row.description(), row.description(),
                         row.amount(), row.type(), row.paymentMethod(), row.suggestedCategoryId()))
                 .toList();
         return statementImportService.commit(

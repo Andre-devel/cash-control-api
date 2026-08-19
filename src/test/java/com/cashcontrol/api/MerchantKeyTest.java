@@ -153,4 +153,37 @@ class MerchantKeyTest {
             assertThat(MerchantKey.of(key)).isEqualTo(key);
         });
     }
+
+    // ── Tokens significativos ───────────────────────────────────────────────
+
+    @Test
+    void tokens_comeFromTheMostSpecificToTheLeast() {
+        // A ordem é o desempate de quem consulta a memória por palavra: com mais de um
+        // token conhecido, vence o mais longo, que é o mais específico.
+        assertThat(MerchantKey.significantTokens("padaria sao joao penapolis"))
+                .containsExactly("penapolis", "padaria", "joao");
+    }
+
+    @Test
+    void tokens_dropWhatDoesNotIdentifyAnyone() {
+        // Curtos demais ("sao", "ai") e sufixo de razão social não distinguem comerciante:
+        // casariam lançamentos sem relação nenhuma entre si.
+        assertThat(MerchantKey.significantTokens("comercio de alimentos ltda sao ai"))
+                .containsExactly("alimentos", "comercio");
+    }
+
+    @Test
+    void tokens_areWhatLinksTheSameMerchantAcrossSpellings() {
+        // O caso que justifica o casamento por palavra existir: o emissor manda a mesma
+        // assinatura de formas que nenhuma normalização reduz uma à outra.
+        assertThat(MerchantKey.significantTokens(MerchantKey.of("ANTHROPIC* CLAUDE SUB")))
+                .contains("claude");
+        assertThat(MerchantKey.significantTokens(MerchantKey.of("CLAUDE.AI SUBSCRIPTION")))
+                .contains("claude");
+    }
+
+    @Test
+    void tokens_ofNothingIdentifiableAreEmpty() {
+        assertThat(MerchantKey.significantTokens(MerchantKey.of("  ---  "))).isEmpty();
+    }
 }

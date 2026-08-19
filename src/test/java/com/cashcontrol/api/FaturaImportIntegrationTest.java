@@ -312,6 +312,41 @@ class FaturaImportIntegrationTest {
         assertThat(mercadoNovo.suggestionSource()).isEqualTo(SuggestionSource.NONE);
     }
 
+    /**
+     * O caso que motivou a memória de apelido: a fatura manda o mesmo nome ilegível todo
+     * mês, o usuário renomeia uma vez e a importação seguinte já chega com o nome dele —
+     * sem perder o texto do arquivo, que continua em {@code description}.
+     */
+    @Test
+    void reimportingNextMonth_prefillsTheDescriptionTheUserWroteBefore() {
+        commitRenaming(preview(), "LOJA DE TESTE", "Loja boa");
+
+        FaturaImportPreviewResponse august = faturaImportService.preview(
+                nextMonthFixture(), InvoiceImportFormat.INTER_FATURA_PDF, userId);
+
+        FaturaImportPreviewRow lojaDeTeste = rowStartingWith(august, "LOJA DE TESTE");
+        assertThat(lojaDeTeste.suggestedDescription()).isEqualTo("Loja boa");
+        assertThat(lojaDeTeste.description()).startsWith("LOJA DE TESTE");
+
+        // Estabelecimento novo, nunca renomeado: nada a pré-preencher.
+        assertThat(rowStartingWith(august, "MERCADO NOVO").suggestedDescription()).isNull();
+    }
+
+    @Test
+    void goingBackToTheOriginalDescription_forgetsTheAlias() {
+        commitRenaming(preview(), "LOJA DE TESTE", "Loja boa");
+
+        FaturaImportPreviewResponse august = faturaImportService.preview(
+                nextMonthFixture(), InvoiceImportFormat.INTER_FATURA_PDF, userId);
+        // O usuário clica em "usar original": a linha volta a ser confirmada com o texto do
+        // arquivo, e isso apaga o apelido em vez de reconfirmá-lo.
+        commitRenaming(august, "LOJA DE TESTE", rowStartingWith(august, "LOJA DE TESTE").description());
+
+        FaturaImportPreviewResponse again = faturaImportService.preview(
+                nextMonthFixture(), InvoiceImportFormat.INTER_FATURA_PDF, userId);
+        assertThat(rowStartingWith(again, "LOJA DE TESTE").suggestedDescription()).isNull();
+    }
+
     @Test
     void preview_appliesTheUserCategoryRules_andCommitPersistsThem() {
         CategoryResponse food = categoryService.listCategories(userId, false, false).stream()
@@ -476,6 +511,33 @@ class FaturaImportIntegrationTest {
         return faturaImportService.commit(new FaturaImportCommitRequest(
                 InvoiceImportFormat.INTER_FATURA_PDF, preview.referenceMonth(), accountId, approved),
                 userId);
+    }
+
+    /** Como {@link #commit}, mas renomeando a linha que começa com {@code prefix} — como se o
+     * usuário tivesse reescrito a descrição na prévia. */
+    private FaturaImportResultResponse commitRenaming(FaturaImportPreviewResponse preview,
+                                                      String prefix, String newDescription) {
+        List<FaturaImportCommitRow> approved = new ArrayList<>();
+        for (FaturaImportGroupPreview group : preview.groups()) {
+            for (FaturaImportPreviewRow row : group.rows()) {
+                String description = row.description().startsWith(prefix) ? newDescription : row.description();
+                approved.add(new FaturaImportCommitRow(
+                        row.lineNumber(), group.suggestedCreditCardId(), group.cardLast4(),
+                        row.externalRef(), row.ordinal(), row.date(), description,
+                        row.description(), row.amount(), row.installmentNumber(),
+                        row.totalInstallments(), row.suggestedCategoryId()));
+            }
+        }
+        return faturaImportService.commit(new FaturaImportCommitRequest(
+                InvoiceImportFormat.INTER_FATURA_PDF, preview.referenceMonth(), accountId, approved),
+                userId);
+    }
+
+    private FaturaImportPreviewRow rowStartingWith(FaturaImportPreviewResponse preview, String prefix) {
+        return preview.groups().stream()
+                .flatMap(group -> group.rows().stream())
+                .filter(row -> row.description().startsWith(prefix))
+                .findFirst().orElseThrow();
     }
 
     private FaturaImportResultResponse commitAlreadyPaid(FaturaImportPreviewResponse preview) {

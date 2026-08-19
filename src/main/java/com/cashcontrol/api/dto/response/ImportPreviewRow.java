@@ -42,6 +42,15 @@ public record ImportPreviewRow(
                 linhas deste estabelecimento" agrupa as linhas da prévia.""", example = "padaria sao joao")
         String merchantKey,
 
+        @Schema(description = """
+                Como o usuário renomeou este estabelecimento da última vez, ou null se \
+                nunca renomeou.
+
+                Não substitui `description`, que continua sendo o texto do arquivo: os dois \
+                vêm juntos para que a prévia possa pré-preencher o apelido e ainda assim \
+                mostrar o original.""", example = "Claude - mensalidade")
+        String suggestedDescription,
+
         @Schema(description = "Categoria sugerida — por regra do usuário ou pelo histórico do estabelecimento, "
                 + "conforme suggestionSource")
         UUID suggestedCategoryId,

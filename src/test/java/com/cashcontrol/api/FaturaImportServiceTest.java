@@ -11,6 +11,7 @@ import com.cashcontrol.api.domain.entity.Invoice;
 import com.cashcontrol.api.domain.entity.InvoiceImportFormat;
 import com.cashcontrol.api.domain.entity.InvoiceItem;
 import com.cashcontrol.api.domain.entity.InvoiceStatus;
+import com.cashcontrol.api.domain.entity.MerchantAlias;
 import com.cashcontrol.api.domain.entity.PaymentMethod;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
@@ -27,6 +28,7 @@ import com.cashcontrol.api.dto.response.SuggestionSource;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CategoryRuleRepository;
+import com.cashcontrol.api.repository.MerchantAliasRepository;
 import com.cashcontrol.api.repository.CreditCardRepository;
 import com.cashcontrol.api.repository.InstallmentSeriesRepository;
 import com.cashcontrol.api.repository.InvoiceItemRepository;
@@ -37,6 +39,7 @@ import com.cashcontrol.api.service.CategorySuggester;
 import com.cashcontrol.api.service.CreditCardService;
 import com.cashcontrol.api.service.FaturaImportServiceImpl;
 import com.cashcontrol.api.service.InvoiceCycleCalculator;
+import com.cashcontrol.api.service.MerchantAliasService;
 import com.cashcontrol.api.service.InvoiceCycleCalculator.InvoiceCycleInfo;
 import com.cashcontrol.api.service.TransactionService;
 import com.cashcontrol.api.service.fatura.FaturaParser;
@@ -91,6 +94,7 @@ class FaturaImportServiceTest {
     @Mock private InstallmentSeriesRepository installmentSeriesRepository;
     @Mock private CategoryRepository categoryRepository;
     @Mock private CategoryRuleRepository categoryRuleRepository;
+    @Mock private MerchantAliasRepository merchantAliasRepository;
     @Mock private CreditCardService creditCardService;
     @Mock private TransactionService transactionService;
 
@@ -131,6 +135,7 @@ class FaturaImportServiceTest {
                 categoryRepository,
                 categoryRuleRepository,
                 new CategorySuggester(transactionRepository, new CategoryRuleMatcher()),
+                new MerchantAliasService(merchantAliasRepository),
                 creditCardService,
                 transactionService,
                 new InvoiceCycleCalculator(),
@@ -256,7 +261,7 @@ class FaturaImportServiceTest {
     @Test
     void preview_suggestsFromHistoryWhenNoRuleMatchesTheRow() {
         Category market = category("Mercado");
-        when(transactionRepository.findCategoryHistoryByMerchantKeys(eq(userId), any())).thenReturn(List.<Object[]>of(
+        when(transactionRepository.findCategoryHistoryByMerchantKeysOrTokenPattern(eq(userId), any(), any())).thenReturn(List.<Object[]>of(
                 new Object[]{"loja de teste", market.getId(), market.getName(), null, null, 3L}));
 
         FaturaImportPreviewRow row = preview().groups().getFirst().rows().getFirst();
@@ -271,7 +276,7 @@ class FaturaImportServiceTest {
         Category market = category("Mercado");
         when(categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId))
                 .thenReturn(List.of(rule("loja de teste", food)));
-        when(transactionRepository.findCategoryHistoryByMerchantKeys(eq(userId), any())).thenReturn(List.<Object[]>of(
+        when(transactionRepository.findCategoryHistoryByMerchantKeysOrTokenPattern(eq(userId), any(), any())).thenReturn(List.<Object[]>of(
                 new Object[]{"loja de teste", market.getId(), market.getName(), null, null, 3L}));
 
         FaturaImportPreviewRow row = preview().groups().getFirst().rows().getFirst();
@@ -295,6 +300,56 @@ class FaturaImportServiceTest {
         // "LOJA DE TESTE (Parcela 04 de 05)" reduzida à identidade do estabelecimento.
         assertThat(row.merchantKey()).isEqualTo(com.cashcontrol.api.service.MerchantKey.of(row.description()));
         assertThat(row.merchantKey()).isEqualTo("loja de teste");
+    }
+
+    @Test
+    void preview_prefillsTheDescriptionTheUserChoseForThatMerchantBefore() {
+        MerchantAlias alias = new MerchantAlias();
+        alias.setUserId(userId);
+        alias.setMerchantKey("loja de teste");
+        alias.setDisplayName("Loja boa");
+        alias.setUpdatedAt(Instant.now());
+        when(merchantAliasRepository.findAllByUserId(userId)).thenReturn(List.of(alias));
+
+        FaturaImportPreviewRow row = preview().groups().getFirst().rows().getFirst();
+
+        // A descrição continua sendo a do arquivo: as duas vêm juntas para que a tela possa
+        // pré-preencher o apelido e ainda assim mostrar o original.
+        assertThat(row.suggestedDescription()).isEqualTo("Loja boa");
+        assertThat(row.description()).isEqualTo("LOJA DE TESTE (Parcela 04 de 05)");
+    }
+
+    @Test
+    void preview_leavesTheDescriptionSuggestionEmptyForAMerchantNeverRenamed() {
+        when(merchantAliasRepository.findAllByUserId(userId)).thenReturn(List.of());
+
+        assertThat(preview().groups().getFirst().rows().getFirst().suggestedDescription()).isNull();
+    }
+
+    @Test
+    void commit_remembersTheDescriptionTheUserRewroteOnTheRow() {
+        List<FaturaImportCommitRow> rows = commitRowsFromPreview();
+        FaturaImportCommitRow first = rows.getFirst();
+        rows.set(0, new FaturaImportCommitRow(
+                first.lineNumber(), first.creditCardId(), first.cardLast4(), first.externalRef(),
+                first.ordinal(), first.date(), "Loja boa", first.originalDescription(),
+                first.amount(), first.installmentNumber(), first.totalInstallments(), null));
+
+        commit(rows);
+
+        ArgumentCaptor<MerchantAlias> saved = ArgumentCaptor.forClass(MerchantAlias.class);
+        verify(merchantAliasRepository).save(saved.capture());
+        assertThat(saved.getValue().getDisplayName()).isEqualTo("Loja boa");
+        // A chave vem da descrição do PDF, não da que o usuário escreveu — é ela que volta
+        // igual no mês que vem.
+        assertThat(saved.getValue().getMerchantKey()).isEqualTo("loja de teste");
+    }
+
+    @Test
+    void commit_doesNotRememberAnythingForRowsLeftAsTheyCame() {
+        commit(commitRowsFromPreview());
+
+        verify(merchantAliasRepository, never()).save(any());
     }
 
     @Test
