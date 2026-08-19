@@ -12,7 +12,10 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import com.cashcontrol.api.service.MerchantKey;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -119,6 +122,16 @@ public class Transaction {
     @Column(name = "external_ref", length = 64)
     private String externalRef;
 
+    /**
+     * Identidade do estabelecimento, derivada da descrição em todo insert/update
+     * por {@link #deriveMerchantKey()} — nunca setada por um call site. É sobre
+     * ela que a sugestão de categoria por histórico agrupa lançamentos do mesmo
+     * comerciante. NULL quando a descrição não deixa nada identificável.
+     */
+    @Setter(lombok.AccessLevel.NONE)
+    @Column(name = "merchant_key", length = 64)
+    private String merchantKey;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "payment_method_id", nullable = false)
     private PaymentMethod paymentMethod;
@@ -143,4 +156,15 @@ public class Transaction {
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
+    /**
+     * Roda em todo insert e update, independente de como a descrição foi parar
+     * no campo — é por isso que seis serviços diferentes gravam transação sem
+     * nenhum precisar lembrar de preencher merchantKey.
+     */
+    @PrePersist
+    @PreUpdate
+    private void deriveMerchantKey() {
+        this.merchantKey = MerchantKey.of(this.description);
+    }
 }

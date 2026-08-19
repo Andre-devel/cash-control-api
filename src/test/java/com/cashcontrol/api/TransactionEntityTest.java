@@ -9,6 +9,7 @@ import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.domain.entity.PaymentMethod;
 import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
+import com.cashcontrol.api.service.MerchantKey;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TagRepository;
@@ -187,6 +188,29 @@ class TransactionEntityTest {
         List<Transaction> legs = transactionRepository.findAllByTransferGroupId(groupId);
         assertThat(legs).hasSize(2);
         assertThat(legs).allMatch(t -> groupId.equals(t.getTransferGroupId()));
+    }
+
+    @Test
+    void merchantKey_isDerivedOnSaveWithoutAnyoneSettingIt() {
+        Transaction tx = buildTransaction(TransactionType.EXPENSE, TransactionStatus.PAID, "40.00");
+        tx.setDescription("SHOPEE *LarkSpComercio (Parcela 04 de 05)");
+
+        Transaction saved = transactionRepository.saveAndFlush(tx);
+
+        assertThat(saved.getMerchantKey()).isEqualTo(MerchantKey.of("SHOPEE *LarkSpComercio (Parcela 04 de 05)"));
+    }
+
+    @Test
+    void merchantKey_isRederivedOnUpdateWhenDescriptionChanges() {
+        Transaction tx = buildTransaction(TransactionType.EXPENSE, TransactionStatus.PAID, "40.00");
+        tx.setDescription("PADARIA SAO JOAO");
+        Transaction saved = transactionRepository.saveAndFlush(tx);
+        assertThat(saved.getMerchantKey()).isEqualTo(MerchantKey.of("PADARIA SAO JOAO"));
+
+        saved.setDescription("MERCADO NOVO");
+        Transaction updated = transactionRepository.saveAndFlush(saved);
+
+        assertThat(updated.getMerchantKey()).isEqualTo(MerchantKey.of("MERCADO NOVO"));
     }
 
     private Transaction buildTransaction(TransactionType type, TransactionStatus status, String amount) {
