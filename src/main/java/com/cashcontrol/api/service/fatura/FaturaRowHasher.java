@@ -1,5 +1,6 @@
 package com.cashcontrol.api.service.fatura;
 
+import com.cashcontrol.api.service.MerchantKey;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -57,10 +58,6 @@ public class FaturaRowHasher {
 
     private static final Pattern COLLAPSIBLE_WHITESPACE = Pattern.compile("\\s+");
 
-    /** O mesmo sufixo que o parser lê para extrair a posição da parcela. */
-    private static final Pattern INSTALLMENT_SUFFIX =
-            Pattern.compile("\\(\\s*Parcela\\s+\\d+\\s+de\\s+\\d+\\s*\\)", Pattern.CASE_INSENSITIVE);
-
     /**
      * A chave de uma linha e a posição dela dentro do grupo de linhas iguais do arquivo.
      *
@@ -116,7 +113,9 @@ public class FaturaRowHasher {
      * lida — a parcela 5 herdaria "(Parcela 04 de 05)".
      */
     public String stripInstallmentSuffix(String description) {
-        return INSTALLMENT_SUFFIX.matcher(description).replaceAll("").trim();
+        // O padrão vive em MerchantKey: a chave de estabelecimento tira o mesmo sufixo,
+        // e duas cópias do regex seriam duas chances de divergir.
+        return MerchantKey.stripInstallmentSuffix(description);
     }
 
     /**
