@@ -18,12 +18,14 @@ import com.cashcontrol.api.dto.request.ImportCommitRow;
 import com.cashcontrol.api.dto.response.ImportPreviewResponse;
 import com.cashcontrol.api.dto.response.ImportPreviewRow;
 import com.cashcontrol.api.dto.response.ImportResultResponse;
+import com.cashcontrol.api.dto.response.SuggestionSource;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CategoryRuleRepository;
 import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.CategoryRuleMatcher;
+import com.cashcontrol.api.service.CategorySuggester;
 import com.cashcontrol.api.service.StatementImportServiceImpl;
 import com.cashcontrol.api.service.statement.InterCsvStatementParser;
 import com.cashcontrol.api.service.statement.StatementHistoryMapper;
@@ -92,7 +94,7 @@ class StatementImportServiceTest {
                 categoryRepository,
                 categoryRuleRepository,
                 paymentMethodRepository,
-                new CategoryRuleMatcher(),
+                new CategorySuggester(transactionRepository, new CategoryRuleMatcher()),
                 new StatementHistoryMapper(),
                 new StatementRowHasher(),
                 List.of(new InterCsvStatementParser()),
@@ -175,6 +177,74 @@ class StatementImportServiceTest {
                     assertThat(row.suggestedCategoryName()).isEqualTo("Alimentação");
                 });
         assertThat(rowWithDescription(preview, "Pix Marketplace").suggestedCategoryId()).isNull();
+    }
+
+    @Test
+    void preview_suggestsFromHistoryWhenNoRuleMatchesTheRow() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenNoCategoryRules();
+        Category market = category("Mercado");
+        when(transactionRepository.findCategoryHistoryByMerchantKeys(eq(userId), any())).thenReturn(List.<Object[]>of(
+                new Object[]{"pix marketplace", market.getId(), market.getName(), null, null, 2L}));
+
+        ImportPreviewResponse preview = service.preview(fixture(), StatementFormat.INTER_CSV, accountId, userId);
+
+        ImportPreviewRow row = rowWithDescription(preview, "Pix Marketplace");
+        assertThat(row.suggestedCategoryId()).isEqualTo(market.getId());
+        assertThat(row.suggestionSource()).isEqualTo(SuggestionSource.HISTORY);
+    }
+
+    @Test
+    void preview_prefersTheRuleOverTheHistoryForTheSameRow() {
+        givenAccountFound();
+        givenNoExistingImports();
+        Category food = category("Alimentação");
+        Category market = category("Mercado");
+        CategoryRule rule = new CategoryRule();
+        rule.setUserId(userId);
+        rule.setPattern("Cafe Do Ponto");
+        rule.setCategory(food);
+        when(categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId))
+                .thenReturn(List.of(rule));
+        when(transactionRepository.findCategoryHistoryByMerchantKeys(eq(userId), any())).thenReturn(List.<Object[]>of(
+                new Object[]{"cafe do ponto", market.getId(), market.getName(), null, null, 5L}));
+
+        ImportPreviewResponse preview = service.preview(fixture(), StatementFormat.INTER_CSV, accountId, userId);
+
+        assertThat(preview.rows())
+                .filteredOn(row -> row.description().startsWith("Cafe Do Ponto"))
+                .isNotEmpty()
+                .allSatisfy(row -> {
+                    assertThat(row.suggestedCategoryId()).isEqualTo(food.getId());
+                    assertThat(row.suggestionSource()).isEqualTo(SuggestionSource.RULE);
+                });
+    }
+
+    @Test
+    void preview_leavesTheSuggestionAsNoneWhenNeitherARuleNorHistoryMatch() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenNoCategoryRules();
+
+        ImportPreviewResponse preview = service.preview(fixture(), StatementFormat.INTER_CSV, accountId, userId);
+
+        assertThat(rowWithDescription(preview, "Pix Marketplace")).satisfies(row -> {
+            assertThat(row.suggestedCategoryId()).isNull();
+            assertThat(row.suggestionSource()).isEqualTo(SuggestionSource.NONE);
+        });
+    }
+
+    @Test
+    void preview_exposesTheMerchantKeyOfEachRow() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenNoCategoryRules();
+
+        ImportPreviewResponse preview = service.preview(fixture(), StatementFormat.INTER_CSV, accountId, userId);
+
+        ImportPreviewRow row = rowWithDescription(preview, "Pix Marketplace");
+        assertThat(row.merchantKey()).isEqualTo(com.cashcontrol.api.service.MerchantKey.of(row.description()));
     }
 
     @Test
@@ -273,8 +343,8 @@ class StatementImportServiceTest {
         givenAccountFound();
         StatementImportServiceImpl withoutParsers = new StatementImportServiceImpl(
                 transactionRepository, accountRepository, categoryRepository, categoryRuleRepository,
-                paymentMethodRepository, new CategoryRuleMatcher(), new StatementHistoryMapper(),
-                new StatementRowHasher(), List.of(), new AppProperties());
+                paymentMethodRepository, new CategorySuggester(transactionRepository, new CategoryRuleMatcher()),
+                new StatementHistoryMapper(), new StatementRowHasher(), List.of(), new AppProperties());
 
         assertThatThrownBy(() -> withoutParsers.preview(fixture(), StatementFormat.INTER_CSV, accountId, userId))
                 .isInstanceOf(BusinessRuleException.class)
@@ -520,7 +590,7 @@ class StatementImportServiceTest {
                 categoryRepository,
                 categoryRuleRepository,
                 paymentMethodRepository,
-                new CategoryRuleMatcher(),
+                new CategorySuggester(transactionRepository, new CategoryRuleMatcher()),
                 new StatementHistoryMapper(),
                 new StatementRowHasher(),
                 List.of(new InterCsvStatementParser()),

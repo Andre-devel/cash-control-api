@@ -77,7 +77,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
     private final InstallmentSeriesRepository installmentSeriesRepository;
     private final CategoryRepository categoryRepository;
     private final CategoryRuleRepository categoryRuleRepository;
-    private final CategoryRuleMatcher categoryRuleMatcher;
+    private final CategorySuggester categorySuggester;
     private final CreditCardService creditCardService;
     private final TransactionService transactionService;
     private final InvoiceCycleCalculator cycleCalculator;
@@ -93,6 +93,11 @@ public class FaturaImportServiceImpl implements FaturaImportService {
         ParsedFatura fatura = parse(file, format);
         String referenceMonth = referenceMonthOf(fatura.dueDate());
         List<CategoryRule> rules = categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId);
+        // Uma consulta de histórico para o arquivo inteiro, não uma por linha nem uma por
+        // seção de cartão.
+        Map<String, CategorySuggester.Suggestion> history = categorySuggester.loadHistory(userId,
+                fatura.cardSections().stream().flatMap(section -> section.rows().stream())
+                        .map(ParsedFaturaRow::description).toList());
 
         List<FaturaImportGroupPreview> groups = new ArrayList<>(fatura.cardSections().size());
         int excludedPayments = 0;
@@ -114,7 +119,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
 
             List<FaturaImportPreviewRow> rows = new ArrayList<>(expenses.size());
             for (int i = 0; i < expenses.size(); i++) {
-                rows.add(toPreviewRow(expenses.get(i), keys.get(i), alreadyImported, rules));
+                rows.add(toPreviewRow(expenses.get(i), keys.get(i), alreadyImported, rules, history));
             }
 
             groups.add(new FaturaImportGroupPreview(
@@ -238,9 +243,9 @@ public class FaturaImportServiceImpl implements FaturaImportService {
 
     // ── Prévia ────────────────────────────────────────────────────────────────
 
-    private FaturaImportPreviewRow toPreviewRow(ParsedFaturaRow row, RowKey key,
-                                                Set<String> alreadyImported, List<CategoryRule> rules) {
-        Optional<CategoryRule> rule = categoryRuleMatcher.match(rules, row.description());
+    private FaturaImportPreviewRow toPreviewRow(ParsedFaturaRow row, RowKey key, Set<String> alreadyImported,
+                                                List<CategoryRule> rules, Map<String, CategorySuggester.Suggestion> history) {
+        CategorySuggester.Suggestion suggestion = categorySuggester.suggest(row.description(), rules, history);
 
         return new FaturaImportPreviewRow(
                 row.lineNumber(),
@@ -251,8 +256,12 @@ public class FaturaImportServiceImpl implements FaturaImportService {
                 row.signedAmount().abs(),
                 row.installmentNumber(),
                 row.totalInstallments(),
-                rule.map(r -> r.getCategory().getId()).orElse(null),
-                rule.map(r -> r.getCategory().getName()).orElse(null),
+                MerchantKey.of(row.description()),
+                suggestion.categoryId(),
+                suggestion.categoryName(),
+                suggestion.subcategoryId(),
+                suggestion.subcategoryName(),
+                suggestion.source(),
                 alreadyImported.contains(key.externalRef()));
     }
 

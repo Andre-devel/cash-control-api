@@ -326,4 +326,29 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
     List<Object[]> findTopCategoriesByFrequency(
             @Param("userId") UUID userId,
             org.springframework.data.domain.Pageable pageable);
+
+    /**
+     * Por {@code merchantKey}, cada categoria já usada pelo usuário e quantas vezes — a
+     * matéria-prima da sugestão por histórico da importação (ver {@code CategorySuggester}).
+     *
+     * <p>Conta {@code COUNT(DISTINCT COALESCE(installmentSeries.id, id))}, não
+     * {@code COUNT(t)}: uma série de parcelas é <em>uma</em> decisão de categorização, não
+     * uma por parcela. Sem isso, uma compra em 12x dominaria o voto de doze compras à vista
+     * no mesmo comerciante.
+     *
+     * <p>{@code LEFT JOIN} explícito na subcategoria: ela é opcional, e um join implícito
+     * de {@code t.subcategory.name} vira {@code INNER JOIN} — descartaria toda linha sem
+     * subcategoria, que é a maioria.
+     */
+    @Query("SELECT t.merchantKey, c.id, c.name, sc.id, sc.name, " +
+           "COUNT(DISTINCT COALESCE(t.installmentSeries.id, t.id)) " +
+           "FROM Transaction t " +
+           "JOIN t.category c " +
+           "LEFT JOIN t.subcategory sc " +
+           "WHERE t.userId = :userId AND t.merchantKey IN :merchantKeys " +
+           "AND t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED " +
+           "GROUP BY t.merchantKey, c.id, c.name, sc.id, sc.name")
+    List<Object[]> findCategoryHistoryByMerchantKeys(
+            @Param("userId") UUID userId,
+            @Param("merchantKeys") Collection<String> merchantKeys);
 }

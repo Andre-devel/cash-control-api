@@ -41,7 +41,6 @@ import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -64,7 +63,7 @@ public class StatementImportServiceImpl implements StatementImportService {
     private final CategoryRepository categoryRepository;
     private final CategoryRuleRepository categoryRuleRepository;
     private final PaymentMethodRepository paymentMethodRepository;
-    private final CategoryRuleMatcher categoryRuleMatcher;
+    private final CategorySuggester categorySuggester;
     private final StatementHistoryMapper historyMapper;
     private final StatementRowHasher rowHasher;
     private final List<StatementParser> parsers;
@@ -89,10 +88,12 @@ public class StatementImportServiceImpl implements StatementImportService {
                 : new HashSet<>(transactionRepository.findExistingExternalRefs(userId, account.getId(), hashes));
 
         List<CategoryRule> rules = categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId);
+        Map<String, CategorySuggester.Suggestion> history = categorySuggester.loadHistory(
+                userId, statement.rows().stream().map(ParsedStatementRow::description).toList());
 
         List<ImportPreviewRow> rows = new ArrayList<>(statement.rows().size());
         for (int i = 0; i < statement.rows().size(); i++) {
-            rows.add(toPreviewRow(statement.rows().get(i), hashes.get(i), alreadyImported, rules));
+            rows.add(toPreviewRow(statement.rows().get(i), hashes.get(i), alreadyImported, rules, history));
         }
 
         int duplicateCount = (int) rows.stream().filter(ImportPreviewRow::duplicate).count();
@@ -155,10 +156,10 @@ public class StatementImportServiceImpl implements StatementImportService {
 
     // ── Prévia ────────────────────────────────────────────────────────────────
 
-    private ImportPreviewRow toPreviewRow(ParsedStatementRow row, String externalRef,
-                                          Set<String> alreadyImported, List<CategoryRule> rules) {
+    private ImportPreviewRow toPreviewRow(ParsedStatementRow row, String externalRef, Set<String> alreadyImported,
+                                          List<CategoryRule> rules, Map<String, CategorySuggester.Suggestion> history) {
         StatementHistoryMapper.Mapping mapping = historyMapper.map(row.rawHistory(), row.signedAmount());
-        Optional<CategoryRule> rule = categoryRuleMatcher.match(rules, row.description());
+        CategorySuggester.Suggestion suggestion = categorySuggester.suggest(row.description(), rules, history);
 
         return new ImportPreviewRow(
                 row.lineNumber(),
@@ -169,8 +170,12 @@ public class StatementImportServiceImpl implements StatementImportService {
                 row.signedAmount().abs(),
                 mapping.type(),
                 mapping.paymentMethod(),
-                rule.map(r -> r.getCategory().getId()).orElse(null),
-                rule.map(r -> r.getCategory().getName()).orElse(null),
+                MerchantKey.of(row.description()),
+                suggestion.categoryId(),
+                suggestion.categoryName(),
+                suggestion.subcategoryId(),
+                suggestion.subcategoryName(),
+                suggestion.source(),
                 alreadyImported.contains(externalRef),
                 mapping.unknownHistory());
     }

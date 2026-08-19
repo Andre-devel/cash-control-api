@@ -36,11 +36,28 @@ public record ImportPreviewRow(
         @Schema(description = "Forma de pagamento deduzida do histórico", example = "PIX")
         PaymentMethodSlug paymentMethod,
 
-        @Schema(description = "Categoria sugerida pelas regras de categorização do usuário, quando alguma casou")
+        @Schema(description = """
+                Identidade do estabelecimento, derivada da descrição. {@code null} quando a \
+                descrição não deixa nada identificável. É por ela que "aplicar a todas as \
+                linhas deste estabelecimento" agrupa as linhas da prévia.""", example = "padaria sao joao")
+        String merchantKey,
+
+        @Schema(description = "Categoria sugerida — por regra do usuário ou pelo histórico do estabelecimento, "
+                + "conforme suggestionSource")
         UUID suggestedCategoryId,
 
         @Schema(description = "Nome da categoria sugerida", example = "Alimentação")
         String suggestedCategoryName,
+
+        @Schema(description = "Subcategoria sugerida, quando a sugestão trouxer uma")
+        UUID suggestedSubcategoryId,
+
+        @Schema(description = "Nome da subcategoria sugerida")
+        String suggestedSubcategoryName,
+
+        @Schema(description = "De onde veio a sugestão: RULE (regra do usuário), "
+                + "HISTORY (categoria mais usada nesse estabelecimento) ou NONE")
+        SuggestionSource suggestionSource,
 
         @Schema(description = "true quando esta linha já foi importada antes nesta conta")
         boolean duplicate,

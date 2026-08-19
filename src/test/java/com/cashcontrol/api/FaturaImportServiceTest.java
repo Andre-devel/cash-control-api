@@ -23,6 +23,7 @@ import com.cashcontrol.api.dto.response.FaturaImportGroupPreview;
 import com.cashcontrol.api.dto.response.FaturaImportPreviewResponse;
 import com.cashcontrol.api.dto.response.FaturaImportPreviewRow;
 import com.cashcontrol.api.dto.response.FaturaImportResultResponse;
+import com.cashcontrol.api.dto.response.SuggestionSource;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CategoryRuleRepository;
@@ -32,6 +33,7 @@ import com.cashcontrol.api.repository.InvoiceItemRepository;
 import com.cashcontrol.api.repository.InvoiceRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.CategoryRuleMatcher;
+import com.cashcontrol.api.service.CategorySuggester;
 import com.cashcontrol.api.service.CreditCardService;
 import com.cashcontrol.api.service.FaturaImportServiceImpl;
 import com.cashcontrol.api.service.InvoiceCycleCalculator;
@@ -128,7 +130,7 @@ class FaturaImportServiceTest {
                 installmentSeriesRepository,
                 categoryRepository,
                 categoryRuleRepository,
-                new CategoryRuleMatcher(),
+                new CategorySuggester(transactionRepository, new CategoryRuleMatcher()),
                 creditCardService,
                 transactionService,
                 new InvoiceCycleCalculator(),
@@ -248,6 +250,51 @@ class FaturaImportServiceTest {
 
         assertThat(row.suggestedCategoryId()).isEqualTo(food.getId());
         assertThat(row.suggestedCategoryName()).isEqualTo("Alimentação");
+        assertThat(row.suggestionSource()).isEqualTo(SuggestionSource.RULE);
+    }
+
+    @Test
+    void preview_suggestsFromHistoryWhenNoRuleMatchesTheRow() {
+        Category market = category("Mercado");
+        when(transactionRepository.findCategoryHistoryByMerchantKeys(eq(userId), any())).thenReturn(List.<Object[]>of(
+                new Object[]{"loja de teste", market.getId(), market.getName(), null, null, 3L}));
+
+        FaturaImportPreviewRow row = preview().groups().getFirst().rows().getFirst();
+
+        assertThat(row.suggestedCategoryId()).isEqualTo(market.getId());
+        assertThat(row.suggestionSource()).isEqualTo(SuggestionSource.HISTORY);
+    }
+
+    @Test
+    void preview_prefersTheRuleOverTheHistoryForTheSameRow() {
+        Category food = category("Alimentação");
+        Category market = category("Mercado");
+        when(categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId))
+                .thenReturn(List.of(rule("loja de teste", food)));
+        when(transactionRepository.findCategoryHistoryByMerchantKeys(eq(userId), any())).thenReturn(List.<Object[]>of(
+                new Object[]{"loja de teste", market.getId(), market.getName(), null, null, 3L}));
+
+        FaturaImportPreviewRow row = preview().groups().getFirst().rows().getFirst();
+
+        assertThat(row.suggestedCategoryId()).isEqualTo(food.getId());
+        assertThat(row.suggestionSource()).isEqualTo(SuggestionSource.RULE);
+    }
+
+    @Test
+    void preview_leavesTheSuggestionAsNoneWhenNeitherARuleNorHistoryMatch() {
+        FaturaImportPreviewRow row = preview().groups().getFirst().rows().getFirst();
+
+        assertThat(row.suggestedCategoryId()).isNull();
+        assertThat(row.suggestionSource()).isEqualTo(SuggestionSource.NONE);
+    }
+
+    @Test
+    void preview_exposesTheMerchantKeyOfEachRow() {
+        FaturaImportPreviewRow row = preview().groups().getFirst().rows().getFirst();
+
+        // "LOJA DE TESTE (Parcela 04 de 05)" reduzida à identidade do estabelecimento.
+        assertThat(row.merchantKey()).isEqualTo(com.cashcontrol.api.service.MerchantKey.of(row.description()));
+        assertThat(row.merchantKey()).isEqualTo("loja de teste");
     }
 
     @Test

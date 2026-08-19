@@ -22,6 +22,7 @@ import com.cashcontrol.api.dto.response.FaturaImportPreviewResponse;
 import com.cashcontrol.api.dto.response.FaturaImportPreviewRow;
 import com.cashcontrol.api.dto.response.FaturaImportResultResponse;
 import com.cashcontrol.api.dto.response.InvoiceResponse;
+import com.cashcontrol.api.dto.response.SuggestionSource;
 import com.cashcontrol.api.repository.InvoiceRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.AccountService;
@@ -280,6 +281,37 @@ class FaturaImportIntegrationTest {
                 .isEqualByComparingTo("97.19");
     }
 
+    /**
+     * O caso central do plano de memória de estabelecimento: sem regra nenhuma, a
+     * categoria escolhida à mão na prévia de julho reaparece como sugestão de histórico
+     * quando a fatura de agosto chega — "LOJA DE TESTE (Parcela 04 de 05)" e "(Parcela 05
+     * de 05)" reduzem à mesma chave de estabelecimento.
+     */
+    @Test
+    void reimportingNextMonth_suggestsCategoryFromTheHistoryOfThatMerchant() {
+        CategoryResponse food = categoryService.listCategories(userId, false, false).stream()
+                .filter(category -> category.name().equals("Alimentação"))
+                .findFirst()
+                .orElseThrow();
+
+        commit(preview(), food.id());
+
+        FaturaImportPreviewResponse august = faturaImportService.preview(
+                nextMonthFixture(), InvoiceImportFormat.INTER_FATURA_PDF, userId);
+
+        FaturaImportPreviewRow lojaDeTeste = august.groups().getFirst().rows().stream()
+                .filter(row -> row.description().startsWith("LOJA DE TESTE"))
+                .findFirst().orElseThrow();
+        assertThat(lojaDeTeste.suggestedCategoryId()).isEqualTo(food.id());
+        assertThat(lojaDeTeste.suggestionSource()).isEqualTo(SuggestionSource.HISTORY);
+
+        // A compra nova do mês, sem histórico algum para o estabelecimento, segue sem sugestão.
+        FaturaImportPreviewRow mercadoNovo = august.groups().getFirst().rows().stream()
+                .filter(row -> row.description().startsWith("MERCADO NOVO"))
+                .findFirst().orElseThrow();
+        assertThat(mercadoNovo.suggestionSource()).isEqualTo(SuggestionSource.NONE);
+    }
+
     @Test
     void preview_appliesTheUserCategoryRules_andCommitPersistsThem() {
         CategoryResponse food = categoryService.listCategories(userId, false, false).stream()
@@ -419,6 +451,26 @@ class FaturaImportIntegrationTest {
                         row.externalRef(), row.ordinal(), row.date(), row.description(),
                         row.description(), row.amount(), row.installmentNumber(),
                         row.totalInstallments(), row.suggestedCategoryId()));
+            }
+        }
+        return faturaImportService.commit(new FaturaImportCommitRequest(
+                InvoiceImportFormat.INTER_FATURA_PDF, preview.referenceMonth(), accountId, approved),
+                userId);
+    }
+
+    /** Como {@link #commit}, mas forçando a categoria da linha "LOJA DE TESTE" — como se o
+     * usuário a tivesse escolhido à mão na prévia, sem regra nenhuma envolvida. */
+    private FaturaImportResultResponse commit(FaturaImportPreviewResponse preview, UUID lojaDeTesteCategoryId) {
+        List<FaturaImportCommitRow> approved = new ArrayList<>();
+        for (FaturaImportGroupPreview group : preview.groups()) {
+            for (FaturaImportPreviewRow row : group.rows()) {
+                UUID categoryId = row.description().startsWith("LOJA DE TESTE")
+                        ? lojaDeTesteCategoryId : row.suggestedCategoryId();
+                approved.add(new FaturaImportCommitRow(
+                        row.lineNumber(), group.suggestedCreditCardId(), group.cardLast4(),
+                        row.externalRef(), row.ordinal(), row.date(), row.description(),
+                        row.description(), row.amount(), row.installmentNumber(),
+                        row.totalInstallments(), categoryId));
             }
         }
         return faturaImportService.commit(new FaturaImportCommitRequest(
