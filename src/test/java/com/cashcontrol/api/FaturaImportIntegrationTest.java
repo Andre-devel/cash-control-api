@@ -8,12 +8,15 @@ import com.cashcontrol.api.domain.entity.InvoiceStatus;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
+import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
 import com.cashcontrol.api.dto.request.CreateAccountRequest;
 import com.cashcontrol.api.dto.request.CreateCardRequest;
 import com.cashcontrol.api.dto.request.CreateCategoryRuleRequest;
 import com.cashcontrol.api.dto.request.FaturaImportCommitRequest;
 import com.cashcontrol.api.dto.request.FaturaImportCommitRow;
+import com.cashcontrol.api.dto.request.FaturaImportDuplicateCheckRequest;
 import com.cashcontrol.api.dto.response.CategoryResponse;
+import com.cashcontrol.api.dto.response.FaturaImportDuplicateCheckResponse;
 import com.cashcontrol.api.dto.response.FaturaImportGroupPreview;
 import com.cashcontrol.api.dto.response.FaturaImportPreviewResponse;
 import com.cashcontrol.api.dto.response.FaturaImportPreviewRow;
@@ -42,6 +45,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Importação de fatura de ponta a ponta contra um Postgres real, a partir de um PDF
@@ -332,6 +336,63 @@ class FaturaImportIntegrationTest {
         assertThat(preview.totalRows()).isEqualTo(3);
     }
 
+    /**
+     * O caso do cartão virtual: os 4 dígitos do PDF não batem com nenhum cadastrado, então
+     * a prévia não sugere nada e não marca duplicata alguma. Depois que o usuário escolhe o
+     * cartão no cliente, é esta checagem que diz o que já entrou.
+     */
+    @Test
+    void checkDuplicates_flagsTheRowsAlreadyOnTheInvoiceOfTheCardChosenByHand() {
+        UUID virtualCardId = createCard("Inter Virtual", "0001");
+        FaturaImportPreviewResponse first = preview();
+        FaturaImportGroupPreview group = first.groups().getFirst();
+        commitRowsToCard(first, group, virtualCardId);
+
+        FaturaImportPreviewResponse second = preview();
+        FaturaImportGroupPreview reread = second.groups().getFirst();
+        // A prévia continua sem saber: ela olhou a fatura do cartão que sugeriu.
+        assertThat(reread.rows()).noneMatch(FaturaImportPreviewRow::duplicate);
+
+        FaturaImportDuplicateCheckResponse duplicates = faturaImportService.checkDuplicates(
+                new FaturaImportDuplicateCheckRequest(virtualCardId, second.referenceMonth(),
+                        refsOf(reread)),
+                userId);
+
+        assertThat(duplicates.duplicateExternalRefs()).containsExactlyElementsOf(refsOf(reread));
+    }
+
+    @Test
+    void checkDuplicates_flagsNothingOnACardThatNeverReceivedTheCharges() {
+        FaturaImportPreviewResponse preview = preview();
+        FaturaImportGroupPreview group = preview.groups().getFirst();
+
+        FaturaImportDuplicateCheckResponse duplicates = faturaImportService.checkDuplicates(
+                new FaturaImportDuplicateCheckRequest(cardBId, preview.referenceMonth(), refsOf(group)),
+                userId);
+
+        assertThat(duplicates.duplicateExternalRefs()).isEmpty();
+    }
+
+    @Test
+    void checkDuplicates_rejectsACardThatIsNotTheUsers() {
+        UUID otherUserId = jdbcTemplate.queryForObject(
+                "INSERT INTO users (email, account_status_id, auth_origin_id, credentials_updated_at) " +
+                "VALUES (?, " +
+                "  (SELECT id FROM account_statuses WHERE slug = 'ACTIVE'), " +
+                "  (SELECT id FROM auth_origins WHERE slug = 'LOCAL'), " +
+                "  NOW()) " +
+                "RETURNING id",
+                UUID.class,
+                "fatura-dup-outro-" + UUID.randomUUID() + "@example.com");
+        FaturaImportPreviewResponse preview = preview();
+
+        assertThatThrownBy(() -> faturaImportService.checkDuplicates(
+                new FaturaImportDuplicateCheckRequest(cardAId, preview.referenceMonth(),
+                        refsOf(preview.groups().getFirst())),
+                otherUserId))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
     // ── apoio ─────────────────────────────────────────────────────────────────
 
     private UUID createCard(String name, String last4) {
@@ -378,6 +439,26 @@ class FaturaImportIntegrationTest {
         }
         return faturaImportService.commit(new FaturaImportCommitRequest(
                 InvoiceImportFormat.INTER_FATURA_PDF, preview.referenceMonth(), accountId, approved, true),
+                userId);
+    }
+
+    private List<String> refsOf(FaturaImportGroupPreview group) {
+        return group.rows().stream().map(FaturaImportPreviewRow::externalRef).toList();
+    }
+
+    /** Confirma um grupo num cartão diferente do sugerido, como faz a escolha à mão. */
+    private FaturaImportResultResponse commitRowsToCard(FaturaImportPreviewResponse preview,
+                                                        FaturaImportGroupPreview group, UUID cardId) {
+        List<FaturaImportCommitRow> approved = new ArrayList<>();
+        for (FaturaImportPreviewRow row : group.rows()) {
+            approved.add(new FaturaImportCommitRow(
+                    row.lineNumber(), cardId, group.cardLast4(),
+                    row.externalRef(), row.ordinal(), row.date(), row.description(),
+                    row.description(), row.amount(), row.installmentNumber(),
+                    row.totalInstallments(), row.suggestedCategoryId()));
+        }
+        return faturaImportService.commit(new FaturaImportCommitRequest(
+                InvoiceImportFormat.INTER_FATURA_PDF, preview.referenceMonth(), accountId, approved),
                 userId);
     }
 

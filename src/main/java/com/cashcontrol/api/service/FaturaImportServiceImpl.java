@@ -19,6 +19,8 @@ import com.cashcontrol.api.domain.exception.BusinessRuleException;
 import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
 import com.cashcontrol.api.dto.request.FaturaImportCommitRequest;
 import com.cashcontrol.api.dto.request.FaturaImportCommitRow;
+import com.cashcontrol.api.dto.request.FaturaImportDuplicateCheckRequest;
+import com.cashcontrol.api.dto.response.FaturaImportDuplicateCheckResponse;
 import com.cashcontrol.api.dto.response.FaturaImportGroupPreview;
 import com.cashcontrol.api.dto.response.FaturaImportPreviewResponse;
 import com.cashcontrol.api.dto.response.FaturaImportPreviewRow;
@@ -105,7 +107,10 @@ public class FaturaImportServiceImpl implements FaturaImportService {
 
             CreditCard suggested = suggestCard(section.cardLast4(), userId).orElse(null);
             List<RowKey> keys = rowHasher.hashAll(section.cardLast4(), expenses);
-            Set<String> alreadyImported = findAlreadyImported(suggested, referenceMonth, keys, userId);
+            Set<String> alreadyImported = suggested == null
+                    ? Set.of()
+                    : findAlreadyImported(suggested, referenceMonth,
+                            keys.stream().map(RowKey::externalRef).toList(), userId);
 
             List<FaturaImportPreviewRow> rows = new ArrayList<>(expenses.size());
             for (int i = 0; i < expenses.size(); i++) {
@@ -267,22 +272,46 @@ public class FaturaImportServiceImpl implements FaturaImportService {
     }
 
     /**
-     * Quais linhas já entraram na fatura deste mês.
+     * Quais linhas já entraram na fatura deste mês, para o cartão informado.
      *
-     * <p>Depende do cartão sugerido: sem cartão não há fatura onde procurar, e nenhuma
-     * linha é marcada como duplicata. Trocar o cartão no cliente desatualiza essa marca,
-     * mas não abre buraco — a confirmação refaz a checagem contra a fatura de verdade.
+     * <p>Depende do cartão: é a fatura dele que diz o que já foi importado. Na prévia
+     * só existe cartão quando os 4 dígitos do PDF casaram com um cadastrado; quando o
+     * usuário escolhe o cartão à mão, é o {@link #checkDuplicates} que refaz esta
+     * mesma consulta com o cartão escolhido.
      */
     private Set<String> findAlreadyImported(CreditCard card, String referenceMonth,
-                                            List<RowKey> keys, UUID userId) {
-        if (card == null || keys.isEmpty()) {
+                                            List<String> refs, UUID userId) {
+        if (refs.isEmpty()) {
             return Set.of();
         }
-        List<String> refs = keys.stream().map(RowKey::externalRef).toList();
         return invoiceRepository.findByCreditCard_IdAndReferenceMonth(card.getId(), referenceMonth)
                 .map(invoice -> Set.copyOf(
                         invoiceItemRepository.findExistingExternalRefs(userId, invoice.getId(), refs)))
                 .orElseGet(Set::of);
+    }
+
+    /**
+     * A marcação de duplicatas de uma seção, refeita contra o cartão que o usuário
+     * escolheu no cliente.
+     *
+     * <p>Não grava nada e não guarda estado: recebe os {@code externalRef} que a prévia
+     * devolveu e responde quais deles já estão na fatura do cartão. O cartão é validado
+     * como na confirmação — arquivado não recebe lançamento, e um cartão de outro usuário
+     * simplesmente não existe.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public FaturaImportDuplicateCheckResponse checkDuplicates(FaturaImportDuplicateCheckRequest request, UUID userId) {
+        CreditCard card = requireImportableCard(request.creditCardId(), userId);
+        // Só valida o formato: a consulta usa a string, que é como o mês é gravado.
+        parseReferenceMonth(request.referenceMonth());
+
+        Set<String> duplicates = findAlreadyImported(
+                card, request.referenceMonth(), request.externalRefs(), userId);
+
+        // Devolvidos na ordem em que o cliente perguntou, para uma resposta estável.
+        return new FaturaImportDuplicateCheckResponse(
+                request.externalRefs().stream().distinct().filter(duplicates::contains).toList());
     }
 
     /**

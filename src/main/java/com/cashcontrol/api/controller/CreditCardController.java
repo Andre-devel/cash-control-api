@@ -4,10 +4,12 @@ import com.cashcontrol.api.domain.entity.InvoiceImportFormat;
 import com.cashcontrol.api.dto.request.CreateCardRequest;
 import com.cashcontrol.api.dto.request.EditCardRequest;
 import com.cashcontrol.api.dto.request.FaturaImportCommitRequest;
+import com.cashcontrol.api.dto.request.FaturaImportDuplicateCheckRequest;
 import com.cashcontrol.api.dto.request.PayInvoiceRequest;
 import com.cashcontrol.api.dto.request.RecordChargeRequest;
 import com.cashcontrol.api.dto.response.CreditCardResponse;
 import com.cashcontrol.api.dto.response.ErrorResponse;
+import com.cashcontrol.api.dto.response.FaturaImportDuplicateCheckResponse;
 import com.cashcontrol.api.dto.response.FaturaImportPreviewResponse;
 import com.cashcontrol.api.dto.response.FaturaImportResultResponse;
 import com.cashcontrol.api.dto.response.InvoiceItemResponse;
@@ -195,6 +197,32 @@ public class CreditCardController {
             @RequestParam(defaultValue = "INTER_FATURA_PDF") InvoiceImportFormat format,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         return faturaImportService.preview(file, format, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Check invoice import duplicates", description = """
+            Tells which preview rows are already on the invoice of a card the user picked by hand.
+
+            The preview can only flag duplicates for the sections whose four digits matched a \
+            registered card. When the destination card is chosen in the client — a virtual card, \
+            say — the flags belong to a different invoice, and this endpoint recomputes them for \
+            the given `externalRef` list. Nothing is persisted.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Duplicates returned"),
+            @ApiResponse(responseCode = "400", description = "Validation error",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Credit card not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Archived card or invalid reference month",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping("/invoices/import/duplicates")
+    @PreAuthorize("isAuthenticated()")
+    public FaturaImportDuplicateCheckResponse checkInvoiceImportDuplicates(
+            @Valid @RequestBody FaturaImportDuplicateCheckRequest request,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return faturaImportService.checkDuplicates(request, principal.getUser().getId());
     }
 
     @Operation(summary = "Commit invoice import", description = """
