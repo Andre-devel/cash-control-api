@@ -200,7 +200,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
                 invoice = resolveInvoice(card, context.referenceMonth());
             } catch (BusinessRuleException | ResourceNotFoundException e) {
                 // O cartão inteiro cai, mas os demais grupos do mesmo PDF continuam:
-                // uma fatura já paga não pode invalidar a importação do outro cartão.
+                // um cartão arquivado não pode invalidar a importação do outro.
                 group.getValue().stream().flatMap(purchase -> purchase.rows().stream())
                         .forEach(row -> tally.errors.add(new ImportRowError(row.lineNumber(), e.getMessage())));
                 continue;
@@ -213,7 +213,14 @@ public class FaturaImportServiceImpl implements FaturaImportService {
         }
 
         tally.addedByInvoice.forEach((invoice, added) -> {
+            // Uma fatura quitada que recebe lançamento novo continua quitada: o pagamento
+            // acompanha o total, senão ela ficaria PAGA devendo a diferença. Só vale para a
+            // quitada por inteiro — numa parcial, o que falta pagar é real e tem de aparecer.
+            boolean wasFullyPaid = invoice.getStatus() == InvoiceStatus.PAID;
             invoice.setTotalAmount(invoice.getTotalAmount().add(added));
+            if (wasFullyPaid) {
+                invoice.setPaidAmount(invoice.getTotalAmount());
+            }
             invoiceRepository.save(invoice);
         });
 
@@ -233,8 +240,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
      * exatamente o combinado para o histórico já liquidado.
      *
      * <p>O total já foi consolidado antes desta chamada, então {@code getTotalAmount()} é o
-     * valor final da fatura. Faturas que já tinham pagamento nem chegam aqui: a
-     * {@link #resolveInvoice} recusa importar sobre elas.
+     * valor final da fatura.
      */
     private int markInvoicesPaid(List<Invoice> invoices) {
         for (Invoice invoice : invoices) {
@@ -824,15 +830,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
                 closingDate,
                 cycleCalculator.dueDateFor(closingDate, card.getDueDay()));
 
-        Invoice invoice = creditCardService.getOrCreateInvoice(card, cycleInfo);
-        if (invoice.getPaidAmount().signum() > 0) {
-            // Somar lançamentos depois do pagamento deixaria total e pago inconsistentes,
-            // e o saldo rotativo já gerado apontaria para um valor que não existe mais.
-            throw new BusinessRuleException(
-                    "A fatura de " + invoice.getReferenceMonth() + " do cartão '" + card.getName()
-                    + "' já recebeu pagamento e não aceita a importação de novos lançamentos.");
-        }
-        return invoice;
+        return creditCardService.getOrCreateInvoice(card, cycleInfo);
     }
 
     // ── Apoio ─────────────────────────────────────────────────────────────────

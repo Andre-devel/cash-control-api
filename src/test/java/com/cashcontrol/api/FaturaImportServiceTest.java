@@ -797,19 +797,33 @@ class FaturaImportServiceTest {
     }
 
     @Test
-    void commit_refusesACardWhoseInvoiceAlreadyReceivedPayment_withoutBlockingTheOtherCard() {
+    void commit_importsIntoAPartiallyPaidInvoiceWithoutInventingPayment() {
         invoiceA.setPaidAmount(new BigDecimal("50.00"));
         invoiceA.setStatus(InvoiceStatus.PARTIAL);
 
         FaturaImportResultResponse result = commit(commitRowsFromPreview());
 
-        // O cartão A cai inteiro, mas o adicional do mesmo PDF continua entrando.
-        assertThat(result.imported()).isEqualTo(1);
-        assertThat(result.failed()).isEqualTo(2);
-        assertThat(result.errors()).extracting(error -> error.message())
-                .allSatisfy(message -> assertThat(message).contains("já recebeu pagamento"));
-        assertThat(itemsOf(REFERENCE_MONTH)).singleElement()
-                .satisfies(item -> assertThat(item.getInvoice()).isEqualTo(invoiceB));
+        assertThat(result.imported()).isEqualTo(3);
+        assertThat(result.failed()).isZero();
+        // O que falta pagar é real: o total cresce e o pago fica onde estava.
+        assertThat(invoiceA.getTotalAmount()).isEqualByComparingTo("165.19");
+        assertThat(invoiceA.getPaidAmount()).isEqualByComparingTo("50.00");
+    }
+
+    @Test
+    void commit_keepsAFullyPaidInvoiceSettledWhenNewRowsArrive() {
+        // Importar o mês seguinte de um histórico já quitado não pode deixar a fatura
+        // PAGA devendo a diferença.
+        invoiceA.setTotalAmount(new BigDecimal("10.00"));
+        invoiceA.setPaidAmount(new BigDecimal("10.00"));
+        invoiceA.setStatus(InvoiceStatus.PAID);
+
+        FaturaImportResultResponse result = commit(commitRowsFromPreview());
+
+        assertThat(result.failed()).isZero();
+        assertThat(invoiceA.getTotalAmount()).isEqualByComparingTo("175.19");
+        assertThat(invoiceA.getPaidAmount()).isEqualByComparingTo("175.19");
+        assertThat(invoiceA.getStatus()).isEqualTo(InvoiceStatus.PAID);
     }
 
     @Test
