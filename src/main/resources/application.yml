@@ -87,6 +87,11 @@ app:
     verification-token-days: ${RETENTION_VERIFICATION_TOKEN_DAYS:7}
     refresh-token-days: ${RETENTION_REFRESH_TOKEN_DAYS:30}
 
+  storage:
+    # Em produção precisa apontar para um volume montado. O default cai em java.io.tmpdir,
+    # que serve para o dev local mas some junto com o container a cada deploy.
+    local-path: ${APP_STORAGE_LOCAL_PATH:${java.io.tmpdir}/cash-control-attachments}
+
   attachments:
     max-file-size-mb: ${ATTACHMENT_MAX_SIZE_MB:10}
     max-per-transaction: ${ATTACHMENT_MAX_PER_TRANSACTION:5}
@@ -95,6 +100,24 @@ app:
   statement-import:
     max-file-size-mb: ${STATEMENT_IMPORT_MAX_SIZE_MB:5}
     max-rows: ${STATEMENT_IMPORT_MAX_ROWS:5000}
+
+  invoice-import:
+    max-file-size-mb: ${INVOICE_IMPORT_MAX_SIZE_MB:5}
+
+  receipt-import:
+    # Alinhado ao teto de anexo: o comprovante é gravado como anexo depois de lido, e
+    # aceitar aqui um arquivo que o anexo recusaria adiante só adiaria o erro.
+    max-file-size-mb: ${RECEIPT_IMPORT_MAX_SIZE_MB:10}
+
+  ocr:
+    # Print de comprovante é o caso principal (Nubank e PicPay compartilham imagem, não PDF).
+    enabled: ${OCR_ENABLED:true}
+    binary: ${OCR_BINARY:tesseract}
+    language: ${OCR_LANGUAGE:por}
+    timeout-seconds: ${OCR_TIMEOUT_SECONDS:20}
+    # Teto de OCR simultâneo. É o processamento mais pesado da API e os endpoints de
+    # importação não passam pelo RateLimitingFilter, que hoje cobre só os caminhos de auth.
+    max-concurrent: ${OCR_MAX_CONCURRENT:2}
 
   dashboard:
     upcoming-bills-days: ${UPCOMING_BILLS_DAYS:7}
