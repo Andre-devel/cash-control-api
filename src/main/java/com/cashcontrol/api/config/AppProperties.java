@@ -41,6 +41,9 @@ public class AppProperties {
     private final Retention retention = new Retention();
 
     @Valid
+    private final Storage storage = new Storage();
+
+    @Valid
     private final Attachments attachments = new Attachments();
 
     @Valid
@@ -48,6 +51,12 @@ public class AppProperties {
 
     @Valid
     private final InvoiceImport invoiceImport = new InvoiceImport();
+
+    @Valid
+    private final ReceiptImport receiptImport = new ReceiptImport();
+
+    @Valid
+    private final Ocr ocr = new Ocr();
 
     @Valid
     private final Dashboard dashboard = new Dashboard();
@@ -118,6 +127,20 @@ public class AppProperties {
         private int refreshTokenDays = 30;
     }
 
+    /** Onde os anexos ficam gravados. Liga em {@code app.storage.*}. */
+    @Getter
+    @Setter
+    public static class Storage {
+
+        /**
+         * O default só serve para o dev local. Em produção precisa apontar para um volume
+         * montado: {@code java.io.tmpdir} vive na camada de escrita do container e todo
+         * anexo se perde no rebuild seguinte.
+         */
+        @NotBlank
+        private String localPath = System.getProperty("java.io.tmpdir") + "/cash-control-attachments";
+    }
+
     @Getter
     @Setter
     public static class Attachments {
@@ -158,6 +181,57 @@ public class AppProperties {
          */
         @Positive
         private int maxFileSizeMb = 5;
+    }
+
+    /** Leitura de comprovante de pagamento. Liga em {@code app.receipt-import.*}. */
+    @Getter
+    @Setter
+    public static class ReceiptImport {
+
+        /**
+         * Alinhado ao teto de anexo, e não ao dos outros imports: o comprovante lido vira
+         * anexo da transação no mesmo passo, e um teto menor aqui só adiaria a recusa.
+         */
+        @Positive
+        private int maxFileSizeMb = 10;
+    }
+
+    /**
+     * OCR de comprovante em imagem. Liga em {@code app.ocr.*}.
+     *
+     * <p>O binário do sistema é chamado por {@code ProcessBuilder} em vez de uma binding
+     * JNA: a imagem de runtime é Alpine (musl), onde o Tess4J espera {@code libtesseract}
+     * compilado para glibc. A CLI também evita duas armadilhas — o Tesseract não é
+     * thread-safe, e uma chamada JNI fixaria a carrier thread, já que a aplicação roda com
+     * virtual threads ligadas.
+     */
+    @Getter
+    @Setter
+    public static class Ocr {
+
+        /**
+         * Desligado, comprovante em imagem entra sem campos lidos em vez de estourar erro —
+         * é o comportamento certo para um ambiente sem o binário instalado.
+         */
+        private boolean enabled = true;
+
+        @NotBlank
+        private String binary = "tesseract";
+
+        @NotBlank
+        private String language = "por";
+
+        @Positive
+        private int timeoutSeconds = 20;
+
+        /**
+         * Teto de OCR simultâneo. Os endpoints de importação não passam pelo
+         * {@code RateLimitingFilter}, que cobre só os caminhos de auth, e o OCR é o
+         * processamento mais caro da API — sem teto, um punhado de uploads paralelos
+         * ocupa a CPU do VPS inteiro.
+         */
+        @Positive
+        private int maxConcurrent = 2;
     }
 
     @Getter

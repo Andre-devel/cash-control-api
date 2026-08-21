@@ -14,6 +14,10 @@ RUN ./gradlew bootJar --no-daemon -x test -q
 
 # Stage 2: Runtime
 FROM eclipse-temurin:25-jre-alpine AS runtime
+# tesseract-ocr — leitura de comprovante de PIX compartilhado em imagem (OcrReceiptTextExtractor).
+# Chamado como binário via ProcessBuilder, não como binding JNI: Tess4J espera libtesseract
+# compilado para glibc, e esta imagem é musl (Alpine).
+RUN apk add --no-cache tesseract-ocr tesseract-ocr-data-por
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 WORKDIR /app
 COPY --from=builder /app/build/libs/*.jar app.jar

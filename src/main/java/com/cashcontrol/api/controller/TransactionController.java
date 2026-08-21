@@ -4,11 +4,13 @@ import com.cashcontrol.api.dto.request.CreateTransactionRequest;
 import com.cashcontrol.api.dto.request.EditTransactionRequest;
 import com.cashcontrol.api.dto.request.ImportCommitRequest;
 import com.cashcontrol.api.dto.request.MarkAsPaidRequest;
+import com.cashcontrol.api.dto.request.ReceiptCommitRequest;
 import com.cashcontrol.api.dto.request.TransactionFilterRequest;
 import com.cashcontrol.api.dto.response.AttachmentResponse;
 import com.cashcontrol.api.dto.response.ErrorResponse;
 import com.cashcontrol.api.dto.response.ImportPreviewResponse;
 import com.cashcontrol.api.dto.response.ImportResultResponse;
+import com.cashcontrol.api.dto.response.ReceiptPreviewResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.dto.response.TransactionSummaryResponse;
 import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
@@ -17,6 +19,7 @@ import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.security.AuthenticatedUser;
 import com.cashcontrol.api.service.AttachmentService;
+import com.cashcontrol.api.service.ReceiptImportService;
 import com.cashcontrol.api.service.StatementImportService;
 import com.cashcontrol.api.service.TransactionService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -65,6 +68,7 @@ public class TransactionController {
     private final TransactionService transactionService;
     private final AttachmentService attachmentService;
     private final StatementImportService statementImportService;
+    private final ReceiptImportService receiptImportService;
 
     @Operation(summary = "Create transaction", description = "Records a new INCOME, EXPENSE, or REFUND transaction for the authenticated user.")
     @ApiResponses({
@@ -273,6 +277,62 @@ public class TransactionController {
             @Valid @RequestBody ImportCommitRequest request,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         return statementImportService.commit(request, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Preview receipt import", description = """
+            Reads a payment receipt (PIX proof) — PDF or, when OCR is enabled, an image — and returns \
+            whatever could be identified (amount, date, recipient, category suggestion), together with \
+            a duplicate flag, **without persisting anything**.
+
+            `accountId` is optional: in the share-target flow the account has not been chosen yet when \
+            the receipt arrives, so duplicate detection is skipped until `POST /api/v1/transactions/receipts` \
+            is called, which always checks against the given account.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Preview returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Empty file or file exceeds the size limit",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping(value = "/receipts/preview", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("isAuthenticated()")
+    public ReceiptPreviewResponse previewReceipt(
+            @Parameter(description = "Receipt file (PDF or image)", required = true) @RequestPart("file") MultipartFile file,
+            @Parameter(description = "Account UUID that will receive the transaction, when already known")
+            @RequestParam(required = false) UUID accountId,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return receiptImportService.preview(file, accountId, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Commit receipt import", description = """
+            Persists the transaction the user reviewed from a receipt preview, attaching the original \
+            file to it in the same step.
+
+            Rejects with 409 when a transaction with the same `externalRef` already exists in the \
+            account, so retrying the same payload after a network hiccup is safe.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Transaction created and receipt attached"),
+            @ApiResponse(responseCode = "400", description = "Validation error",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Account, category, or subcategory not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "This receipt was already recorded",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Archived account or unsupported file",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping(value = "/receipts", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("isAuthenticated()")
+    public TransactionDetailResponse commitReceipt(
+            @Parameter(description = "Reviewed transaction fields", required = true)
+            @RequestPart("data") @Valid ReceiptCommitRequest data,
+            @Parameter(description = "The same receipt file sent to the preview endpoint", required = true)
+            @RequestPart("file") MultipartFile file,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return receiptImportService.commit(data, file, principal.getUser().getId());
     }
 
     @Operation(summary = "Upload attachments", description = "Attaches one or more receipt or proof-of-payment files to a transaction.")
