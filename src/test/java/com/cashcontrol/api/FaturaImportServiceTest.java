@@ -39,6 +39,7 @@ import com.cashcontrol.api.service.CategorySuggester;
 import com.cashcontrol.api.service.CreditCardService;
 import com.cashcontrol.api.service.FaturaImportServiceImpl;
 import com.cashcontrol.api.service.InvoiceCycleCalculator;
+import com.cashcontrol.api.service.InvoiceManagementService;
 import com.cashcontrol.api.service.MerchantAliasService;
 import com.cashcontrol.api.service.InvoiceCycleCalculator.InvoiceCycleInfo;
 import com.cashcontrol.api.service.TransactionService;
@@ -96,6 +97,7 @@ class FaturaImportServiceTest {
     @Mock private CategoryRuleRepository categoryRuleRepository;
     @Mock private MerchantAliasRepository merchantAliasRepository;
     @Mock private CreditCardService creditCardService;
+    @Mock private InvoiceManagementService invoiceManagementService;
     @Mock private TransactionService transactionService;
 
     private FaturaImportServiceImpl service;
@@ -137,6 +139,7 @@ class FaturaImportServiceTest {
                 new CategorySuggester(transactionRepository, new CategoryRuleMatcher()),
                 new MerchantAliasService(merchantAliasRepository),
                 creditCardService,
+                invoiceManagementService,
                 transactionService,
                 new InvoiceCycleCalculator(),
                 new FaturaRowHasher(),

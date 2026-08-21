@@ -10,7 +10,10 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import com.cashcontrol.api.service.MerchantKey;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -52,6 +55,16 @@ public class InvoiceItem {
     @Column(name = "description", nullable = false, length = 255)
     private String description;
 
+    /**
+     * A descrição como o arquivo trouxe, antes de qualquer edição do usuário. NULL em
+     * itens lançados à mão e em itens importados antes desta coluna existir. É dela, e
+     * não de {@link #description}, que {@link #merchantKey} é derivada — ver o cabeçalho
+     * da migração V28 para o porquê (a mesma diferença documentada em MerchantAlias
+     * contra transactions.merchant_key).
+     */
+    @Column(name = "original_description", length = 255)
+    private String originalDescription;
+
     @Column(name = "amount", nullable = false, precision = 19, scale = 2)
     private BigDecimal amount;
 
@@ -90,6 +103,16 @@ public class InvoiceItem {
     @Column(name = "external_ref", length = 64)
     private String externalRef;
 
+    /**
+     * Identidade do estabelecimento, derivada em todo insert/update por
+     * {@link #deriveMerchantKey()} a partir de {@link #originalDescription} (com fallback
+     * para {@link #description} quando não há original — item lançado à mão). NULL quando
+     * a descrição não deixa nada identificável.
+     */
+    @Setter(lombok.AccessLevel.NONE)
+    @Column(name = "merchant_key", length = 64)
+    private String merchantKey;
+
     @Column(name = "is_detached", nullable = false)
     private boolean isDetached = false;
 
@@ -115,4 +138,14 @@ public class InvoiceItem {
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
+    /**
+     * Roda em todo insert e update, no mesmo padrão de Transaction.deriveMerchantKey:
+     * nenhum call site precisa lembrar de preencher merchantKey.
+     */
+    @PrePersist
+    @PreUpdate
+    private void deriveMerchantKey() {
+        this.merchantKey = MerchantKey.of(this.originalDescription != null ? this.originalDescription : this.description);
+    }
 }

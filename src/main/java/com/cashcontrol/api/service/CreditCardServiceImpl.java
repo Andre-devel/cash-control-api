@@ -203,7 +203,7 @@ public class CreditCardServiceImpl implements CreditCardService {
         invoice.setTotalAmount(invoice.getTotalAmount().add(request.amount()));
         invoiceRepository.save(invoice);
 
-        return toItemResponse(item);
+        return InvoiceMapper.toItemResponse(item);
     }
 
     @Override
@@ -236,26 +236,7 @@ public class CreditCardServiceImpl implements CreditCardService {
         Page<InvoiceItem> itemsPage = invoiceItemRepository.findAllByInvoice_IdAndCancelledAtIsNull(
                 invoice.getId(), pageable);
 
-        List<InvoiceItemResponse> itemResponses = itemsPage.getContent().stream()
-                .map(this::toItemResponse)
-                .toList();
-
-        return new InvoiceResponse(
-                invoice.getId(),
-                card.getId(),
-                invoice.getReferenceMonth(),
-                invoice.getStatus(),
-                invoice.getClosingDate(),
-                invoice.getDueDate(),
-                invoice.getTotalAmount(),
-                invoice.getPaidAmount(),
-                page,
-                size,
-                itemsPage.getTotalElements(),
-                itemResponses,
-                invoice.getCreatedAt(),
-                invoice.getUpdatedAt()
-        );
+        return InvoiceMapper.toInvoiceResponse(invoice, card.getId(), page, size, itemsPage);
     }
 
     @Override
@@ -541,27 +522,6 @@ public class CreditCardServiceImpl implements CreditCardService {
                 card.getArchivedAt(),
                 card.getCreatedAt(),
                 card.getUpdatedAt()
-        );
-    }
-
-    private InvoiceItemResponse toItemResponse(InvoiceItem item) {
-        return new InvoiceItemResponse(
-                item.getId(),
-                item.getDescription(),
-                item.getAmount(),
-                item.getCompetenceDate(),
-                item.getCategory() != null ? item.getCategory().getId() : null,
-                item.getCategory() != null ? item.getCategory().getName() : null,
-                item.getSubcategory() != null ? item.getSubcategory().getId() : null,
-                item.getSubcategory() != null ? item.getSubcategory().getName() : null,
-                item.getNotes(),
-                item.isRevolving(),
-                item.getInstallmentNumber(),
-                item.getTotalInstallments(),
-                item.getTransaction() != null ? item.getTransaction().getId() : null,
-                item.getCancelledAt(),
-                item.getCreatedAt(),
-                item.getUpdatedAt()
         );
     }
 

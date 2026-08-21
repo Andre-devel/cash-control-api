@@ -80,6 +80,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
     private final CategorySuggester categorySuggester;
     private final MerchantAliasService merchantAliasService;
     private final CreditCardService creditCardService;
+    private final InvoiceManagementService invoiceManagementService;
     private final TransactionService transactionService;
     private final InvoiceCycleCalculator cycleCalculator;
     private final FaturaRowHasher rowHasher;
@@ -224,7 +225,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
             invoiceRepository.save(invoice);
         });
 
-        int markedPaid = request.alreadyPaid() ? markInvoicesPaid(currentInvoices) : 0;
+        int markedPaid = request.alreadyPaid() ? markInvoicesPaid(currentInvoices, userId) : 0;
 
         return new FaturaImportResultResponse(tally.imported, tally.futureInstallments,
                 tally.skippedDuplicates, tally.errors.size(), markedPaid, tally.errors);
@@ -233,20 +234,16 @@ public class FaturaImportServiceImpl implements FaturaImportService {
     /**
      * Quita as faturas do mês, para o caso de importar uma fatura que já foi paga na vida real.
      *
-     * <p>Marca só a fatura: {@code paidAmount = totalAmount} e status PAGO. As compras
-     * continuam PENDENTES — é o próprio modelo do sistema, em que a fatura é a fonte de
-     * verdade do "pago" e o {@code payInvoice} normal também não mexe nas transações. Como
-     * o saldo da conta soma apenas transações PAGAS, quitar aqui não movimenta a conta,
-     * exatamente o combinado para o histórico já liquidado.
+     * <p>Delega para {@link InvoiceManagementService#settle}, a mesma quitação simples que a
+     * tela de gerenciamento de faturas oferece pelo botão "Marcar como paga" — duas cópias da
+     * regra seriam duas chances de uma aprender {@code paidWithoutTransaction} e a outra não.
      *
      * <p>O total já foi consolidado antes desta chamada, então {@code getTotalAmount()} é o
      * valor final da fatura.
      */
-    private int markInvoicesPaid(List<Invoice> invoices) {
+    private int markInvoicesPaid(List<Invoice> invoices, UUID userId) {
         for (Invoice invoice : invoices) {
-            invoice.setPaidAmount(invoice.getTotalAmount());
-            invoice.setStatus(InvoiceStatus.PAID);
-            invoiceRepository.save(invoice);
+            invoiceManagementService.settle(invoice.getId(), userId);
         }
         return invoices.size();
     }
@@ -577,8 +574,10 @@ public class FaturaImportServiceImpl implements FaturaImportService {
         }
 
         String description = truncateDescription(rowHasher.stripInstallmentSuffix(row.description()));
+        String originalDescription = truncateDescription(
+                rowHasher.stripInstallmentSuffix(row.originalDescription()));
         saveCharge(invoice, row.externalRef(), competenceDateFor(row.date(), context.referenceMonth(), card),
-                row.amount(), description, card, category,
+                row.amount(), description, originalDescription, card, category,
                 series.resolve(category, description), number, purchase.total(), context, tally);
         tally.imported++;
         return true;
@@ -615,8 +614,10 @@ public class FaturaImportServiceImpl implements FaturaImportService {
 
         Category category = resolveCategory(row.categoryId(), context.categories());
         String description = truncateDescription(rowHasher.stripInstallmentSuffix(row.description()));
+        String originalDescription = truncateDescription(
+                rowHasher.stripInstallmentSuffix(row.originalDescription()));
         saveCharge(invoice, externalRef, competenceDateFor(row.date(), targetMonth, card), row.amount(),
-                description, card, category, series.resolve(category, description),
+                description, originalDescription, card, category, series.resolve(category, description),
                 number, purchase.total(), context, tally);
         tally.futureInstallments++;
     }
@@ -664,7 +665,8 @@ public class FaturaImportServiceImpl implements FaturaImportService {
      * compra num mês em que o banco não a cobrou.
      */
     private void saveCharge(Invoice invoice, String externalRef, LocalDate competenceDate,
-                            BigDecimal amount, String description, CreditCard card, Category category,
+                            BigDecimal amount, String description, String originalDescription,
+                            CreditCard card, Category category,
                             InstallmentSeries series, int number, int total,
                             CommitContext context, CommitTally tally) {
         Transaction tx = new Transaction();
@@ -693,6 +695,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
         item.setInvoice(invoice);
         item.setTransaction(tx);
         item.setDescription(description);
+        item.setOriginalDescription(originalDescription);
         item.setAmount(amount);
         item.setCompetenceDate(competenceDate);
         item.setCategory(category);

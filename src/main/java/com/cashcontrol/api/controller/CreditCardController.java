@@ -7,6 +7,7 @@ import com.cashcontrol.api.dto.request.FaturaImportCommitRequest;
 import com.cashcontrol.api.dto.request.FaturaImportDuplicateCheckRequest;
 import com.cashcontrol.api.dto.request.PayInvoiceRequest;
 import com.cashcontrol.api.dto.request.RecordChargeRequest;
+import com.cashcontrol.api.dto.request.UpdateInvoiceItemRequest;
 import com.cashcontrol.api.dto.response.CreditCardResponse;
 import com.cashcontrol.api.dto.response.ErrorResponse;
 import com.cashcontrol.api.dto.response.FaturaImportDuplicateCheckResponse;
@@ -14,11 +15,15 @@ import com.cashcontrol.api.dto.response.FaturaImportPreviewResponse;
 import com.cashcontrol.api.dto.response.FaturaImportResultResponse;
 import com.cashcontrol.api.dto.response.InvoiceItemResponse;
 import com.cashcontrol.api.dto.response.InvoiceResponse;
+import com.cashcontrol.api.dto.response.InvoiceSummaryResponse;
 import com.cashcontrol.api.dto.response.LimitUsageResponse;
+import com.cashcontrol.api.dto.response.MerchantScopeResponse;
 import com.cashcontrol.api.dto.response.SpendingByCategoryResponse;
+import com.cashcontrol.api.dto.response.UpdateInvoiceItemResponse;
 import com.cashcontrol.api.security.AuthenticatedUser;
 import com.cashcontrol.api.service.CreditCardService;
 import com.cashcontrol.api.service.FaturaImportService;
+import com.cashcontrol.api.service.InvoiceManagementService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -29,12 +34,14 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -59,6 +66,7 @@ public class CreditCardController {
 
     private final CreditCardService creditCardService;
     private final FaturaImportService faturaImportService;
+    private final InvoiceManagementService invoiceManagementService;
 
     @Operation(summary = "Create credit card", description = "Registers a new credit card for the authenticated user and opens the first invoice.")
     @ApiResponses({
@@ -270,6 +278,123 @@ public class CreditCardController {
             @Valid @RequestBody PayInvoiceRequest request,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         return creditCardService.payInvoice(invoiceId, request, principal.getUser().getId());
+    }
+
+    @Operation(summary = "List invoices", description = "Lists a card's invoices, newest reference month first, with a lightweight item count per invoice — no charges.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Invoices returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Credit card not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @GetMapping("/{id}/invoices")
+    @PreAuthorize("isAuthenticated()")
+    public Page<InvoiceSummaryResponse> listInvoices(
+            @Parameter(description = "Credit card UUID", required = true) @PathVariable UUID id,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return invoiceManagementService.listInvoices(id, principal.getUser().getId(), page, size);
+    }
+
+    @Operation(summary = "Get invoice by id", description = "Same shape as GET /{id}/invoices/{referenceMonth}, but addressed by invoice id — the invoice detail screen navigates by id, not by card + month.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Invoice returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Invoice not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @GetMapping("/invoices/{invoiceId}")
+    @PreAuthorize("isAuthenticated()")
+    public InvoiceResponse getInvoiceById(
+            @Parameter(description = "Invoice UUID", required = true) @PathVariable UUID invoiceId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return invoiceManagementService.getInvoiceById(invoiceId, principal.getUser().getId(), page, size);
+    }
+
+    @Operation(summary = "Update invoice item", description = """
+            Corrects the description and/or category of a single invoice item, after it was already \
+            imported (or recorded by hand). Mirrors the change onto the linked transaction, if any. \
+            `rememberMerchant` saves the description as this merchant's remembered alias, so the next \
+            import comes pre-filled. `applyToHistory` applies the same description and category to the \
+            merchant's other non-cancelled items across every invoice.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Item updated"),
+            @ApiResponse(responseCode = "400", description = "Validation error",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Invoice item or category not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Item is cancelled",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PatchMapping("/invoices/items/{itemId}")
+    @PreAuthorize("isAuthenticated()")
+    public UpdateInvoiceItemResponse updateInvoiceItem(
+            @Parameter(description = "Invoice item UUID", required = true) @PathVariable UUID itemId,
+            @Valid @RequestBody UpdateInvoiceItemRequest request,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return invoiceManagementService.updateItem(itemId, request, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Get merchant scope", description = "How many other non-cancelled items share this item's merchant, and the merchant's currently remembered alias, if any — what the edit dialog needs before showing its \"apply to N others\" checkbox.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Merchant scope returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Invoice item not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @GetMapping("/invoices/items/{itemId}/merchant")
+    @PreAuthorize("isAuthenticated()")
+    public MerchantScopeResponse getMerchantScope(
+            @Parameter(description = "Invoice item UUID", required = true) @PathVariable UUID itemId,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return invoiceManagementService.getMerchantScope(itemId, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Settle invoice without a transaction", description = """
+            Marks the invoice PAID without creating a payment transaction on any account — the same \
+            simple settlement the import's "already paid" checkbox performs, for a bill paid outside \
+            the app before it was ever imported. Charges stay PENDING and the account balance is \
+            untouched. Reversible via POST .../reopen, as long as no real payment (POST .../pay) \
+            happened since.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Invoice settled"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Invoice not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping("/invoices/{invoiceId}/settle")
+    @PreAuthorize("isAuthenticated()")
+    public InvoiceResponse settleInvoice(
+            @Parameter(description = "Invoice UUID", required = true) @PathVariable UUID invoiceId,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return invoiceManagementService.settle(invoiceId, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Reopen a settled invoice", description = "Undoes POST .../settle. Refused when the invoice was paid through a real transaction (POST .../pay) instead — reopening it would leave that transaction orphaned.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Invoice reopened"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Invoice not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Invoice is not paid, or was paid through a real transaction",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping("/invoices/{invoiceId}/reopen")
+    @PreAuthorize("isAuthenticated()")
+    public InvoiceResponse reopenInvoice(
+            @Parameter(description = "Invoice UUID", required = true) @PathVariable UUID invoiceId,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return invoiceManagementService.reopen(invoiceId, principal.getUser().getId());
     }
 
     @Operation(summary = "Get limit usage", description = "Returns real-time credit limit usage for the card, accounting for all open, closed, partial, and overdue invoices.")

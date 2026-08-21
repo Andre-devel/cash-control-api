@@ -209,6 +209,8 @@ class FaturaImportIntegrationTest {
 
         assertThat(invoiceOf(cardAId).status()).isEqualTo(InvoiceStatus.PAID);
         assertThat(invoiceOf(cardAId).paidAmount()).isEqualByComparingTo(FaturaPdfFixture.CARD_A_TOTAL);
+        // Reabrível: nenhuma transação de pagamento foi criada, só a fatura foi quitada.
+        assertThat(invoiceOf(cardAId).paidWithoutTransaction()).isTrue();
         assertThat(invoiceOf(cardBId).status()).isEqualTo(InvoiceStatus.PAID);
         assertThat(invoiceOf(cardBId).paidAmount()).isEqualByComparingTo(FaturaPdfFixture.CARD_B_TOTAL);
 

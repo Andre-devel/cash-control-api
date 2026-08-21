@@ -379,7 +379,7 @@ class CreditCardControllerTest {
     }
 
     private InvoiceItemResponse buildItemResponse(UUID id) {
-        return new InvoiceItemResponse(id, "Supermarket", new BigDecimal("150.00"),
+        return new InvoiceItemResponse(id, "Supermarket", null, false, new BigDecimal("150.00"),
                 LocalDate.of(2025, 5, 10), null, null, null, null, null,
                 false, null, null, null, null, Instant.now(), Instant.now());
     }
@@ -387,7 +387,7 @@ class CreditCardControllerTest {
     private InvoiceResponse buildInvoiceResponse(UUID invoiceId, UUID cardId) {
         return new InvoiceResponse(invoiceId, cardId, "2025-05", InvoiceStatus.OPEN,
                 LocalDate.of(2025, 5, 15), LocalDate.of(2025, 6, 10),
-                BigDecimal.ZERO, BigDecimal.ZERO, 0, 20, 0,
+                BigDecimal.ZERO, BigDecimal.ZERO, false, 0, 20, 0,
                 Collections.emptyList(), Instant.now(), Instant.now());
     }
 }

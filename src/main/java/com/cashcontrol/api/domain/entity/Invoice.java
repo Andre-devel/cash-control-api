@@ -69,6 +69,16 @@ public class Invoice {
     @Column(name = "paid_amount", nullable = false, precision = 19, scale = 2)
     private BigDecimal paidAmount = BigDecimal.ZERO;
 
+    /**
+     * {@code true} quando o status PAID veio da quitação simples ({@code settle} / o
+     * {@code alreadyPaid} do import) em vez de um pagamento real via {@code payInvoice}.
+     * É o que distingue uma fatura que pode ser reaberta sem deixar rastro (nenhuma
+     * transação de pagamento foi criada) de uma que não pode (reabrir deixaria órfã a
+     * transação de pagamento na conta).
+     */
+    @Column(name = "paid_without_transaction", nullable = false)
+    private boolean paidWithoutTransaction = false;
+
     @OneToMany(mappedBy = "invoice", fetch = FetchType.LAZY)
     private List<InvoiceItem> items = new ArrayList<>();
 

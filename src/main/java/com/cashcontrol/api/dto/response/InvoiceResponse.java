@@ -19,6 +19,7 @@ public record InvoiceResponse(
         @Schema(description = "Payment due date", example = "2026-05-27") LocalDate dueDate,
         @Schema(description = "Sum of all non-cancelled charges in this cycle. Serialized as decimal string.", example = "1500.00") BigDecimal totalAmount,
         @Schema(description = "Amount paid. Zero for OPEN/CLOSED invoices; non-zero for PARTIAL/PAID.", example = "1000.00") BigDecimal paidAmount,
+        @Schema(description = "True when PAID came from the simple settle action instead of a real payment transaction — the only case it is safe to reopen.") boolean paidWithoutTransaction,
         @Schema(description = "Current page number (0-based)", example = "0") int page,
         @Schema(description = "Page size", example = "20") int size,
         @Schema(description = "Total number of charge items in this invoice", example = "15") long totalItems,

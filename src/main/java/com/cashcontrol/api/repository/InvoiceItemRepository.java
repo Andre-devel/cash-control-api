@@ -80,4 +80,22 @@ public interface InvoiceItemRepository extends JpaRepository<InvoiceItem, UUID> 
            "AND ii.invoice.status IN :statuses")
     BigDecimal sumAmountByCardIdAndInvoiceStatuses(@Param("cardId") UUID cardId,
                                                    @Param("statuses") List<InvoiceStatus> statuses);
+
+    /**
+     * Quantos itens não cancelados cada fatura tem, e quantos deles vieram de importação
+     * ({@code externalRef IS NOT NULL}) — a coluna "N · M importados" da lista de faturas.
+     * Uma consulta para a página inteira, não uma por fatura.
+     */
+    @Query("SELECT ii.invoice.id, COUNT(ii), SUM(CASE WHEN ii.externalRef IS NOT NULL THEN 1L ELSE 0L END) " +
+           "FROM InvoiceItem ii WHERE ii.invoice.id IN :invoiceIds AND ii.cancelledAt IS NULL " +
+           "GROUP BY ii.invoice.id")
+    List<Object[]> countItemsByInvoiceIds(@Param("invoiceIds") Collection<UUID> invoiceIds);
+
+    /**
+     * Os demais itens do mesmo estabelecimento — usada tanto para o "aplicar aos outros N"
+     * da edição quanto para o {@code GET .../merchant} que informa esse N antes de editar.
+     * Exclui o próprio item que está sendo editado.
+     */
+    List<InvoiceItem> findAllByUserIdAndMerchantKeyAndCancelledAtIsNullAndIdNot(
+            UUID userId, String merchantKey, UUID excludedId);
 }

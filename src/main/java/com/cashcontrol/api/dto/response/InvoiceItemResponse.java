@@ -8,6 +8,8 @@ import java.util.UUID;
 public record InvoiceItemResponse(
         UUID id,
         String description,
+        String originalDescription,
+        boolean imported,
         BigDecimal amount,
         LocalDate competenceDate,
         UUID categoryId,
