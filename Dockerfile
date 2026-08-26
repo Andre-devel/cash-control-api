@@ -19,6 +19,10 @@ FROM eclipse-temurin:25-jre-alpine AS runtime
 # compilado para glibc, e esta imagem é musl (Alpine).
 RUN apk add --no-cache tesseract-ocr tesseract-ocr-data-por
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+# Criado (e não deixado pro Docker inicializar sozinho) porque APP_STORAGE_LOCAL_PATH
+# é montado como volume nomeado: um path que só passa a existir quando o volume é
+# criado herda root:root, e appuser não teria permissão de escrita nele.
+RUN mkdir -p /var/lib/cash-control/attachments && chown -R appuser:appgroup /var/lib/cash-control/attachments
 WORKDIR /app
 COPY --from=builder /app/build/libs/*.jar app.jar
 USER appuser
