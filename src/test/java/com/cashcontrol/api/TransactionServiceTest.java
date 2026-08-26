@@ -28,6 +28,7 @@ import com.cashcontrol.api.repository.CreditCardRepository;
 import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TagRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
+import com.cashcontrol.api.service.AttachmentService;
 import com.cashcontrol.api.service.CategoryRuleMatcher;
 import com.cashcontrol.api.service.CreditCardService;
 import com.cashcontrol.api.service.TransactionServiceImpl;
@@ -71,6 +72,7 @@ class TransactionServiceTest {
     @Mock private PaymentMethodRepository paymentMethodRepository;
     @Mock private CreditCardRepository creditCardRepository;
     @Mock private CreditCardService creditCardService;
+    @Mock private AttachmentService attachmentService;
     // Lógica pura de casamento de padrão: mockar não testaria nada, só devolveria null.
     @Spy private CategoryRuleMatcher categoryRuleMatcher = new CategoryRuleMatcher();
     @InjectMocks private TransactionServiceImpl transactionService;
