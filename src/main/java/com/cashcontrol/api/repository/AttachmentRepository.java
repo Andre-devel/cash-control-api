@@ -18,7 +18,7 @@ public interface AttachmentRepository extends JpaRepository<Attachment, UUID> {
 
     long countByTransaction_IdAndUserIdAndDeletedAtIsNull(UUID transactionId, UUID userId);
 
-    // Soft-deleted attachments still hold the FK to transactions, so deleting a
-    // transaction requires checking every row, not just the live ones.
-    long countByTransaction_IdIn(Collection<UUID> transactionIds);
+    // Soft-deleted attachments still hold the FK to transactions, so cascading a
+    // transaction delete requires every row, not just the live ones.
+    List<Attachment> findAllByTransaction_IdIn(Collection<UUID> transactionIds);
 }

@@ -26,7 +26,6 @@ import com.cashcontrol.api.dto.response.TagResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.dto.response.TransactionSummaryResponse;
 import com.cashcontrol.api.repository.AccountRepository;
-import com.cashcontrol.api.repository.AttachmentRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.InstallmentSeriesRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
@@ -52,7 +51,7 @@ public class InstallmentServiceImpl implements InstallmentService {
     private final TransactionRepository transactionRepository;
     private final AccountRepository accountRepository;
     private final CategoryRepository categoryRepository;
-    private final AttachmentRepository attachmentRepository;
+    private final AttachmentService attachmentService;
     private final TransactionService transactionService;
     private final CreditCardService creditCardService;
 
@@ -384,11 +383,7 @@ public class InstallmentServiceImpl implements InstallmentService {
         }
 
         List<UUID> installmentIds = installments.stream().map(Transaction::getId).toList();
-        if (!installmentIds.isEmpty() && attachmentRepository.countByTransaction_IdIn(installmentIds) > 0) {
-            throw new BusinessRuleException(
-                    "Não é possível excluir um parcelamento cujas parcelas possuem anexos. "
-                    + "Remova os anexos antes.");
-        }
+        attachmentService.deleteAllForTransactions(installmentIds);
 
         // Rejects the deletion when any installment already landed on a closed invoice.
         creditCardService.deleteInvoiceItemsForInstallmentSeries(seriesId);

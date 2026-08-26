@@ -16,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -32,6 +33,22 @@ public class AttachmentServiceImpl implements AttachmentService {
     private final TransactionRepository transactionRepository;
     private final StoragePort storagePort;
     private final AppProperties appProperties;
+
+    @Override
+    @Transactional
+    public void deleteAllForTransactions(Collection<UUID> transactionIds) {
+        if (transactionIds.isEmpty()) {
+            return;
+        }
+
+        List<Attachment> attachments = attachmentRepository.findAllByTransaction_IdIn(transactionIds);
+        for (Attachment attachment : attachments) {
+            if (attachment.getDeletedAt() == null) {
+                storagePort.delete(attachment.getStorageKey());
+            }
+        }
+        attachmentRepository.deleteAll(attachments);
+    }
 
     @Override
     @Transactional

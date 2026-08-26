@@ -52,6 +52,7 @@ public class TransactionServiceImpl implements TransactionService {
 
     private final TransactionRepository transactionRepository;
     private final AccountRepository accountRepository;
+    private final AttachmentService attachmentService;
     private final CategoryRepository categoryRepository;
     private final CategoryRuleRepository categoryRuleRepository;
     private final TagRepository tagRepository;
@@ -200,6 +201,7 @@ public class TransactionServiceImpl implements TransactionService {
                     + "para remover o parcelamento inteiro.");
         }
 
+        attachmentService.deleteAllForTransactions(List.of(tx.getId()));
         creditCardService.detachInvoiceItemForTransaction(tx.getId());
         transactionRepository.delete(tx);
     }
