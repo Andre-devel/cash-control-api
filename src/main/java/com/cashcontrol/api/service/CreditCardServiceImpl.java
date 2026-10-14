@@ -247,7 +247,10 @@ public class CreditCardServiceImpl implements CreditCardService {
         if (invoice.getStatus() == InvoiceStatus.PAID) {
             throw new BusinessRuleException("A fatura já está totalmente paga.");
         }
-        if (invoice.getStatus() == InvoiceStatus.OPEN) {
+        // Nada transiciona a fatura para CLOSED, então o status não diz se ela fechou: quem diz é
+        // a data. Compras no próprio dia de fechamento ainda entram nela (InvoiceCycleCalculator),
+        // por isso só passa a aceitar pagamento no dia seguinte.
+        if (invoice.getStatus() == InvoiceStatus.OPEN && !LocalDate.now().isAfter(invoice.getClosingDate())) {
             throw new BusinessRuleException("Não é possível pagar uma fatura ainda ABERTA.");
         }
 

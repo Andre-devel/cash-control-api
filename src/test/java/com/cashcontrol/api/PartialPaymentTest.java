@@ -157,26 +157,48 @@ class PartialPaymentTest {
     }
 
     @Test
-    void payingOpenInvoice_throwsBusinessRuleException() {
+    void payingInvoiceBeforeClosingDate_throwsBusinessRuleException() {
         CreditCardResponse card = creditCardService.createCard(
                 new CreateCardRequest("Open Invoice Card", CardBrand.VISA, "Bank", null,
                         new BigDecimal("5000.00"), 15, 10, null),
                 userId);
 
-        LocalDate chargeDate = LocalDate.of(2025, 1, 5);
+        // Compra de hoje cai na fatura que ainda não fechou
+        LocalDate chargeDate = LocalDate.now();
         creditCardService.recordCharge(card.id(),
                 new RecordChargeRequest("Charge", new BigDecimal("100.00"), chargeDate, null, null, null),
                 userId);
 
-        // Invoice is OPEN — cannot be paid
-        var invoice = invoiceRepository.findByCreditCard_IdAndReferenceMonth(card.id(), "2025-01").orElseThrow();
+        var invoice = invoiceRepository.findByCreditCard_IdAndStatus(card.id(), InvoiceStatus.OPEN).orElseThrow();
         assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.OPEN);
+        assertThat(invoice.getClosingDate()).isAfterOrEqualTo(LocalDate.now());
 
         PayInvoiceRequest request = new PayInvoiceRequest(
                 new BigDecimal("100.00"), sourceAccountId, null);
         assertThatThrownBy(() -> creditCardService.payInvoice(invoice.getId(), request, userId))
                 .isInstanceOf(BusinessRuleException.class)
                 .hasMessageContaining("ABERTA");
+    }
+
+    @Test
+    void payingOpenInvoiceAfterClosingDate_succeeds() {
+        CreditCardResponse card = creditCardService.createCard(
+                new CreateCardRequest("Past Closing Card", CardBrand.VISA, "Bank", null,
+                        new BigDecimal("5000.00"), 15, 10, null),
+                userId);
+
+        // Fatura 2025-01 fechou em 15/01/2025 e continua OPEN: nada muda o status para CLOSED
+        creditCardService.recordCharge(card.id(),
+                new RecordChargeRequest("Charge", new BigDecimal("100.00"), LocalDate.of(2025, 1, 5),
+                        null, null, null),
+                userId);
+        var invoice = invoiceRepository.findByCreditCard_IdAndReferenceMonth(card.id(), "2025-01").orElseThrow();
+        assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.OPEN);
+
+        InvoiceResponse response = creditCardService.payInvoice(invoice.getId(),
+                new PayInvoiceRequest(new BigDecimal("100.00"), sourceAccountId, null), userId);
+
+        assertThat(response.status()).isEqualTo(InvoiceStatus.PAID);
     }
 
     @Test
