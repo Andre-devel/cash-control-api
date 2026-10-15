@@ -5,6 +5,7 @@ import com.cashcontrol.api.domain.entity.InvoiceStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -25,6 +26,21 @@ public interface InvoiceRepository extends JpaRepository<Invoice, UUID> {
     Optional<Invoice> findByCreditCard_IdAndStatus(UUID creditCardId, InvoiceStatus status);
 
     Optional<Invoice> findByIdAndUserId(UUID id, UUID userId);
+
+    /** Lote noturno de {@code Invoice.refreshTimelineStatus}: venceu sem ser paga. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("UPDATE Invoice i SET i.status = com.cashcontrol.api.domain.entity.InvoiceStatus.OVERDUE " +
+           "WHERE i.status IN (com.cashcontrol.api.domain.entity.InvoiceStatus.OPEN, " +
+           "                   com.cashcontrol.api.domain.entity.InvoiceStatus.CLOSED) " +
+           "AND i.dueDate < :today")
+    int markOverdue(@Param("today") LocalDate today);
+
+    /** Lote noturno de {@code Invoice.refreshTimelineStatus}: passou do dia de fechamento. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("UPDATE Invoice i SET i.status = com.cashcontrol.api.domain.entity.InvoiceStatus.CLOSED " +
+           "WHERE i.status = com.cashcontrol.api.domain.entity.InvoiceStatus.OPEN " +
+           "AND i.closingDate < :today")
+    int markClosed(@Param("today") LocalDate today);
 
     /**
      * Quanto do limite as faturas do cartão ainda ocupam: o saldo devedor de cada uma.

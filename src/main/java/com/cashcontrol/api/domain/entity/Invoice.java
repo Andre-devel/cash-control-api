@@ -110,6 +110,28 @@ public class Invoice {
             paidAmount = totalAmount;
         } else if (paidAmount.compareTo(totalAmount) < 0) {
             status = InvoiceStatus.OPEN;
+            refreshTimelineStatus(LocalDate.now());
+        }
+    }
+
+    /**
+     * Status de uma fatura que ainda não recebeu pagamento, pela data: ABERTA até o dia do
+     * fechamento (compras desse dia ainda entram nela, ver InvoiceCycleCalculator), FECHADA
+     * depois dele e VENCIDA depois do vencimento. PAGA e PARCIAL não mudam com o tempo.
+     *
+     * <p>A mesma regra roda em lote no job noturno ({@code InvoiceRepository.markOverdue} e
+     * {@code markClosed}); aqui ela vale para a fatura que nasce ou reabre fora de hora.
+     */
+    public void refreshTimelineStatus(LocalDate today) {
+        if (status == InvoiceStatus.PAID || status == InvoiceStatus.PARTIAL) {
+            return;
+        }
+        if (dueDate.isBefore(today)) {
+            status = InvoiceStatus.OVERDUE;
+        } else if (closingDate.isBefore(today)) {
+            status = InvoiceStatus.CLOSED;
+        } else {
+            status = InvoiceStatus.OPEN;
         }
     }
 }

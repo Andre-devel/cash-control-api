@@ -27,6 +27,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -190,6 +191,14 @@ public class InvoiceManagementServiceImpl implements InvoiceManagementService {
      */
     @Override
     @Transactional
+    public int refreshInvoiceStatuses() {
+        LocalDate today = LocalDate.now();
+        // VENCIDA antes de FECHADA: uma ABERTA que já venceu vai direto para VENCIDA.
+        return invoiceRepository.markOverdue(today) + invoiceRepository.markClosed(today);
+    }
+
+    @Override
+    @Transactional
     public InvoiceResponse settle(UUID invoiceId, UUID userId) {
         Invoice invoice = requireInvoice(invoiceId, userId);
 
@@ -211,10 +220,8 @@ public class InvoiceManagementServiceImpl implements InvoiceManagementService {
      * Desfaz {@link #settle}. Bloqueada quando a quitação veio de um pagamento real: reabrir
      * deixaria a transação de pagamento na conta sem fatura para justificá-la.
      *
-     * <p>Sempre volta para OPEN, não para CLOSED: nada no sistema hoje transiciona uma fatura
-     * para CLOSED (nem um job agendado, nem nenhum service) — é um status previsto no enum sem
-     * produtor. Calcular "CLOSED se a data de fechamento já passou" seria inventar uma regra
-     * que o resto do sistema não segue em lugar nenhum.
+     * <p>Volta ao status que a data dá (ABERTA, FECHADA ou VENCIDA), ver
+     * {@code Invoice.refreshTimelineStatus}.
      */
     @Override
     @Transactional
@@ -231,6 +238,7 @@ public class InvoiceManagementServiceImpl implements InvoiceManagementService {
 
         invoice.setPaidAmount(BigDecimal.ZERO);
         invoice.setStatus(InvoiceStatus.OPEN);
+        invoice.refreshTimelineStatus(LocalDate.now());
         invoice.setPaidWithoutTransaction(false);
         invoiceRepository.save(invoice);
         transactionRepository.reopenInvoicePurchases(invoice.getId());

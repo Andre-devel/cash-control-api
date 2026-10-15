@@ -5,6 +5,7 @@ import com.cashcontrol.api.domain.entity.InvoiceStatus;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -16,6 +17,8 @@ class InvoiceAddToTotalTest {
         invoice.setPaidAmount(new BigDecimal(total));
         invoice.setStatus(InvoiceStatus.PAID);
         invoice.setPaidWithoutTransaction(withoutTransaction);
+        invoice.setClosingDate(LocalDate.now().plusDays(5));
+        invoice.setDueDate(LocalDate.now().plusDays(12));
         return invoice;
     }
 
@@ -45,6 +48,35 @@ class InvoiceAddToTotalTest {
 
         assertThat(invoice.getPaidAmount()).isEqualByComparingTo("100.00");
         assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.OPEN);
+    }
+
+    @Test
+    void reopenedInvoiceTakesTheStatusItsDatesGive() {
+        Invoice invoice = paid("100.00", false);
+        invoice.setClosingDate(LocalDate.now().minusDays(20));
+        invoice.setDueDate(LocalDate.now().minusDays(10));
+        invoice.addToTotal(new BigDecimal("50.00"));
+
+        assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.OVERDUE);
+    }
+
+    @Test
+    void timelineStatusFollowsClosingAndDueDates() {
+        Invoice invoice = new Invoice();
+        LocalDate today = LocalDate.of(2026, 3, 16);
+        invoice.setClosingDate(LocalDate.of(2026, 3, 15));
+        invoice.setDueDate(LocalDate.of(2026, 3, 25));
+
+        invoice.refreshTimelineStatus(LocalDate.of(2026, 3, 15));
+        assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.OPEN);
+        invoice.refreshTimelineStatus(today);
+        assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.CLOSED);
+        invoice.refreshTimelineStatus(LocalDate.of(2026, 3, 26));
+        assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.OVERDUE);
+
+        invoice.setStatus(InvoiceStatus.PAID);
+        invoice.refreshTimelineStatus(LocalDate.of(2026, 4, 30));
+        assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.PAID);
     }
 
     @Test

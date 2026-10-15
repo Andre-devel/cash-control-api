@@ -45,7 +45,6 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -95,33 +94,11 @@ public class CreditCardServiceImpl implements CreditCardService {
         card.setSharedLimitGroup(sharedGroup);
         card = creditCardRepository.save(card);
 
-        // Create first OPEN invoice for the current billing cycle
-        createOpenInvoiceFor(card, LocalDate.now());
+        // Fatura do ciclo corrente, para o cartão já aparecer com uma aberta.
+        getOrCreateInvoice(card, cycleCalculator.calculateForCharge(
+                LocalDate.now(), card.getClosingDay(), card.getDueDay()));
 
         return toResponse(card);
-    }
-
-    private Invoice createOpenInvoiceFor(CreditCard card, LocalDate referenceDate) {
-        InvoiceCycleInfo cycleInfo = cycleCalculator.calculateForCharge(
-                referenceDate, card.getClosingDay(), card.getDueDay());
-
-        // Don't create duplicate
-        Optional<Invoice> existing = invoiceRepository.findByCreditCard_IdAndReferenceMonth(
-                card.getId(), cycleInfo.referenceMonth());
-        if (existing.isPresent()) {
-            return existing.get();
-        }
-
-        Invoice invoice = new Invoice();
-        invoice.setUserId(card.getUserId());
-        invoice.setCreditCard(card);
-        invoice.setStatus(InvoiceStatus.OPEN);
-        invoice.setReferenceMonth(cycleInfo.referenceMonth());
-        invoice.setClosingDate(cycleInfo.closingDate());
-        invoice.setDueDate(cycleInfo.dueDate());
-        invoice.setTotalAmount(BigDecimal.ZERO);
-        invoice.setPaidAmount(BigDecimal.ZERO);
-        return invoiceRepository.save(invoice);
     }
 
     @Override
@@ -209,6 +186,8 @@ public class CreditCardServiceImpl implements CreditCardService {
                     inv.setDueDate(cycleInfo.dueDate());
                     inv.setTotalAmount(BigDecimal.ZERO);
                     inv.setPaidAmount(BigDecimal.ZERO);
+                    // Uma compra antiga cria a fatura de um mês que já fechou (ou venceu).
+                    inv.refreshTimelineStatus(LocalDate.now());
                     return invoiceRepository.save(inv);
                 });
     }
@@ -237,9 +216,9 @@ public class CreditCardServiceImpl implements CreditCardService {
         if (invoice.getStatus() == InvoiceStatus.PAID) {
             throw new BusinessRuleException("A fatura já está totalmente paga.");
         }
-        // Nada transiciona a fatura para CLOSED, então o status não diz se ela fechou: quem diz é
-        // a data. Compras no próprio dia de fechamento ainda entram nela (InvoiceCycleCalculator),
-        // por isso só passa a aceitar pagamento no dia seguinte.
+        // O job noturno passa a fatura para FECHADA, mas pela data e não pelo status: entre a
+        // virada do dia e o job ela ainda está ABERTA. Compras no próprio dia de fechamento
+        // ainda entram nela (InvoiceCycleCalculator), por isso só aceita pagamento no dia seguinte.
         if (invoice.getStatus() == InvoiceStatus.OPEN && !LocalDate.now().isAfter(invoice.getClosingDate())) {
             throw new BusinessRuleException("Não é possível pagar uma fatura ainda ABERTA.");
         }
@@ -469,9 +448,10 @@ public class CreditCardServiceImpl implements CreditCardService {
         List<InvoiceItem> items = invoiceItemRepository.findAllByInstallmentSeries_Id(installmentSeriesId);
 
         for (InvoiceItem item : items) {
-            if (item.getInvoice().getStatus() != InvoiceStatus.OPEN) {
+            InvoiceStatus status = item.getInvoice().getStatus();
+            if (status == InvoiceStatus.PAID || status == InvoiceStatus.PARTIAL) {
                 throw new BusinessRuleException(
-                        "Não é possível excluir um parcelamento que alcançou uma fatura fechada (mês de referência "
+                        "Não é possível excluir um parcelamento que alcançou uma fatura já paga (mês de referência "
                         + item.getInvoice().getReferenceMonth() + "). Use a quitação antecipada.");
             }
         }

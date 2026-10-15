@@ -841,7 +841,8 @@ class FaturaImportServiceTest {
 
         assertThat(invoiceA.getTotalAmount()).isEqualByComparingTo("175.19");
         assertThat(invoiceA.getPaidAmount()).isEqualByComparingTo("10.00");
-        assertThat(invoiceA.getStatus()).isEqualTo(InvoiceStatus.OPEN);
+        // Reabre no status que a data dá: a fatura do fixture venceu em 2026-08-07.
+        assertThat(invoiceA.getStatus()).isEqualTo(InvoiceStatus.OVERDUE);
     }
 
     @Test

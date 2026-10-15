@@ -187,13 +187,13 @@ class PartialPaymentTest {
                         new BigDecimal("5000.00"), 15, 10, null),
                 userId);
 
-        // Fatura 2025-01 fechou em 15/01/2025 e continua OPEN: nada muda o status para CLOSED
+        // Fatura 2025-01 fechou em 15/01/2025 e venceu em 10/02/2025: nasce VENCIDA
         creditCardService.recordCharge(card.id(),
                 new RecordChargeRequest("Charge", new BigDecimal("100.00"), LocalDate.of(2025, 1, 5),
                         null, null, null),
                 userId);
         var invoice = invoiceRepository.findByCreditCard_IdAndReferenceMonth(card.id(), "2025-01").orElseThrow();
-        assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.OPEN);
+        assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.OVERDUE);
 
         InvoiceResponse response = creditCardService.payInvoice(invoice.getId(),
                 new PayInvoiceRequest(new BigDecimal("100.00"), sourceAccountId, null), userId);

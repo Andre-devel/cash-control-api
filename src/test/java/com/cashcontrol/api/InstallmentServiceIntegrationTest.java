@@ -301,7 +301,7 @@ class InstallmentServiceIntegrationTest {
     }
 
     @Test
-    void deleteInstallmentSeries_reachedClosedInvoice_rejected() {
+    void deleteInstallmentSeries_reachedPaidInvoice_rejected() {
         UUID cardId = createCard();
         UUID seriesId = createCardSeries(cardId, "Card series already invoiced");
 
@@ -309,12 +309,12 @@ class InstallmentServiceIntegrationTest {
 
         UUID invoiceId = invoiceItemRepository.findAllByInstallmentSeries_Id(seriesId)
                 .get(0).getInvoice().getId();
-        jdbcTemplate.update("UPDATE invoices SET status = 'CLOSED' WHERE id = ?", invoiceId);
+        jdbcTemplate.update("UPDATE invoices SET status = 'PAID' WHERE id = ?", invoiceId);
         entityManager.clear();
 
         assertThatThrownBy(() -> installmentService.deleteInstallmentSeries(seriesId, userId))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("fatura fechada");
+                .hasMessageContaining("fatura já paga");
 
         entityManager.clear();
         assertThat(transactionRepository.findAllByInstallmentSeries_Id(seriesId)).hasSize(3);

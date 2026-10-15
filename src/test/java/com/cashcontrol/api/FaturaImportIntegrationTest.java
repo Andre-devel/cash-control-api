@@ -228,10 +228,10 @@ class FaturaImportIntegrationTest {
                 .allSatisfy(tx -> assertThat(tx.getPaymentDate()).isNull());
         assertThat(accountService.computeBalance(accountId, userId)).isEqualByComparingTo("0.00");
 
-        // As parcelas futuras caem em meses seguintes e continuam ABERTAS.
+        // As parcelas futuras caem em meses seguintes, cujas faturas não são quitadas.
         assertThat(creditCardService.getInvoice(
                 cardAId, FaturaPdfFixture.NEXT_REFERENCE_MONTH, userId, 0, 50).status())
-                .isEqualTo(InvoiceStatus.OPEN);
+                .isNotIn(InvoiceStatus.PAID, InvoiceStatus.PARTIAL);
     }
 
     @Test

@@ -38,6 +38,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -159,7 +160,7 @@ class InvoiceManagementIntegrationTest {
         assertThat(accountService.computeBalance(accountId, userId)).isEqualByComparingTo("0.00");
 
         InvoiceResponse reopened = invoiceManagementService.reopen(invoice.id(), userId);
-        assertThat(reopened.status()).isEqualTo(InvoiceStatus.OPEN);
+        assertThat(reopened.status()).isNotIn(InvoiceStatus.PAID, InvoiceStatus.PARTIAL);
         assertThat(reopened.paidWithoutTransaction()).isFalse();
         assertThat(reopened.paidAmount()).isEqualByComparingTo(BigDecimal.ZERO);
     }
@@ -198,6 +199,25 @@ class InvoiceManagementIntegrationTest {
     }
 
     // ── apoio ─────────────────────────────────────────────────────────────────
+
+    @Test
+    void refreshInvoiceStatuses_closesAndExpiresUnpaidInvoicesByDate() {
+        invoiceRepository.flush();
+        UUID closingId = jdbcTemplate.queryForObject(
+                "SELECT id FROM invoices WHERE credit_card_id = ? LIMIT 1", UUID.class, cardAId);
+        UUID expiringId = jdbcTemplate.queryForObject(
+                "SELECT id FROM invoices WHERE credit_card_id = ? LIMIT 1", UUID.class, cardBId);
+        LocalDate today = LocalDate.now();
+        jdbcTemplate.update("UPDATE invoices SET status = 'OPEN', closing_date = ?, due_date = ? WHERE id = ?",
+                today.minusDays(1), today.plusDays(5), closingId);
+        jdbcTemplate.update("UPDATE invoices SET status = 'OPEN', closing_date = ?, due_date = ? WHERE id = ?",
+                today.minusDays(10), today.minusDays(1), expiringId);
+
+        invoiceManagementService.refreshInvoiceStatuses();
+
+        assertThat(invoiceRepository.findById(closingId).orElseThrow().getStatus()).isEqualTo(InvoiceStatus.CLOSED);
+        assertThat(invoiceRepository.findById(expiringId).orElseThrow().getStatus()).isEqualTo(InvoiceStatus.OVERDUE);
+    }
 
     private UUID createCard(String name, String last4) {
         return creditCardService.createCard(new CreateCardRequest(

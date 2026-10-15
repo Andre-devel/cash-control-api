@@ -282,7 +282,8 @@ class InvoiceManagementServiceTest {
 
         service.reopen(invoice.getId(), userId);
 
-        assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.OPEN);
+        // Volta ao status que a data dá: a fatura do helper venceu em 2026-07-27.
+        assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.OVERDUE);
         assertThat(invoice.getPaidAmount()).isEqualByComparingTo(BigDecimal.ZERO);
         assertThat(invoice.isPaidWithoutTransaction()).isFalse();
     }

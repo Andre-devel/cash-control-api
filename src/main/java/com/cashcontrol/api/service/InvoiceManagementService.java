@@ -20,6 +20,9 @@ import java.util.UUID;
  */
 public interface InvoiceManagementService {
 
+    /** Avança ABERTA → FECHADA → VENCIDA pela data, para as faturas ainda não pagas. */
+    int refreshInvoiceStatuses();
+
     Page<InvoiceSummaryResponse> listInvoices(UUID cardId, UUID userId, int page, int size);
 
     InvoiceResponse getInvoiceById(UUID invoiceId, UUID userId, int page, int size);
