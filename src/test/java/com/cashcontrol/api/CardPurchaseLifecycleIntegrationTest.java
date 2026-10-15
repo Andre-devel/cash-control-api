@@ -150,6 +150,16 @@ class CardPurchaseLifecycleIntegrationTest {
     }
 
     @Test
+    void payingMoreThanTheRemainderIsRejectedInsteadOfTruncated() {
+        purchase(null);
+
+        assertThatThrownBy(() -> creditCardService.payInvoice(invoiceId(),
+                new PayInvoiceRequest(new BigDecimal("150.00"), accountId, LocalDate.now()), userId))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("maior que o restante");
+    }
+
+    @Test
     void invoicePaymentCannotBeDeleted() {
         purchase(null);
         creditCardService.payInvoice(invoiceId(),

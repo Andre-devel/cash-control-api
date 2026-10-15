@@ -113,12 +113,17 @@ class AccountIntegrationTest {
         AccountResponse account = accountService.createAccount(
                 new CreateAccountRequest("Original", AccountType.CHECKING, "BRL", null, 0, null), userId);
 
-        EditAccountRequest editRequest = new EditAccountRequest("Renamed", AccountType.SAVINGS, "USD", "desc", 5);
+        EditAccountRequest editRequest = new EditAccountRequest("Renamed", AccountType.SAVINGS, "BRL", "desc", 5);
         AccountResponse edited = accountService.editAccount(account.id(), editRequest, userId);
 
         assertThat(edited.name()).isEqualTo("Renamed");
         assertThat(edited.type()).isEqualTo(AccountType.SAVINGS);
-        assertThat(edited.currencyCode()).isEqualTo("USD");
+        assertThat(edited.currencyCode()).isEqualTo("BRL");
+
+        assertThatThrownBy(() -> accountService.editAccount(account.id(),
+                new EditAccountRequest("Renamed", AccountType.SAVINGS, "USD", "desc", 5), userId))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("moeda");
         assertThat(edited.sortOrder()).isEqualTo(5);
     }
 
@@ -183,10 +188,15 @@ class AccountIntegrationTest {
         AccountResponse account = accountService.createAccount(
                 new CreateAccountRequest("Active Account", AccountType.CHECKING, "BRL", null, 0,
                         new BigDecimal("500.00")), userId);
+        AccountResponse other = accountService.createAccount(
+                new CreateAccountRequest("Other Account", AccountType.CHECKING, "BRL", null, 0, null), userId);
 
+        // Ajustes não seguram a conta; uma transferência é histórico e segura.
         accountService.manualAdjustment(account.id(),
                 new ManualAdjustmentRequest(new BigDecimal("100.00"), "Extra adjustment", LocalDate.now()),
                 userId);
+        accountService.createTransfer(new TransferRequest(
+                account.id(), other.id(), new BigDecimal("50.00"), null, LocalDate.now()), userId);
 
         assertThatThrownBy(() -> accountService.deleteAccount(account.id(), userId))
                 .isInstanceOf(BusinessRuleException.class)

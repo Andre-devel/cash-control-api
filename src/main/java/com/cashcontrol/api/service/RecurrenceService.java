@@ -29,4 +29,7 @@ public interface RecurrenceService {
     RecurrenceRuleResponse getRecurrence(UUID ruleId, UUID userId);
 
     int generatePendingInstances(int lookaheadDays);
+
+    /** Retoma as recorrências pausadas cuja data de retomada chegou. */
+    int resumeDueRecurrences();
 }

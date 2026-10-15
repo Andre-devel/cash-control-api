@@ -215,8 +215,19 @@ public class RecurrenceServiceImpl implements RecurrenceService {
     @Override
     @Transactional
     public RecurrenceRuleResponse resumeRecurrence(UUID ruleId, UUID userId) {
-        RecurrenceRule rule = findOwnedRule(ruleId, userId);
+        return toRuleResponse(resume(findOwnedRule(ruleId, userId)));
+    }
 
+    @Override
+    @Transactional
+    public int resumeDueRecurrences() {
+        List<RecurrenceRule> due = recurrenceRepository
+                .findAllByStatusAndResumeAtLessThanEqualAndDeletedAtIsNull(RecurrenceStatus.PAUSED, Instant.now());
+        due.forEach(this::resume);
+        return due.size();
+    }
+
+    private RecurrenceRule resume(RecurrenceRule rule) {
         if (rule.getStatus() != RecurrenceStatus.PAUSED) {
             throw new BusinessRuleException("Apenas recorrências PAUSADAS podem ser retomadas. Status atual: " + rule.getStatus());
         }
@@ -236,7 +247,7 @@ public class RecurrenceServiceImpl implements RecurrenceService {
             rule.setStatus(RecurrenceStatus.ENDED);
             rule.setNextOccurrenceDate(null);
             rule = recurrenceRepository.save(rule);
-            return toRuleResponse(rule);
+            return rule;
         }
 
         List<Transaction> newInstances = new ArrayList<>();
@@ -261,7 +272,7 @@ public class RecurrenceServiceImpl implements RecurrenceService {
         }
 
         rule = recurrenceRepository.save(rule);
-        return toRuleResponse(rule);
+        return rule;
     }
 
     @Override

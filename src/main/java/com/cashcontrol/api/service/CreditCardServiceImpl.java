@@ -232,7 +232,11 @@ public class CreditCardServiceImpl implements CreditCardService {
         }
 
         BigDecimal remaining = invoice.getTotalAmount().subtract(invoice.getPaidAmount());
-        BigDecimal paymentAmount = request.amount().min(remaining);
+        if (request.amount().compareTo(remaining) > 0) {
+            throw new BusinessRuleException(
+                    "O valor informado é maior que o restante da fatura (" + remaining.toPlainString() + ").");
+        }
+        BigDecimal paymentAmount = request.amount();
 
         LocalDate paymentDate = request.paymentDate() != null ? request.paymentDate() : LocalDate.now();
 

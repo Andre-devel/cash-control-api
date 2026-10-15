@@ -388,7 +388,8 @@ public class TransactionServiceImpl implements TransactionService {
         boolean valid = switch (from) {
             case PENDING -> to == TransactionStatus.PAID || to == TransactionStatus.OVERDUE || to == TransactionStatus.CANCELLED;
             case OVERDUE -> to == TransactionStatus.PAID || to == TransactionStatus.CANCELLED;
-            case PAID -> false;
+            // Igual ao POST /{id}/cancel: estornar um lançamento pago é cancelá-lo.
+            case PAID -> to == TransactionStatus.CANCELLED;
             case CANCELLED -> false;
         };
         if (!valid) {

@@ -103,7 +103,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID")
     int reopenInvoicePurchases(@Param("invoiceId") UUID invoiceId);
 
-    long countByAccount_IdAndUserIdAndStatusNot(UUID accountId, UUID userId, TransactionStatus status);
+    boolean existsByAccount_IdAndUserIdAndStatusNotAndTypeNot(
+            UUID accountId, UUID userId, TransactionStatus status, TransactionType type);
 
     List<Transaction> findAllByTransferGroupId(UUID transferGroupId);
 
@@ -135,6 +136,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     String FILTER_PREDICATES = """
             WHERE t.userId = :userId
+            AND t.account.deletedAt IS NULL
             AND (:accountId IS NULL OR t.account.id = :accountId)
             AND (:type IS NULL OR t.type = :type)
             AND (:status IS NULL OR t.status = :status)

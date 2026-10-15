@@ -19,6 +19,7 @@ import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.AccountServiceImpl;
+import com.cashcontrol.api.service.AttachmentService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -51,6 +52,7 @@ class AccountServiceTest {
     @Mock private AccountRepository accountRepository;
     @Mock private TransactionRepository transactionRepository;
     @Mock private PaymentMethodRepository paymentMethodRepository;
+    @Mock private AttachmentService attachmentService;
     @InjectMocks private AccountServiceImpl accountService;
 
     private UUID userId;
@@ -217,12 +219,12 @@ class AccountServiceTest {
         when(transactionRepository.sumPaidAmountByAccountIdAndUserId(accountId, userId))
                 .thenReturn(BigDecimal.ZERO);
 
-        EditAccountRequest request = new EditAccountRequest("New Name", AccountType.SAVINGS, "USD", "desc", 1);
+        EditAccountRequest request = new EditAccountRequest("New Name", AccountType.SAVINGS, "BRL", "desc", 1);
         AccountResponse response = accountService.editAccount(accountId, request, userId);
 
         assertThat(account.getName()).isEqualTo("New Name");
         assertThat(account.getType()).isEqualTo(AccountType.SAVINGS);
-        assertThat(account.getCurrencyCode()).isEqualTo("USD");
+        assertThat(account.getCurrencyCode()).isEqualTo("BRL");
         assertThat(response).isNotNull();
     }
 
@@ -294,8 +296,9 @@ class AccountServiceTest {
     void deleteAccount_noTransactions_succeeds() {
         when(accountRepository.findByIdAndUserIdAndDeletedAtIsNull(accountId, userId))
                 .thenReturn(Optional.of(account));
-        when(transactionRepository.countByAccount_IdAndUserIdAndStatusNot(accountId, userId, TransactionStatus.CANCELLED))
-                .thenReturn(0L);
+        when(transactionRepository.existsByAccount_IdAndUserIdAndStatusNotAndTypeNot(
+                accountId, userId, TransactionStatus.CANCELLED, TransactionType.MANUAL_ADJUSTMENT))
+                .thenReturn(false);
         when(accountRepository.save(account)).thenReturn(account);
 
         accountService.deleteAccount(accountId, userId);
@@ -304,11 +307,12 @@ class AccountServiceTest {
     }
 
     @Test
-    void deleteAccount_onlySeedTransaction_succeeds() {
+    void deleteAccount_onlyAdjustments_succeeds() {
         when(accountRepository.findByIdAndUserIdAndDeletedAtIsNull(accountId, userId))
                 .thenReturn(Optional.of(account));
-        when(transactionRepository.countByAccount_IdAndUserIdAndStatusNot(accountId, userId, TransactionStatus.CANCELLED))
-                .thenReturn(1L);
+        when(transactionRepository.existsByAccount_IdAndUserIdAndStatusNotAndTypeNot(
+                accountId, userId, TransactionStatus.CANCELLED, TransactionType.MANUAL_ADJUSTMENT))
+                .thenReturn(false);
         when(accountRepository.save(account)).thenReturn(account);
 
         accountService.deleteAccount(accountId, userId);
@@ -320,8 +324,9 @@ class AccountServiceTest {
     void deleteAccount_hasTransactions_throwsBusinessRuleException() {
         when(accountRepository.findByIdAndUserIdAndDeletedAtIsNull(accountId, userId))
                 .thenReturn(Optional.of(account));
-        when(transactionRepository.countByAccount_IdAndUserIdAndStatusNot(accountId, userId, TransactionStatus.CANCELLED))
-                .thenReturn(5L);
+        when(transactionRepository.existsByAccount_IdAndUserIdAndStatusNotAndTypeNot(
+                accountId, userId, TransactionStatus.CANCELLED, TransactionType.MANUAL_ADJUSTMENT))
+                .thenReturn(true);
 
         assertThatThrownBy(() -> accountService.deleteAccount(accountId, userId))
                 .isInstanceOf(BusinessRuleException.class)

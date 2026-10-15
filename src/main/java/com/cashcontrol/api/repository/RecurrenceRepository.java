@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -18,6 +19,9 @@ public interface RecurrenceRepository extends JpaRepository<RecurrenceRule, UUID
     Optional<RecurrenceRule> findByIdAndUserIdAndDeletedAtIsNull(UUID id, UUID userId);
 
     List<RecurrenceRule> findAllByUserIdAndDeletedAtIsNull(UUID userId);
+
+    List<RecurrenceRule> findAllByStatusAndResumeAtLessThanEqualAndDeletedAtIsNull(
+            RecurrenceStatus status, Instant resumeAt);
 
     @Query("SELECT r FROM RecurrenceRule r " +
            "WHERE r.status = 'ACTIVE' " +

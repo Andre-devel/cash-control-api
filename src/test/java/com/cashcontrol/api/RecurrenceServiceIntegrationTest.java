@@ -380,4 +380,20 @@ class RecurrenceServiceIntegrationTest {
         assertThatThrownBy(() -> recurrenceService.getRecurrence(created.rule().id(), otherUser))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
+
+    @Test
+    void resumeDueRecurrences_reactivatesPausedRulesWhoseResumeDateArrived() {
+        RecurrenceCreationResponse created = recurrenceService.createRecurrence(
+                new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
+                        new BigDecimal("80.00"), "Academia", null, null,
+                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY),
+                userId);
+        UUID ruleId = created.rule().id();
+        recurrenceService.pauseRecurrence(ruleId, new PauseRecurrenceRequest(LocalDate.now()), userId);
+
+        int resumed = recurrenceService.resumeDueRecurrences();
+
+        assertThat(resumed).isEqualTo(1);
+        assertThat(recurrenceService.getRecurrence(ruleId, userId).status()).isEqualTo(RecurrenceStatus.ACTIVE);
+    }
 }

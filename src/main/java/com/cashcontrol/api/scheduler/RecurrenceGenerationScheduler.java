@@ -21,6 +21,9 @@ public class RecurrenceGenerationScheduler {
     @Scheduled(cron = "0 0 2 * * *")
     @Transactional
     public void generateRecurrences() {
+        // Antes da geração: a retomada já gera as próximas ocorrências da regra reativada.
+        int resumed = recurrenceService.resumeDueRecurrences();
+        log.info("Recurrence auto-resume complete: resumed={}", resumed);
         int count = recurrenceService.generatePendingInstances(LOOKAHEAD_DAYS);
         log.info("Recurrence generation complete: generated={}", count);
     }

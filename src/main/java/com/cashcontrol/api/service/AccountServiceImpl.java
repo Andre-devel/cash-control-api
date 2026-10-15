@@ -34,6 +34,7 @@ public class AccountServiceImpl implements AccountService {
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
     private final PaymentMethodRepository paymentMethodRepository;
+    private final AttachmentService attachmentService;
 
     @Override
     @Transactional
@@ -93,8 +94,9 @@ public class AccountServiceImpl implements AccountService {
 
         account.setName(request.name());
         account.setType(request.type());
-        if (request.currencyCode() != null) {
-            account.setCurrencyCode(request.currencyCode());
+        // A moeda é fixa: o saldo é a soma dos lançamentos, todos gravados nela.
+        if (request.currencyCode() != null && !request.currencyCode().equals(account.getCurrencyCode())) {
+            throw new BusinessRuleException("A moeda da conta não pode ser alterada.");
         }
         account.setDescription(request.description());
         if (request.sortOrder() != null) {
@@ -133,9 +135,12 @@ public class AccountServiceImpl implements AccountService {
     public void deleteAccount(UUID id, UUID userId) {
         Account account = findActiveAccount(id, userId);
 
-        long nonCancelledCount = transactionRepository
-                .countByAccount_IdAndUserIdAndStatusNot(id, userId, TransactionStatus.CANCELLED);
-        if (nonCancelledCount > 1) {
+        // Ajustes (o saldo inicial entre eles) só mexem no saldo; qualquer outro lançamento
+        // vivo é histórico que sumiria junto com a conta.
+        boolean hasTransactions = transactionRepository
+                .existsByAccount_IdAndUserIdAndStatusNotAndTypeNot(
+                        id, userId, TransactionStatus.CANCELLED, TransactionType.MANUAL_ADJUSTMENT);
+        if (hasTransactions) {
             throw new BusinessRuleException(
                     "A conta não pode ser excluída porque possui transações. Arquive-a em vez disso.");
         }
@@ -182,6 +187,9 @@ public class AccountServiceImpl implements AccountService {
         }
         if (destination.getArchivedAt() != null) {
             throw new BusinessRuleException("A conta de destino está arquivada e não pode ser usada em transferências.");
+        }
+        if (!source.getCurrencyCode().equals(destination.getCurrencyCode())) {
+            throw new BusinessRuleException("Transferências só são permitidas entre contas da mesma moeda.");
         }
 
         UUID transferGroupId = UUID.randomUUID();
@@ -236,6 +244,7 @@ public class AccountServiceImpl implements AccountService {
             }
         }
 
+        attachmentService.deleteAllForTransactions(legs.stream().map(Transaction::getId).toList());
         transactionRepository.deleteAll(legs);
     }
 
