@@ -25,7 +25,6 @@ import com.cashcontrol.api.dto.response.InvoiceResponse;
 import com.cashcontrol.api.dto.response.LimitUsageResponse;
 import com.cashcontrol.api.dto.response.SpendingByCategoryResponse;
 import com.cashcontrol.api.repository.AccountRepository;
-import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CreditCardRepository;
 import com.cashcontrol.api.repository.InvoiceItemRepository;
 import com.cashcontrol.api.repository.InvoiceRepository;
@@ -60,7 +59,7 @@ public class CreditCardServiceImpl implements CreditCardService {
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
     private final SharedLimitGroupRepository sharedLimitGroupRepository;
-    private final CategoryRepository categoryRepository;
+    private final CategoryResolver categoryResolver;
     private final PaymentMethodRepository paymentMethodRepository;
     private final InvoiceCycleCalculator cycleCalculator;
 
@@ -176,17 +175,8 @@ public class CreditCardServiceImpl implements CreditCardService {
 
         Invoice invoice = getOrCreateInvoice(card, cycleInfo);
 
-        Category category = null;
-        if (request.categoryId() != null) {
-            category = categoryRepository.findById(request.categoryId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + request.categoryId()));
-        }
-        Category subcategory = null;
-        if (request.subcategoryId() != null) {
-            subcategory = categoryRepository.findById(request.subcategoryId())
-                    .orElseThrow(() -> new ResourceNotFoundException(
-                            "Subcategory not found: " + request.subcategoryId()));
-        }
+        Category category = categoryResolver.resolve(request.categoryId(), userId);
+        Category subcategory = categoryResolver.resolveSubcategory(request.subcategoryId(), category, userId);
 
         InvoiceItem item = new InvoiceItem();
         item.setUserId(userId);

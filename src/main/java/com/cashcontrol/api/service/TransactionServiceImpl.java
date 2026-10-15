@@ -23,7 +23,6 @@ import com.cashcontrol.api.dto.response.TagResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.dto.response.TransactionSummaryResponse;
 import com.cashcontrol.api.repository.AccountRepository;
-import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CategoryRuleRepository;
 import com.cashcontrol.api.repository.CreditCardRepository;
 import com.cashcontrol.api.repository.PaymentMethodRepository;
@@ -53,7 +52,7 @@ public class TransactionServiceImpl implements TransactionService {
     private final TransactionRepository transactionRepository;
     private final AccountRepository accountRepository;
     private final AttachmentService attachmentService;
-    private final CategoryRepository categoryRepository;
+    private final CategoryResolver categoryResolver;
     private final CategoryRuleRepository categoryRuleRepository;
     private final TagRepository tagRepository;
     private final PaymentMethodRepository paymentMethodRepository;
@@ -358,17 +357,9 @@ public class TransactionServiceImpl implements TransactionService {
 
     private void applyCategory(Transaction tx, UUID categoryId, UUID subcategoryId, UUID userId, String description) {
         if (categoryId != null) {
-            Category category = categoryRepository.findById(categoryId)
-                    .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + categoryId));
+            Category category = categoryResolver.resolve(categoryId, userId);
             tx.setCategory(category);
-
-            if (subcategoryId != null) {
-                Category subcategory = categoryRepository.findById(subcategoryId)
-                        .orElseThrow(() -> new ResourceNotFoundException("Subcategory not found: " + subcategoryId));
-                tx.setSubcategory(subcategory);
-            } else {
-                tx.setSubcategory(null);
-            }
+            tx.setSubcategory(categoryResolver.resolveSubcategory(subcategoryId, category, userId));
         } else if (categoryId == null && description != null && tx.getCategory() == null) {
             applyCategoryRule(tx, userId, description);
         }

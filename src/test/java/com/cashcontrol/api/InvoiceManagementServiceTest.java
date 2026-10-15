@@ -19,6 +19,7 @@ import com.cashcontrol.api.repository.InvoiceItemRepository;
 import com.cashcontrol.api.repository.InvoiceRepository;
 import com.cashcontrol.api.repository.MerchantAliasRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
+import com.cashcontrol.api.service.CategoryResolver;
 import com.cashcontrol.api.service.InvoiceManagementServiceImpl;
 import com.cashcontrol.api.service.MerchantAliasService;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -71,7 +73,7 @@ class InvoiceManagementServiceTest {
         userId = UUID.randomUUID();
         service = new InvoiceManagementServiceImpl(
                 invoiceRepository, invoiceItemRepository, creditCardRepository,
-                categoryRepository, transactionRepository, merchantAliasRepository, merchantAliasService);
+                new CategoryResolver(categoryRepository), transactionRepository, merchantAliasRepository, merchantAliasService);
 
         when(invoiceItemRepository.findAllByInvoice_IdAndCancelledAtIsNull(any(), any()))
                 .thenReturn(new PageImpl<>(List.of()));
@@ -129,7 +131,7 @@ class InvoiceManagementServiceTest {
         Transaction tx = new Transaction();
         item.setTransaction(tx);
         when(invoiceItemRepository.findByIdAndUserId(item.getId(), userId)).thenReturn(Optional.of(item));
-        when(categoryRepository.findById(category.getId())).thenReturn(Optional.of(category));
+        when(categoryRepository.findByIdVisibleToUser(eq(category.getId()), any())).thenReturn(Optional.of(category));
 
         UpdateInvoiceItemRequest request = new UpdateInvoiceItemRequest(
                 "Claude - mensalidade", category.getId(), null, false, false);
@@ -157,7 +159,7 @@ class InvoiceManagementServiceTest {
         InvoiceItem item = item("posto", "POSTO 24 HORAS", "POSTO 24 HORAS");
         UUID categoryId = UUID.randomUUID();
         when(invoiceItemRepository.findByIdAndUserId(item.getId(), userId)).thenReturn(Optional.of(item));
-        when(categoryRepository.findById(categoryId)).thenReturn(Optional.empty());
+        when(categoryRepository.findByIdVisibleToUser(eq(categoryId), any())).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.updateItem(item.getId(),
                 new UpdateInvoiceItemRequest("Posto novo", categoryId, null, false, false), userId))

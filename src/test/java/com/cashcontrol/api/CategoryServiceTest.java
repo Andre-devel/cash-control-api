@@ -15,12 +15,12 @@ import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CategoryRuleRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
+import com.cashcontrol.api.service.CategoryResolver;
 import com.cashcontrol.api.service.CategoryServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -45,13 +45,15 @@ class CategoryServiceTest {
     @Mock private CategoryRuleRepository categoryRuleRepository;
     @Mock private AccountRepository accountRepository;
     @Mock private TransactionRepository transactionRepository;
-    @InjectMocks private CategoryServiceImpl categoryService;
+    private CategoryServiceImpl categoryService;
 
     private UUID userId;
 
     @BeforeEach
     void setUp() {
         userId = UUID.randomUUID();
+        categoryService = new CategoryServiceImpl(categoryRepository, new CategoryResolver(categoryRepository),
+                categoryRuleRepository, accountRepository, transactionRepository);
     }
 
     // ── listCategories ────────────────────────────────────────────────────────
@@ -155,7 +157,7 @@ class CategoryServiceTest {
         Category parent = buildCategory(userId, null, "Food", false, false, false);
         ReflectionTestUtils.setField(parent, "id", parentId);
 
-        when(categoryRepository.findById(parentId)).thenReturn(Optional.of(parent));
+        when(categoryRepository.findByIdVisibleToUser(eq(parentId), any())).thenReturn(Optional.of(parent));
         when(categoryRepository.existsByUserIdAndParentIdAndNameAndArchivedAtIsNull(userId, parentId, "Restaurants"))
                 .thenReturn(false);
         when(categoryRepository.save(any())).thenAnswer(inv -> {
@@ -181,7 +183,7 @@ class CategoryServiceTest {
         Category parent = buildCategory(userId, grandparent, "Sub", false, false, false);
         ReflectionTestUtils.setField(parent, "id", parentId);
 
-        when(categoryRepository.findById(parentId)).thenReturn(Optional.of(parent));
+        when(categoryRepository.findByIdVisibleToUser(eq(parentId), any())).thenReturn(Optional.of(parent));
 
         assertThatThrownBy(() -> categoryService.createCategory(
                 new CreateCategoryRequest("DeepSub", parentId, null, null, 0), userId))
@@ -202,7 +204,7 @@ class CategoryServiceTest {
     @Test
     void createCategory_parentNotFound_throws404() {
         UUID parentId = UUID.randomUUID();
-        when(categoryRepository.findById(parentId)).thenReturn(Optional.empty());
+        when(categoryRepository.findByIdVisibleToUser(eq(parentId), any())).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> categoryService.createCategory(
                 new CreateCategoryRequest("Sub", parentId, null, null, 0), userId))
@@ -394,7 +396,7 @@ class CategoryServiceTest {
         Category cat = buildCategory(null, null, "Food", true, false, false);
         ReflectionTestUtils.setField(cat, "id", catId);
 
-        when(categoryRepository.findById(catId)).thenReturn(Optional.of(cat));
+        when(categoryRepository.findByIdVisibleToUser(eq(catId), any())).thenReturn(Optional.of(cat));
         when(categoryRuleRepository.save(any())).thenAnswer(inv -> {
             CategoryRule r = inv.getArgument(0);
             ReflectionTestUtils.setField(r, "id", UUID.randomUUID());
@@ -423,8 +425,8 @@ class CategoryServiceTest {
         Category sub = buildCategory(null, otherCat, "Fuel", true, false, false);
         ReflectionTestUtils.setField(sub, "id", subId);
 
-        when(categoryRepository.findById(catId)).thenReturn(Optional.of(cat));
-        when(categoryRepository.findById(subId)).thenReturn(Optional.of(sub));
+        when(categoryRepository.findByIdVisibleToUser(eq(catId), any())).thenReturn(Optional.of(cat));
+        when(categoryRepository.findByIdVisibleToUser(eq(subId), any())).thenReturn(Optional.of(sub));
 
         assertThatThrownBy(() -> categoryService.createRule(
                 new CreateCategoryRuleRequest("Gas", catId, subId, null, 0), userId))
@@ -435,7 +437,7 @@ class CategoryServiceTest {
     @Test
     void createRule_categoryNotFound_throws404() {
         UUID catId = UUID.randomUUID();
-        when(categoryRepository.findById(catId)).thenReturn(Optional.empty());
+        when(categoryRepository.findByIdVisibleToUser(eq(catId), any())).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> categoryService.createRule(
                 new CreateCategoryRuleRequest("keyword", catId, null, null, 0), userId))

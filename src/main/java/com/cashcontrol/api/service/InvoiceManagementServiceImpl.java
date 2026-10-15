@@ -13,7 +13,6 @@ import com.cashcontrol.api.dto.response.InvoiceResponse;
 import com.cashcontrol.api.dto.response.InvoiceSummaryResponse;
 import com.cashcontrol.api.dto.response.MerchantScopeResponse;
 import com.cashcontrol.api.dto.response.UpdateInvoiceItemResponse;
-import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CreditCardRepository;
 import com.cashcontrol.api.repository.InvoiceItemRepository;
 import com.cashcontrol.api.repository.InvoiceRepository;
@@ -42,7 +41,7 @@ public class InvoiceManagementServiceImpl implements InvoiceManagementService {
     private final InvoiceRepository invoiceRepository;
     private final InvoiceItemRepository invoiceItemRepository;
     private final CreditCardRepository creditCardRepository;
-    private final CategoryRepository categoryRepository;
+    private final CategoryResolver categoryResolver;
     private final TransactionRepository transactionRepository;
     private final MerchantAliasRepository merchantAliasRepository;
     private final MerchantAliasService merchantAliasService;
@@ -122,8 +121,10 @@ public class InvoiceManagementServiceImpl implements InvoiceManagementService {
         String merchantKeyBeforeEdit = item.getMerchantKey();
 
         String description = request.description().trim();
-        Category category = resolveCategory(request.categoryId());
-        Category subcategory = category != null ? resolveCategory(request.subcategoryId()) : null;
+        Category category = categoryResolver.resolve(request.categoryId(), userId);
+        Category subcategory = category != null
+                ? categoryResolver.resolveSubcategory(request.subcategoryId(), category, userId)
+                : null;
 
         applyDescriptionAndCategory(item, description, category, subcategory);
         invoiceItemRepository.save(item);
@@ -236,14 +237,6 @@ public class InvoiceManagementServiceImpl implements InvoiceManagementService {
     private Invoice requireInvoice(UUID invoiceId, UUID userId) {
         return invoiceRepository.findByIdAndUserId(invoiceId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Invoice not found: " + invoiceId));
-    }
-
-    private Category resolveCategory(UUID categoryId) {
-        if (categoryId == null) {
-            return null;
-        }
-        return categoryRepository.findById(categoryId)
-                .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + categoryId));
     }
 
     private void applyDescriptionAndCategory(InvoiceItem item, String description, Category category, Category subcategory) {

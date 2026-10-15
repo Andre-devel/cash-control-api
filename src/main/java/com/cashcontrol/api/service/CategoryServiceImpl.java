@@ -38,6 +38,7 @@ public class CategoryServiceImpl implements CategoryService {
     private static final int MAX_SUGGESTIONS = 5;
 
     private final CategoryRepository categoryRepository;
+    private final CategoryResolver categoryResolver;
     private final CategoryRuleRepository categoryRuleRepository;
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
@@ -76,8 +77,7 @@ public class CategoryServiceImpl implements CategoryService {
     public CategoryResponse createCategory(CreateCategoryRequest request, UUID userId) {
         Category parent = null;
         if (request.parentId() != null) {
-            parent = categoryRepository.findById(request.parentId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Parent category not found: " + request.parentId()));
+            parent = categoryResolver.resolve(request.parentId(), userId);
 
             if (parent.getParent() != null) {
                 throw new BusinessRuleException("Não é possível criar uma subcategoria dentro de outra subcategoria. A profundidade máxima é 2.");
@@ -217,17 +217,8 @@ public class CategoryServiceImpl implements CategoryService {
     @Override
     @Transactional
     public CategoryRuleResponse createRule(CreateCategoryRuleRequest request, UUID userId) {
-        Category category = categoryRepository.findById(request.categoryId())
-                .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + request.categoryId()));
-
-        Category subcategory = null;
-        if (request.subcategoryId() != null) {
-            subcategory = categoryRepository.findById(request.subcategoryId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Subcategory not found: " + request.subcategoryId()));
-            if (subcategory.getParent() == null || !subcategory.getParent().getId().equals(category.getId())) {
-                throw new BusinessRuleException("A subcategoria não pertence à categoria informada.");
-            }
-        }
+        Category category = categoryResolver.resolve(request.categoryId(), userId);
+        Category subcategory = categoryResolver.resolveSubcategory(request.subcategoryId(), category, userId);
 
         Account account = null;
         if (request.accountId() != null) {

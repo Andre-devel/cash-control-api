@@ -20,7 +20,6 @@ import com.cashcontrol.api.dto.response.RecurrenceCreationResponse;
 import com.cashcontrol.api.dto.response.RecurrenceRuleResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.repository.AccountRepository;
-import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.RecurrenceRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
@@ -46,7 +45,7 @@ public class RecurrenceServiceImpl implements RecurrenceService {
     private final RecurrenceRepository recurrenceRepository;
     private final TransactionRepository transactionRepository;
     private final AccountRepository accountRepository;
-    private final CategoryRepository categoryRepository;
+    private final CategoryResolver categoryResolver;
     private final RecurrenceGeneratorService generatorService;
     private final PaymentMethodRepository paymentMethodRepository;
     private final TransactionService transactionService;
@@ -61,8 +60,8 @@ public class RecurrenceServiceImpl implements RecurrenceService {
             throw new BusinessRuleException("Não é possível criar uma recorrência em uma conta arquivada.");
         }
 
-        Category category = resolveCategory(request.categoryId());
-        Category subcategory = resolveSubcategory(request.subcategoryId(), category);
+        Category category = categoryResolver.resolve(request.categoryId(), userId);
+        Category subcategory = categoryResolver.resolveSubcategory(request.subcategoryId(), category, userId);
 
         RecurrenceRule rule = new RecurrenceRule();
         rule.setUserId(userId);
@@ -134,10 +133,8 @@ public class RecurrenceServiceImpl implements RecurrenceService {
             }
         }
 
-        Category category = request.categoryId() != null ? resolveCategory(request.categoryId()) : null;
-        Category subcategory = request.subcategoryId() != null
-                ? resolveSubcategory(request.subcategoryId(), category)
-                : null;
+        Category category = categoryResolver.resolve(request.categoryId(), userId);
+        Category subcategory = categoryResolver.resolveSubcategory(request.subcategoryId(), category, userId);
 
         // Update master rule
         if (request.amount() != null) rule.setAmount(request.amount());
@@ -381,18 +378,6 @@ public class RecurrenceServiceImpl implements RecurrenceService {
         tx.setSubcategory(rule.getSubcategory());
         tx.setPaymentMethod(otherMethod);
         return tx;
-    }
-
-    private Category resolveCategory(UUID categoryId) {
-        if (categoryId == null) return null;
-        return categoryRepository.findById(categoryId)
-                .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + categoryId));
-    }
-
-    private Category resolveSubcategory(UUID subcategoryId, Category parent) {
-        if (subcategoryId == null) return null;
-        return categoryRepository.findById(subcategoryId)
-                .orElseThrow(() -> new ResourceNotFoundException("Subcategory not found: " + subcategoryId));
     }
 
     private RecurrenceRuleResponse toRuleResponse(RecurrenceRule rule) {

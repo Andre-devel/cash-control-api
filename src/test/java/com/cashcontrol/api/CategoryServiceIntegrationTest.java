@@ -150,6 +150,15 @@ class CategoryServiceIntegrationTest {
     }
 
     @Test
+    void createTransaction_rejectsCategoryOwnedByAnotherUser() {
+        CategoryResponse foreign = categoryService.createCategory(
+                new CreateCategoryRequest("Categoria do B", null, null, null, 0), userBId);
+
+        assertThatThrownBy(() -> createPaidTransaction("Compra", foreign.id()))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
     void suggestCategory_frequencyBasedResult() {
         CategoryResponse catA = categoryService.createCategory(
                 new CreateCategoryRequest("Mercado Category", null, null, null, 0), userId);

@@ -26,7 +26,6 @@ import com.cashcontrol.api.dto.response.TagResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.dto.response.TransactionSummaryResponse;
 import com.cashcontrol.api.repository.AccountRepository;
-import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.InstallmentSeriesRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
@@ -50,7 +49,7 @@ public class InstallmentServiceImpl implements InstallmentService {
     private final InstallmentSeriesRepository installmentSeriesRepository;
     private final TransactionRepository transactionRepository;
     private final AccountRepository accountRepository;
-    private final CategoryRepository categoryRepository;
+    private final CategoryResolver categoryResolver;
     private final AttachmentService attachmentService;
     private final TransactionService transactionService;
     private final CreditCardService creditCardService;
@@ -86,8 +85,8 @@ public class InstallmentServiceImpl implements InstallmentService {
             throw new BusinessRuleException("Não é possível criar um parcelamento em uma conta arquivada.");
         }
 
-        Category category = resolveCategory(request.categoryId());
-        Category subcategory = resolveSubcategory(request.subcategoryId(), category);
+        Category category = categoryResolver.resolve(request.categoryId(), userId);
+        Category subcategory = categoryResolver.resolveSubcategory(request.subcategoryId(), category, userId);
 
         PaymentMethod paymentMethod = transactionService.resolvePaymentMethod(request.paymentMethod());
         CreditCard creditCard = transactionService.validateAndResolveCreditCard(
@@ -160,8 +159,8 @@ public class InstallmentServiceImpl implements InstallmentService {
             throw new BusinessRuleException("Não é possível editar um parcelamento quitado.");
         }
 
-        Category category = resolveCategory(request.categoryId());
-        Category subcategory = resolveSubcategory(request.subcategoryId(), category);
+        Category category = categoryResolver.resolve(request.categoryId(), userId);
+        Category subcategory = categoryResolver.resolveSubcategory(request.subcategoryId(), category, userId);
         Account account = (request.accountId() != null)
                 ? accountRepository.findByIdAndUserIdAndDeletedAtIsNull(request.accountId(), userId)
                         .orElseThrow(() -> new ResourceNotFoundException("Account not found: " + request.accountId()))
@@ -266,16 +265,9 @@ public class InstallmentServiceImpl implements InstallmentService {
             tx.setPaymentDate(request.paymentDate());
         }
         if (request.categoryId() != null) {
-            Category category = categoryRepository.findById(request.categoryId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + request.categoryId()));
+            Category category = categoryResolver.resolve(request.categoryId(), userId);
             tx.setCategory(category);
-            if (request.subcategoryId() != null) {
-                Category sub = categoryRepository.findById(request.subcategoryId())
-                        .orElseThrow(() -> new ResourceNotFoundException("Subcategory not found: " + request.subcategoryId()));
-                tx.setSubcategory(sub);
-            } else {
-                tx.setSubcategory(null);
-            }
+            tx.setSubcategory(categoryResolver.resolveSubcategory(request.subcategoryId(), category, userId));
         }
 
         tx = transactionRepository.save(tx);
@@ -397,18 +389,6 @@ public class InstallmentServiceImpl implements InstallmentService {
     private InstallmentSeries findOwnedSeries(UUID seriesId, UUID userId) {
         return installmentSeriesRepository.findByIdAndUserId(seriesId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Installment series not found: " + seriesId));
-    }
-
-    private Category resolveCategory(UUID categoryId) {
-        if (categoryId == null) return null;
-        return categoryRepository.findById(categoryId)
-                .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + categoryId));
-    }
-
-    private Category resolveSubcategory(UUID subcategoryId, Category parent) {
-        if (subcategoryId == null) return null;
-        return categoryRepository.findById(subcategoryId)
-                .orElseThrow(() -> new ResourceNotFoundException("Subcategory not found: " + subcategoryId));
     }
 
     private InstallmentSeriesResponse toSeriesResponse(InstallmentSeries series) {
