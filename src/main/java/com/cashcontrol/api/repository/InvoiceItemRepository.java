@@ -1,7 +1,6 @@
 package com.cashcontrol.api.repository;
 
 import com.cashcontrol.api.domain.entity.InvoiceItem;
-import com.cashcontrol.api.domain.entity.InvoiceStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -9,7 +8,6 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
@@ -74,12 +72,6 @@ public interface InvoiceItemRepository extends JpaRepository<InvoiceItem, UUID> 
     List<Object[]> findSpendingByCategory(@Param("cardId") UUID cardId, @Param("userId") UUID userId,
                                           @Param("from") LocalDate from, @Param("to") LocalDate to);
 
-    @Query("SELECT COALESCE(SUM(ii.amount), 0) FROM InvoiceItem ii " +
-           "WHERE ii.invoice.creditCard.id = :cardId " +
-           "AND ii.cancelledAt IS NULL " +
-           "AND ii.invoice.status IN :statuses")
-    BigDecimal sumAmountByCardIdAndInvoiceStatuses(@Param("cardId") UUID cardId,
-                                                   @Param("statuses") List<InvoiceStatus> statuses);
 
     /**
      * Quantos itens não cancelados cada fatura tem, e quantos deles vieram de importação

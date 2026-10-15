@@ -1,12 +1,15 @@
 package com.cashcontrol.api;
 
 import com.cashcontrol.api.config.PostgresTestContainerConfig;
+import com.cashcontrol.api.domain.entity.AccountType;
 import com.cashcontrol.api.domain.entity.CardBrand;
 import com.cashcontrol.api.domain.entity.InvoiceStatus;
 import com.cashcontrol.api.domain.exception.BusinessRuleException;
 import com.cashcontrol.api.domain.exception.ConflictException;
+import com.cashcontrol.api.dto.request.CreateAccountRequest;
 import com.cashcontrol.api.dto.request.CreateCardRequest;
 import com.cashcontrol.api.dto.request.EditCardRequest;
+import com.cashcontrol.api.dto.request.PayInvoiceRequest;
 import com.cashcontrol.api.dto.request.RecordChargeRequest;
 import com.cashcontrol.api.dto.response.CreditCardResponse;
 import com.cashcontrol.api.dto.response.InvoiceItemResponse;
@@ -14,6 +17,7 @@ import com.cashcontrol.api.dto.response.InvoiceResponse;
 import com.cashcontrol.api.dto.response.LimitUsageResponse;
 import com.cashcontrol.api.dto.response.SpendingByCategoryResponse;
 import com.cashcontrol.api.repository.InvoiceRepository;
+import com.cashcontrol.api.service.AccountService;
 import com.cashcontrol.api.service.CategoryService;
 import com.cashcontrol.api.service.CreditCardService;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,6 +45,7 @@ class CreditCardServiceIntegrationTest {
 
     @Autowired private CreditCardService creditCardService;
     @Autowired private CategoryService categoryService;
+    @Autowired private AccountService accountService;
     @Autowired private InvoiceRepository invoiceRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
 
@@ -264,6 +269,29 @@ class CreditCardServiceIntegrationTest {
         assertThat(limitUsage.creditLimit()).isEqualByComparingTo("5000.00");
         assertThat(limitUsage.usedLimit()).isEqualByComparingTo("300.00");
         assertThat(limitUsage.availableLimit()).isEqualByComparingTo("4700.00");
+    }
+
+    @Test
+    void getLimitUsage_partialPaymentOccupiesOnlyTheRemainderOnce() {
+        CreditCardResponse card = creditCardService.createCard(defaultRequest("Partial Limit Card"), userId);
+        UUID accountId = accountService.createAccount(
+                new CreateAccountRequest("Partial Limit Account", AccountType.CHECKING, "BRL", null, null, null),
+                userId).id();
+
+        // 2025-01 já fechou, então aceita pagamento.
+        creditCardService.recordCharge(card.id(),
+                new RecordChargeRequest("Compra", new BigDecimal("1000.00"), LocalDate.of(2025, 1, 5), null, null, null),
+                userId);
+        UUID invoiceId = invoiceRepository.findByCreditCard_IdAndReferenceMonth(card.id(), "2025-01")
+                .orElseThrow().getId();
+
+        creditCardService.payInvoice(invoiceId,
+                new PayInvoiceRequest(new BigDecimal("400.00"), accountId, LocalDate.of(2025, 2, 1)), userId);
+
+        // 600 rolam para a fatura seguinte como item rotativo; a parcial não pode contar de novo.
+        LimitUsageResponse limitUsage = creditCardService.getLimitUsage(card.id(), userId);
+        assertThat(limitUsage.usedLimit()).isEqualByComparingTo("600.00");
+        assertThat(limitUsage.availableLimit()).isEqualByComparingTo("4400.00");
     }
 
     @Test

@@ -323,9 +323,8 @@ public class CreditCardServiceImpl implements CreditCardService {
     public LimitUsageResponse getLimitUsage(UUID cardId, UUID userId) {
         CreditCard card = findActiveCard(cardId, userId);
 
-        BigDecimal usedLimit = invoiceItemRepository.sumAmountByCardIdAndInvoiceStatuses(
-                cardId, List.of(InvoiceStatus.OPEN, InvoiceStatus.CLOSED,
-                        InvoiceStatus.PARTIAL, InvoiceStatus.OVERDUE));
+        BigDecimal usedLimit = invoiceRepository.sumOutstandingByCardIdAndStatuses(
+                cardId, List.of(InvoiceStatus.OPEN, InvoiceStatus.CLOSED, InvoiceStatus.OVERDUE));
         if (usedLimit == null) {
             usedLimit = BigDecimal.ZERO;
         }
