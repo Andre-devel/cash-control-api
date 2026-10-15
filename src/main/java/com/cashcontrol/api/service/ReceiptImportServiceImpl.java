@@ -8,6 +8,7 @@ import com.cashcontrol.api.domain.entity.PaymentMethod;
 import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
+import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.domain.exception.BusinessRuleException;
 import com.cashcontrol.api.domain.exception.ConflictException;
 import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
@@ -125,6 +126,11 @@ public class ReceiptImportServiceImpl implements ReceiptImportService {
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found: " + request.accountId()));
         if (account.getArchivedAt() != null) {
             throw new BusinessRuleException("Não é possível lançar um comprovante em uma conta arquivada.");
+        }
+
+        // Comprovante de PIX é sempre um pagamento enviado ou recebido.
+        if (request.type() != TransactionType.EXPENSE && request.type() != TransactionType.INCOME) {
+            throw new BusinessRuleException("Comprovante só pode gerar receita ou despesa.");
         }
 
         boolean alreadyExists = !transactionRepository

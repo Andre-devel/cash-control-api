@@ -117,7 +117,8 @@ public class InstallmentServiceImpl implements InstallmentService {
             LocalDate paymentDate = request.firstPaymentDate().plusMonths(i);
             BigDecimal amount = (i == n - 1) ? lastAmount : baseAmount;
 
-            TransactionStatus status = (i == 0 && !request.firstPaymentDate().isAfter(today))
+            // No cartão nenhuma parcela nasce PAGA: quem as quita é o pagamento de cada fatura.
+            TransactionStatus status = (i == 0 && creditCard == null && !request.firstPaymentDate().isAfter(today))
                     ? TransactionStatus.PAID
                     : TransactionStatus.PENDING;
 
@@ -262,6 +263,9 @@ public class InstallmentServiceImpl implements InstallmentService {
             tx.setNotes(request.notes());
         }
         if (request.paymentDate() != null) {
+            if (tx.getCreditCard() != null) {
+                throw new BusinessRuleException(TransactionService.CARD_PURCHASE_PAID_BY_INVOICE);
+            }
             tx.setPaymentDate(request.paymentDate());
         }
         if (request.categoryId() != null) {
@@ -301,11 +305,13 @@ public class InstallmentServiceImpl implements InstallmentService {
         settlement.setUserId(userId);
         settlement.setAccount(series.getAccount());
         settlement.setType(TransactionType.EXPENSE);
-        settlement.setStatus(TransactionStatus.PAID);
+        // No cartão a quitação é mais uma cobrança na fatura, e sai da conta quando ela for paga.
+        boolean onCard = series.getCreditCard() != null;
+        settlement.setStatus(onCard ? TransactionStatus.PENDING : TransactionStatus.PAID);
         settlement.setAmount(request.settlementAmount());
-        settlement.setDescription("Early settlement: " + series.getDescription());
+        settlement.setDescription("Quitação antecipada: " + series.getDescription());
         settlement.setCompetenceDate(request.settlementDate());
-        settlement.setPaymentDate(request.settlementDate());
+        settlement.setPaymentDate(onCard ? null : request.settlementDate());
         settlement.setInstallmentSeries(series);
         settlement.setEarlySettlement(true);
         settlement.setCategory(series.getCategory());
@@ -338,20 +344,26 @@ public class InstallmentServiceImpl implements InstallmentService {
                         + " está com status: " + tx.getStatus());
             }
 
-            tx.setPaymentDate(request.newPaymentDate());
-
             if (request.adjustedAmount() != null) {
                 tx.setAmount(request.adjustedAmount());
             }
 
-            if (!request.newPaymentDate().isAfter(today)) {
-                tx.setStatus(TransactionStatus.PAID);
+            if (tx.getCreditCard() != null) {
+                // Antecipar no cartão é trazer a parcela para a fatura da nova data; ela
+                // continua PENDENTE até essa fatura ser paga.
+                tx.setCompetenceDate(request.newPaymentDate());
+            } else {
+                tx.setPaymentDate(request.newPaymentDate());
+                if (!request.newPaymentDate().isAfter(today)) {
+                    tx.setStatus(TransactionStatus.PAID);
+                }
             }
 
             updated.add(tx);
         }
 
         updated = transactionRepository.saveAll(updated);
+        updated.forEach(creditCardService::syncInvoiceItemForTransaction);
         return updated.stream().map(transactionService::toDetail).toList();
     }
 

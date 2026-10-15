@@ -9,6 +9,7 @@ import com.cashcontrol.api.domain.entity.RecurrenceRule;
 import com.cashcontrol.api.domain.entity.RecurrenceStatus;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
+import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.domain.exception.BusinessRuleException;
 import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
 import com.cashcontrol.api.dto.request.CreateRecurrenceRequest;
@@ -58,6 +59,11 @@ public class RecurrenceServiceImpl implements RecurrenceService {
 
         if (account.getArchivedAt() != null) {
             throw new BusinessRuleException("Não é possível criar uma recorrência em uma conta arquivada.");
+        }
+
+        if (request.type() != TransactionType.INCOME && request.type() != TransactionType.EXPENSE
+                && request.type() != TransactionType.REFUND) {
+            throw new BusinessRuleException("Recorrências só podem gerar receitas, despesas ou reembolsos.");
         }
 
         Category category = categoryResolver.resolve(request.categoryId(), userId);

@@ -65,6 +65,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("externalRefs") Collection<String> externalRefs);
 
     // TRANSFER amounts are stored signed: source leg = negative, destination leg = positive.
+    // INVOICE_PAYMENT is stored negative too. Card purchases (creditCard set) never touch the
+    // account balance: the money leaves the account through the INVOICE_PAYMENT that settles them.
     // MANUAL_ADJUSTMENT amounts are also signed (positive = increase, negative = decrease).
     @Query("SELECT COALESCE(SUM(CASE " +
            "WHEN t.type = com.cashcontrol.api.domain.entity.TransactionType.INCOME " +
@@ -73,10 +75,33 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "ELSE t.amount END), 0) " +
            "FROM Transaction t " +
            "WHERE t.account.id = :accountId AND t.userId = :userId " +
-           "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID")
+           "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
+           "AND t.creditCard IS NULL")
     BigDecimal sumPaidAmountByAccountIdAndUserId(
             @Param("accountId") UUID accountId,
             @Param("userId") UUID userId);
+
+    /**
+     * Marca como PAGAS as compras de uma fatura — o que o pagamento dela significa para cada
+     * compra. Só as que ainda estão em aberto: canceladas continuam canceladas.
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("UPDATE Transaction t SET t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID, " +
+           "t.paymentDate = :paymentDate " +
+           "WHERE t.id IN (SELECT ii.transaction.id FROM InvoiceItem ii " +
+           "               WHERE ii.invoice.id = :invoiceId AND ii.cancelledAt IS NULL) " +
+           "AND t.status IN (com.cashcontrol.api.domain.entity.TransactionStatus.PENDING, " +
+           "                 com.cashcontrol.api.domain.entity.TransactionStatus.OVERDUE)")
+    int markInvoicePurchasesPaid(@Param("invoiceId") UUID invoiceId, @Param("paymentDate") LocalDate paymentDate);
+
+    /** Desfaz {@link #markInvoicePurchasesPaid} quando a fatura é reaberta. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("UPDATE Transaction t SET t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PENDING, " +
+           "t.paymentDate = NULL " +
+           "WHERE t.id IN (SELECT ii.transaction.id FROM InvoiceItem ii " +
+           "               WHERE ii.invoice.id = :invoiceId AND ii.cancelledAt IS NULL) " +
+           "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID")
+    int reopenInvoicePurchases(@Param("invoiceId") UUID invoiceId);
 
     long countByAccount_IdAndUserIdAndStatusNot(UUID accountId, UUID userId, TransactionStatus status);
 
@@ -185,6 +210,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "FROM Transaction t " +
            "WHERE t.userId = :userId " +
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
+           "AND t.creditCard IS NULL " +
            "AND t.account.archivedAt IS NULL AND t.account.deletedAt IS NULL " +
            "AND t.account.type <> :excludedType")
     BigDecimal sumTotalBalanceExcludingType(
@@ -199,6 +225,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "FROM Transaction t " +
            "WHERE t.userId = :userId " +
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
+           "AND t.creditCard IS NULL " +
            "AND t.account.archivedAt IS NULL AND t.account.deletedAt IS NULL")
     BigDecimal sumTotalNetWorth(@Param("userId") UUID userId);
 
@@ -285,6 +312,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "FROM Transaction t " +
            "WHERE t.userId = :userId " +
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
+           "AND t.creditCard IS NULL " +
            "AND t.account.archivedAt IS NULL AND t.account.deletedAt IS NULL " +
            "AND t.paymentDate <= :upTo")
     BigDecimal sumNetWorthUpTo(

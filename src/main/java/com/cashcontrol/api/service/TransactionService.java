@@ -17,6 +17,13 @@ import java.util.UUID;
 
 public interface TransactionService {
 
+    /**
+     * Compra no cartão sai da conta pelo pagamento da fatura, que é quem a marca como PAGA.
+     * Pagá-la à parte debitaria a conta duas vezes.
+     */
+    String CARD_PURCHASE_PAID_BY_INVOICE =
+            "Compras no cartão de crédito são quitadas pelo pagamento da fatura, não individualmente.";
+
     TransactionDetailResponse createTransaction(CreateTransactionRequest request, UUID userId);
 
     TransactionDetailResponse editTransaction(UUID id, EditTransactionRequest request, UUID userId);

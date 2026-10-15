@@ -214,11 +214,18 @@ class FaturaImportIntegrationTest {
         assertThat(invoiceOf(cardBId).status()).isEqualTo(InvoiceStatus.PAID);
         assertThat(invoiceOf(cardBId).paidAmount()).isEqualByComparingTo(FaturaPdfFixture.CARD_B_TOTAL);
 
-        // Compras seguem pendentes e o saldo da conta não se moveu.
-        assertThat(transactionRepository.findAll().stream()
-                .filter(tx -> tx.getUserId().equals(userId)))
+        // As compras das faturas quitadas viram PAGAS no vencimento; as parcelas futuras seguem
+        // PENDENTES. Nenhuma mexe no saldo: compra no cartão sai da conta pelo pagamento da fatura.
+        var transactions = transactionRepository.findAll().stream()
+                .filter(tx -> tx.getUserId().equals(userId))
+                .toList();
+        assertThat(transactions).filteredOn(tx -> tx.getStatus() == TransactionStatus.PAID)
                 .isNotEmpty()
-                .allSatisfy(tx -> assertThat(tx.getStatus()).isEqualTo(TransactionStatus.PENDING));
+                .allSatisfy(tx -> assertThat(tx.getPaymentDate())
+                        .isIn(invoiceOf(cardAId).dueDate(), invoiceOf(cardBId).dueDate()));
+        assertThat(transactions).filteredOn(tx -> tx.getStatus() == TransactionStatus.PENDING)
+                .isNotEmpty()
+                .allSatisfy(tx -> assertThat(tx.getPaymentDate()).isNull());
         assertThat(accountService.computeBalance(accountId, userId)).isEqualByComparingTo("0.00");
 
         // As parcelas futuras caem em meses seguintes e continuam ABERTAS.

@@ -188,7 +188,7 @@ class TransactionControllerIT {
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, TransactionType.EXPENSE, new BigDecimal("200.00"), "Card payment",
                 LocalDate.now(), LocalDate.now(), null, null, null, null, null,
-                TransactionStatus.PAID, PaymentMethodSlug.CREDIT_CARD, creditCardId), userId);
+                null, PaymentMethodSlug.CREDIT_CARD, creditCardId), userId);
 
         mockMvc.perform(get("/api/v1/transactions")
                         .header("Authorization", bearer())

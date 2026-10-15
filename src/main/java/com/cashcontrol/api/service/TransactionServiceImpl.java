@@ -69,6 +69,9 @@ public class TransactionServiceImpl implements TransactionService {
         if (request.type() == TransactionType.MANUAL_ADJUSTMENT) {
             throw new BusinessRuleException("Use o endpoint de ajuste manual para criar transações do tipo MANUAL_ADJUSTMENT.");
         }
+        if (request.type() == TransactionType.INVOICE_PAYMENT) {
+            throw new BusinessRuleException("Pagamentos de fatura são lançados pelo pagamento da própria fatura.");
+        }
 
         Account account = accountRepository.findByIdAndUserIdAndDeletedAtIsNull(request.accountId(), userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found: " + request.accountId()));
@@ -93,14 +96,22 @@ public class TransactionServiceImpl implements TransactionService {
         tx.setPaymentMethod(paymentMethod);
         tx.setCreditCard(creditCard);
 
-        TransactionStatus status = request.status() != null ? request.status() : TransactionStatus.PAID;
-        tx.setStatus(status);
-
-        if (status == TransactionStatus.PAID) {
-            tx.setPaymentDate(request.paymentDate() != null ? request.paymentDate() : request.competenceDate());
+        TransactionStatus status;
+        if (creditCard != null) {
+            if (request.status() == TransactionStatus.PAID) {
+                throw new BusinessRuleException(CARD_PURCHASE_PAID_BY_INVOICE);
+            }
+            // Sem data de pagamento: quem a define é o pagamento da fatura, e uma data aqui
+            // faria o job de vencidas marcar a compra como VENCIDA.
+            status = request.status() != null ? request.status() : TransactionStatus.PENDING;
+            tx.setPaymentDate(null);
         } else {
-            tx.setPaymentDate(request.paymentDate());
+            status = request.status() != null ? request.status() : TransactionStatus.PAID;
+            tx.setPaymentDate(status == TransactionStatus.PAID && request.paymentDate() == null
+                    ? request.competenceDate()
+                    : request.paymentDate());
         }
+        tx.setStatus(status);
 
         applyCategory(tx, request.categoryId(), request.subcategoryId(), userId, request.description());
         applyTags(tx, request.tagIds(), userId);
@@ -118,6 +129,9 @@ public class TransactionServiceImpl implements TransactionService {
         if (tx.getStatus() == TransactionStatus.CANCELLED) {
             throw new BusinessRuleException("Transações canceladas não podem ser editadas.");
         }
+        rejectInvoicePayment(tx);
+        boolean wasOnCard = tx.getCreditCard() != null;
+        TransactionStatus previousStatus = tx.getStatus();
 
         if (tx.getInstallmentSeries() != null && !tx.isDetached()) {
             tx.setDetached(true);
@@ -170,6 +184,19 @@ public class TransactionServiceImpl implements TransactionService {
             tx.setCreditCard(creditCard);
         }
 
+        if (tx.getCreditCard() != null) {
+            // Só a compra que já estava no cartão e já estava PAGA (pela fatura) pode continuar
+            // assim; virar PAGA aqui, ou ir para o cartão já PAGA, é pagar fora da fatura.
+            boolean paidOutsideInvoice = tx.getStatus() == TransactionStatus.PAID
+                    && (previousStatus != TransactionStatus.PAID || !wasOnCard);
+            if (paidOutsideInvoice) {
+                throw new BusinessRuleException(CARD_PURCHASE_PAID_BY_INVOICE);
+            }
+            if (tx.getStatus() != TransactionStatus.PAID) {
+                tx.setPaymentDate(null);
+            }
+        }
+
         applyCategory(tx, request.categoryId(), request.subcategoryId(), userId, null);
         if (request.tagIds() != null) {
             applyTags(tx, request.tagIds(), userId);
@@ -184,6 +211,7 @@ public class TransactionServiceImpl implements TransactionService {
     @Transactional
     public void deleteTransaction(UUID id, UUID userId) {
         Transaction tx = findOwnedTransaction(id, userId);
+        rejectInvoicePayment(tx);
 
         if (tx.getTransferGroupId() != null) {
             throw new BusinessRuleException(
@@ -214,6 +242,9 @@ public class TransactionServiceImpl implements TransactionService {
             throw new BusinessRuleException(
                     "Apenas transações PENDENTES ou VENCIDAS podem ser marcadas como pagas. Status atual: " + tx.getStatus());
         }
+        if (tx.getCreditCard() != null) {
+            throw new BusinessRuleException(CARD_PURCHASE_PAID_BY_INVOICE);
+        }
 
         tx.setStatus(TransactionStatus.PAID);
         tx.setPaymentDate(request.paymentDate() != null ? request.paymentDate() : LocalDate.now());
@@ -231,6 +262,7 @@ public class TransactionServiceImpl implements TransactionService {
         if (tx.getStatus() == TransactionStatus.CANCELLED) {
             throw new BusinessRuleException("A transação já está cancelada.");
         }
+        rejectInvoicePayment(tx);
 
         tx.setStatus(TransactionStatus.CANCELLED);
         tx.setCancelledAt(Instant.now());
@@ -332,6 +364,16 @@ public class TransactionServiceImpl implements TransactionService {
                     "creditCardId não deve ser informado quando paymentMethod não é CREDIT_CARD.");
         }
         return null;
+    }
+
+    /**
+     * O pagamento de fatura já quitou a fatura e as compras dela: alterá-lo ou removê-lo
+     * sozinho deixaria a fatura PAGA sem o dinheiro que a pagou.
+     */
+    private void rejectInvoicePayment(Transaction tx) {
+        if (tx.getType() == TransactionType.INVOICE_PAYMENT) {
+            throw new BusinessRuleException("Pagamentos de fatura não podem ser alterados, cancelados ou excluídos.");
+        }
     }
 
     private Transaction findOwnedTransaction(UUID id, UUID userId) {

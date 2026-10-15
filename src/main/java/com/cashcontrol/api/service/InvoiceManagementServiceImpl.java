@@ -199,6 +199,9 @@ public class InvoiceManagementServiceImpl implements InvoiceManagementService {
             invoice.setStatus(InvoiceStatus.PAID);
             invoice.setPaidWithoutTransaction(true);
             invoiceRepository.save(invoice);
+            // Sem pagamento real não há data de saída do dinheiro; o vencimento é a data em
+            // que a fatura foi (ou seria) paga, e coloca o gasto no mês certo do dashboard.
+            transactionRepository.markInvoicePurchasesPaid(invoice.getId(), invoice.getDueDate());
         }
 
         return getInvoiceById(invoiceId, userId, 0, DEFAULT_PAGE_SIZE);
@@ -230,6 +233,7 @@ public class InvoiceManagementServiceImpl implements InvoiceManagementService {
         invoice.setStatus(InvoiceStatus.OPEN);
         invoice.setPaidWithoutTransaction(false);
         invoiceRepository.save(invoice);
+        transactionRepository.reopenInvoicePurchases(invoice.getId());
 
         return getInvoiceById(invoiceId, userId, 0, DEFAULT_PAGE_SIZE);
     }

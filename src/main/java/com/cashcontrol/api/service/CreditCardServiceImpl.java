@@ -257,14 +257,15 @@ public class CreditCardServiceImpl implements CreditCardService {
 
         LocalDate paymentDate = request.paymentDate() != null ? request.paymentDate() : LocalDate.now();
 
-        // Create EXPENSE transaction on source account
+        // Saída da conta, não despesa: o gasto são as compras da fatura, marcadas como PAGAS
+        // logo abaixo. Como EXPENSE, o dashboard contaria a mesma compra duas vezes.
         Transaction tx = new Transaction();
         tx.setUserId(userId);
         tx.setAccount(sourceAccount);
-        tx.setType(TransactionType.EXPENSE);
+        tx.setType(TransactionType.INVOICE_PAYMENT);
         tx.setStatus(TransactionStatus.PAID);
-        tx.setAmount(paymentAmount);
-        tx.setDescription("Invoice payment — " + invoice.getCreditCard().getName()
+        tx.setAmount(paymentAmount.negate());
+        tx.setDescription("Pagamento de fatura — " + invoice.getCreditCard().getName()
                 + " " + invoice.getReferenceMonth());
         tx.setCompetenceDate(paymentDate);
         tx.setPaymentDate(paymentDate);
@@ -303,6 +304,9 @@ public class CreditCardServiceImpl implements CreditCardService {
         }
 
         invoiceRepository.save(invoice);
+        // Também na parcial: o que faltou pagar virou item rotativo da fatura seguinte, então
+        // as compras desta já estão quitadas do ponto de vista delas.
+        transactionRepository.markInvoicePurchasesPaid(invoice.getId(), paymentDate);
 
         // Return updated invoice with first page of items
         return getInvoice(invoice.getCreditCard().getId(), invoice.getReferenceMonth(), userId, 0, 20);
