@@ -94,24 +94,43 @@ public class Invoice {
     /**
      * Soma {@code delta} (negativo para estornar) ao total, mantendo o status coerente.
      *
-     * <p>Só a fatura PAGA precisa de ajuste. Quitada sem transação ("marcar como paga") é uma
-     * declaração do usuário de que está tudo pago, então o pago acompanha o total. Quitada por
-     * pagamento real não pode inventar dinheiro: se o total passar do que foi pago, ela volta a
-     * dever e reabre; se cair abaixo, fica PAGA com o excedente registrado em {@code paidAmount}.
-     *
-     * <p>PARCIAL fica como está: o restante dela já virou item rotativo na fatura seguinte.
+     * <p>Só a fatura que já recebeu pagamento precisa de ajuste. Quitada sem transação ("marcar
+     * como paga") é uma declaração do usuário de que está tudo pago, então o pago acompanha o
+     * total. Paga por pagamento real não pode inventar dinheiro: o status sai do que foi pago
+     * contra o total novo ({@link #applyPaidAmount}) — o que passar do pago fica PARCIAL e o
+     * restante vai para o item rotativo da fatura seguinte ({@code CreditCardService.syncRevolvingItem}).
      */
     public void addToTotal(BigDecimal delta) {
         totalAmount = totalAmount.add(delta);
-        if (status != InvoiceStatus.PAID) {
+        if (status != InvoiceStatus.PAID && status != InvoiceStatus.PARTIAL) {
             return;
         }
         if (paidWithoutTransaction) {
             paidAmount = totalAmount;
-        } else if (paidAmount.compareTo(totalAmount) < 0) {
-            status = InvoiceStatus.OPEN;
-            refreshTimelineStatus(LocalDate.now());
+        } else {
+            applyPaidAmount(paidAmount, LocalDate.now());
         }
+    }
+
+    /**
+     * Grava o valor pago e o status que ele dá: PAGA quando cobre o total, PARCIAL quando cobre
+     * parte, e o status da data quando nada foi pago (o estorno do único pagamento).
+     */
+    public void applyPaidAmount(BigDecimal paid, LocalDate today) {
+        paidAmount = paid;
+        if (paid.signum() > 0 && paid.compareTo(totalAmount) >= 0) {
+            status = InvoiceStatus.PAID;
+        } else if (paid.signum() > 0) {
+            status = InvoiceStatus.PARTIAL;
+        } else {
+            status = InvoiceStatus.OPEN;
+            refreshTimelineStatus(today);
+        }
+    }
+
+    /** O que esta fatura empurra para a seguinte como saldo rotativo. */
+    public BigDecimal revolvingBalance() {
+        return status == InvoiceStatus.PARTIAL ? totalAmount.subtract(paidAmount) : BigDecimal.ZERO;
     }
 
     /**

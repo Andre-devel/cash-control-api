@@ -141,6 +141,17 @@ public class CreditCardServiceImpl implements CreditCardService {
     }
 
     @Override
+    public CreditCardResponse unarchiveCard(UUID id, UUID userId) {
+        CreditCard card = findActiveCard(id, userId);
+        if (card.getArchivedAt() == null) {
+            throw new BusinessRuleException("O cartão de crédito não está arquivado.");
+        }
+        card.setArchivedAt(null);
+        card = creditCardRepository.save(card);
+        return toResponse(card);
+    }
+
+    @Override
     public InvoiceItemResponse recordCharge(UUID cardId, RecordChargeRequest request, UUID userId) {
         CreditCard card = findActiveCard(cardId, userId);
         if (card.getArchivedAt() != null) {
@@ -166,9 +177,7 @@ public class CreditCardServiceImpl implements CreditCardService {
         item.setNotes(request.notes());
         item = invoiceItemRepository.save(item);
 
-        // Update invoice total
-        invoice.addToTotal(request.amount());
-        invoiceRepository.save(invoice);
+        adjustInvoiceTotal(invoice, request.amount());
 
         return InvoiceMapper.toItemResponse(item);
     }
@@ -253,40 +262,13 @@ public class CreditCardServiceImpl implements CreditCardService {
         tx.setCompetenceDate(paymentDate);
         tx.setPaymentDate(paymentDate);
         tx.setPaymentMethod(resolveDefaultPaymentMethod());
+        tx.setPaidInvoice(invoice);
         transactionRepository.save(tx);
 
-        BigDecimal newPaidAmount = invoice.getPaidAmount().add(paymentAmount);
-        invoice.setPaidAmount(newPaidAmount);
-
-        if (newPaidAmount.compareTo(invoice.getTotalAmount()) >= 0) {
-            invoice.setStatus(InvoiceStatus.PAID);
-        } else {
-            invoice.setStatus(InvoiceStatus.PARTIAL);
-
-            // Create revolving item on next invoice for the remainder
-            BigDecimal revolvingAmount = invoice.getTotalAmount().subtract(newPaidAmount);
-
-            InvoiceCycleInfo nextCycleInfo = cycleCalculator.calculateForCharge(
-                    invoice.getClosingDate().plusDays(1),
-                    invoice.getCreditCard().getClosingDay(),
-                    invoice.getCreditCard().getDueDay()
-            );
-            Invoice nextInvoice = getOrCreateInvoice(invoice.getCreditCard(), nextCycleInfo);
-
-            InvoiceItem revolving = new InvoiceItem();
-            revolving.setUserId(userId);
-            revolving.setInvoice(nextInvoice);
-            revolving.setDescription("Saldo rotativo de " + invoice.getReferenceMonth());
-            revolving.setAmount(revolvingAmount);
-            revolving.setCompetenceDate(nextInvoice.getClosingDate().withDayOfMonth(1));
-            revolving.setRevolving(true);
-            invoiceItemRepository.save(revolving);
-
-            nextInvoice.addToTotal(revolvingAmount);
-            invoiceRepository.save(nextInvoice);
-        }
-
+        // Na parcial, o que faltou pagar vira item rotativo da fatura seguinte.
+        invoice.applyPaidAmount(invoice.getPaidAmount().add(paymentAmount), paymentDate);
         invoiceRepository.save(invoice);
+        syncRevolvingItem(invoice);
         // Também na parcial: o que faltou pagar virou item rotativo da fatura seguinte, então
         // as compras desta já estão quitadas do ponto de vista delas.
         transactionRepository.markInvoicePurchasesPaid(invoice.getId(), paymentDate);
@@ -367,8 +349,7 @@ public class CreditCardServiceImpl implements CreditCardService {
             item.setTotalInstallments(tx.getTotalInstallments());
         }
         invoiceItemRepository.save(item);
-        invoice.addToTotal(tx.getAmount());
-        invoiceRepository.save(invoice);
+        adjustInvoiceTotal(invoice, tx.getAmount());
     }
 
     @Override
@@ -416,13 +397,11 @@ public class CreditCardServiceImpl implements CreditCardService {
             subtractFromInvoice(item);
             Invoice newInvoice = getOrCreateInvoice(card, newCycle);
             item.setInvoice(newInvoice);
-            newInvoice.addToTotal(tx.getAmount());
-            invoiceRepository.save(newInvoice);
+            adjustInvoiceTotal(newInvoice, tx.getAmount());
         } else {
             BigDecimal delta = tx.getAmount().subtract(item.getAmount());
             if (delta.compareTo(BigDecimal.ZERO) != 0) {
-                currentInvoice.addToTotal(delta);
-                invoiceRepository.save(currentInvoice);
+                adjustInvoiceTotal(currentInvoice, delta);
             }
         }
 
@@ -478,9 +457,81 @@ public class CreditCardServiceImpl implements CreditCardService {
     }
 
     private void subtractFromInvoice(InvoiceItem item) {
-        Invoice invoice = item.getInvoice();
-        invoice.addToTotal(item.getAmount().negate());
+        adjustInvoiceTotal(item.getInvoice(), item.getAmount().negate());
+    }
+
+    @Override
+    public void adjustInvoiceTotal(Invoice invoice, BigDecimal delta) {
+        invoice.addToTotal(delta);
         invoiceRepository.save(invoice);
+        syncRevolvingItem(invoice);
+    }
+
+    @Override
+    public void syncRevolvingItem(Invoice invoice) {
+        BigDecimal balance = invoice.revolvingBalance();
+        List<InvoiceItem> items = invoiceItemRepository
+                .findAllByRevolvingFromInvoice_IdAndCancelledAtIsNullOrderByCreatedAtAsc(invoice.getId());
+
+        // Um item só por fatura de origem. Antes do vínculo, cada pagamento parcial lançava um
+        // rotativo novo com o restante inteiro; os extras são cancelados aqui.
+        InvoiceItem revolving = items.isEmpty() ? null : items.getFirst();
+        for (InvoiceItem extra : items.subList(Math.min(1, items.size()), items.size())) {
+            extra.setCancelledAt(Instant.now());
+            invoiceItemRepository.save(extra);
+            adjustInvoiceTotal(extra.getInvoice(), extra.getAmount().negate());
+        }
+
+        if (balance.signum() <= 0) {
+            if (revolving != null) {
+                revolving.setCancelledAt(Instant.now());
+                invoiceItemRepository.save(revolving);
+                adjustInvoiceTotal(revolving.getInvoice(), revolving.getAmount().negate());
+            }
+            return;
+        }
+
+        if (revolving == null) {
+            CreditCard card = invoice.getCreditCard();
+            Invoice nextInvoice = getOrCreateInvoice(card, cycleCalculator.calculateForCharge(
+                    invoice.getClosingDate().plusDays(1), card.getClosingDay(), card.getDueDay()));
+            revolving = new InvoiceItem();
+            revolving.setUserId(invoice.getUserId());
+            revolving.setInvoice(nextInvoice);
+            revolving.setDescription("Saldo rotativo de " + invoice.getReferenceMonth());
+            revolving.setAmount(balance);
+            revolving.setCompetenceDate(nextInvoice.getClosingDate().withDayOfMonth(1));
+            revolving.setRevolving(true);
+            revolving.setRevolvingFromInvoice(invoice);
+            invoiceItemRepository.save(revolving);
+            adjustInvoiceTotal(nextInvoice, balance);
+            return;
+        }
+
+        BigDecimal delta = balance.subtract(revolving.getAmount());
+        if (delta.signum() != 0) {
+            revolving.setAmount(balance);
+            invoiceItemRepository.save(revolving);
+            adjustInvoiceTotal(revolving.getInvoice(), delta);
+        }
+    }
+
+    @Override
+    public void revertInvoicePayment(UUID invoiceId, BigDecimal amount) {
+        Invoice invoice = invoiceRepository.findById(invoiceId)
+                .orElseThrow(() -> new ResourceNotFoundException("Invoice not found: " + invoiceId));
+
+        // Quitada por "marcar como paga" continua quitada: o usuário declarou o total pago,
+        // e reabrir a fatura é o que desfaz essa declaração.
+        if (!invoice.isPaidWithoutTransaction()) {
+            invoice.applyPaidAmount(invoice.getPaidAmount().subtract(amount), LocalDate.now());
+            invoiceRepository.save(invoice);
+            syncRevolvingItem(invoice);
+        }
+
+        if (invoice.getStatus() != InvoiceStatus.PAID && invoice.getStatus() != InvoiceStatus.PARTIAL) {
+            transactionRepository.reopenInvoicePurchases(invoiceId);
+        }
     }
 
     private CreditCard findActiveCard(UUID id, UUID userId) {

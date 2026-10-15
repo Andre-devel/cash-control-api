@@ -139,6 +139,24 @@ public class CreditCardController {
         return creditCardService.archiveCard(id, principal.getUser().getId());
     }
 
+    @Operation(summary = "Unarchive credit card", description = "Restores an archived credit card so it can receive charges again.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Card unarchived"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Card not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Card is not archived",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping("/{id}/unarchive")
+    @PreAuthorize("isAuthenticated()")
+    public CreditCardResponse unarchiveCard(
+            @Parameter(description = "Credit card UUID", required = true) @PathVariable UUID id,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return creditCardService.unarchiveCard(id, principal.getUser().getId());
+    }
+
     @Operation(summary = "Record charge", description = "Records a charge on the credit card. The charge is assigned to the correct invoice based on the competence date and closing day.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Charge recorded"),

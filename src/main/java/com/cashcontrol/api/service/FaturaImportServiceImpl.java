@@ -212,10 +212,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
             }
         }
 
-        tally.addedByInvoice.forEach((invoice, added) -> {
-            invoice.addToTotal(added);
-            invoiceRepository.save(invoice);
-        });
+        tally.addedByInvoice.forEach(creditCardService::adjustInvoiceTotal);
 
         int markedPaid = request.alreadyPaid() ? markInvoicesPaid(currentInvoices, userId) : 0;
 

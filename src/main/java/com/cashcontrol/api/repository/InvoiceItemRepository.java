@@ -25,6 +25,8 @@ public interface InvoiceItemRepository extends JpaRepository<InvoiceItem, UUID> 
 
     Optional<InvoiceItem> findByTransaction_Id(UUID transactionId);
 
+    List<InvoiceItem> findAllByRevolvingFromInvoice_IdAndCancelledAtIsNullOrderByCreatedAtAsc(UUID invoiceId);
+
     List<InvoiceItem> findAllByInstallmentSeries_Id(UUID installmentSeriesId);
 
     /**

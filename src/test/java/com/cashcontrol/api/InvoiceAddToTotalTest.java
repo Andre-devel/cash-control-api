@@ -42,20 +42,31 @@ class InvoiceAddToTotalTest {
     }
 
     @Test
-    void paidByRealPaymentReopensWhenItOwesAgain() {
+    void paidByRealPaymentBecomesPartialWhenItOwesAgain() {
         Invoice invoice = paid("100.00", false);
         invoice.addToTotal(new BigDecimal("50.00"));
 
         assertThat(invoice.getPaidAmount()).isEqualByComparingTo("100.00");
-        assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.OPEN);
+        assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.PARTIAL);
+        assertThat(invoice.revolvingBalance()).isEqualByComparingTo("50.00");
     }
 
     @Test
-    void reopenedInvoiceTakesTheStatusItsDatesGive() {
+    void partialBecomesPaidWhenTotalDropsToWhatWasPaid() {
+        Invoice invoice = paid("100.00", false);
+        invoice.addToTotal(new BigDecimal("50.00"));
+        invoice.addToTotal(new BigDecimal("-50.00"));
+
+        assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.PAID);
+        assertThat(invoice.revolvingBalance()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void removingEveryPaymentGivesTheStatusTheDatesGive() {
         Invoice invoice = paid("100.00", false);
         invoice.setClosingDate(LocalDate.now().minusDays(20));
         invoice.setDueDate(LocalDate.now().minusDays(10));
-        invoice.addToTotal(new BigDecimal("50.00"));
+        invoice.applyPaidAmount(BigDecimal.ZERO, LocalDate.now());
 
         assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.OVERDUE);
     }

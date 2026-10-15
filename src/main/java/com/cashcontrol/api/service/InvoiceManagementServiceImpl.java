@@ -46,6 +46,7 @@ public class InvoiceManagementServiceImpl implements InvoiceManagementService {
     private final TransactionRepository transactionRepository;
     private final MerchantAliasRepository merchantAliasRepository;
     private final MerchantAliasService merchantAliasService;
+    private final CreditCardService creditCardService;
 
     @Override
     @Transactional(readOnly = true)
@@ -208,6 +209,8 @@ public class InvoiceManagementServiceImpl implements InvoiceManagementService {
             invoice.setStatus(InvoiceStatus.PAID);
             invoice.setPaidWithoutTransaction(true);
             invoiceRepository.save(invoice);
+            // Quitada por inteiro não empurra mais nada para a seguinte.
+            creditCardService.syncRevolvingItem(invoice);
             // Sem pagamento real não há data de saída do dinheiro; o vencimento é a data em
             // que a fatura foi (ou seria) paga, e coloca o gasto no mês certo do dashboard.
             transactionRepository.markInvoicePurchasesPaid(invoice.getId(), invoice.getDueDate());
@@ -218,10 +221,11 @@ public class InvoiceManagementServiceImpl implements InvoiceManagementService {
 
     /**
      * Desfaz {@link #settle}. Bloqueada quando a quitação veio de um pagamento real: reabrir
-     * deixaria a transação de pagamento na conta sem fatura para justificá-la.
+     * deixaria a transação de pagamento na conta sem fatura para justificá-la — o caminho
+     * nesse caso é excluir o pagamento.
      *
-     * <p>Volta ao status que a data dá (ABERTA, FECHADA ou VENCIDA), ver
-     * {@code Invoice.refreshTimelineStatus}.
+     * <p>Volta ao que os pagamentos reais ligados à fatura cobrem: PARCIAL se algum foi feito
+     * antes da quitação, senão o status que a data dá ({@code Invoice.applyPaidAmount}).
      */
     @Override
     @Transactional
@@ -236,12 +240,13 @@ public class InvoiceManagementServiceImpl implements InvoiceManagementService {
                     "Existe um pagamento lançado na conta. Exclua a transação antes de reabrir a fatura.");
         }
 
-        invoice.setPaidAmount(BigDecimal.ZERO);
-        invoice.setStatus(InvoiceStatus.OPEN);
-        invoice.refreshTimelineStatus(LocalDate.now());
         invoice.setPaidWithoutTransaction(false);
+        invoice.applyPaidAmount(transactionRepository.sumPaymentsForInvoice(invoice.getId()), LocalDate.now());
         invoiceRepository.save(invoice);
-        transactionRepository.reopenInvoicePurchases(invoice.getId());
+        creditCardService.syncRevolvingItem(invoice);
+        if (invoice.getStatus() != InvoiceStatus.PAID && invoice.getStatus() != InvoiceStatus.PARTIAL) {
+            transactionRepository.reopenInvoicePurchases(invoice.getId());
+        }
 
         return getInvoiceById(invoiceId, userId, 0, DEFAULT_PAGE_SIZE);
     }

@@ -35,7 +35,7 @@ import java.util.UUID;
 @Setter
 @NoArgsConstructor
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
-@ToString(exclude = {"invoice", "category", "subcategory", "installmentSeries", "transaction", "tags"})
+@ToString(exclude = {"invoice", "category", "subcategory", "installmentSeries", "transaction", "revolvingFromInvoice", "tags"})
 public class InvoiceItem {
 
     @Id
@@ -118,6 +118,11 @@ public class InvoiceItem {
 
     @Column(name = "is_revolving", nullable = false)
     private boolean isRevolving = false;
+
+    /** Só no item rotativo: a fatura PARCIAL cujo restante ele carrega. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "revolving_from_invoice_id")
+    private Invoice revolvingFromInvoice;
 
     @Column(name = "cancelled_at")
     private Instant cancelledAt;

@@ -116,6 +116,10 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID")
     int reopenInvoicePurchases(@Param("invoiceId") UUID invoiceId);
 
+    /** O que os pagamentos ligados à fatura pagaram (INVOICE_PAYMENT é gravado negativo). */
+    @Query("SELECT COALESCE(SUM(-t.amount), 0) FROM Transaction t WHERE t.paidInvoice.id = :invoiceId")
+    BigDecimal sumPaymentsForInvoice(@Param("invoiceId") UUID invoiceId);
+
     boolean existsByAccount_IdAndUserIdAndStatusNotAndTypeNot(
             UUID accountId, UUID userId, TransactionStatus status, TransactionType type);
 

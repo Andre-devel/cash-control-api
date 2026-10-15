@@ -14,6 +14,7 @@ import com.cashcontrol.api.dto.response.LimitUsageResponse;
 import com.cashcontrol.api.dto.response.SpendingByCategoryResponse;
 import com.cashcontrol.api.service.InvoiceCycleCalculator.InvoiceCycleInfo;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -27,6 +28,8 @@ public interface CreditCardService {
     CreditCardResponse editCard(UUID id, EditCardRequest request, UUID userId);
 
     CreditCardResponse archiveCard(UUID id, UUID userId);
+
+    CreditCardResponse unarchiveCard(UUID id, UUID userId);
 
     InvoiceItemResponse recordCharge(UUID cardId, RecordChargeRequest request, UUID userId);
 
@@ -63,4 +66,23 @@ public interface CreditCardService {
      *         what the issuer already charged and must not be rewritten.
      */
     void deleteInvoiceItemsForInstallmentSeries(UUID installmentSeriesId);
+
+    /**
+     * Soma {@code delta} ao total da fatura ({@code Invoice.addToTotal}) e leva a mudança ao
+     * saldo rotativo que ela empurra para a seguinte. Todo ajuste de total passa por aqui.
+     */
+    void adjustInvoiceTotal(Invoice invoice, BigDecimal delta);
+
+    /**
+     * Alinha o item rotativo que a fatura deixou na seguinte com o que ela ainda deve
+     * ({@code Invoice.revolvingBalance}): cria, ajusta ou cancela o item, e o ajuste do total da
+     * seguinte segue em cascata se ela também estiver PARCIAL.
+     */
+    void syncRevolvingItem(Invoice invoice);
+
+    /**
+     * Devolve à fatura um pagamento que foi excluído: tira o valor do pago, refaz o status e o
+     * rotativo, e reabre as compras se a fatura deixou de estar paga.
+     */
+    void revertInvoicePayment(UUID invoiceId, BigDecimal amount);
 }

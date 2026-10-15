@@ -37,7 +37,7 @@ import java.util.UUID;
 @Setter
 @NoArgsConstructor
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
-@ToString(exclude = {"account", "category", "subcategory", "installmentSeries", "recurrenceRule", "tags"})
+@ToString(exclude = {"account", "category", "subcategory", "installmentSeries", "recurrenceRule", "paidInvoice", "tags"})
 public class Transaction {
 
     @Id
@@ -139,6 +139,11 @@ public class Transaction {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "credit_card_id")
     private CreditCard creditCard;
+
+    /** Só em INVOICE_PAYMENT: a fatura que este pagamento pagou. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "paid_invoice_id")
+    private Invoice paidInvoice;
 
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(

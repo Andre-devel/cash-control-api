@@ -20,6 +20,7 @@ import com.cashcontrol.api.repository.InvoiceRepository;
 import com.cashcontrol.api.repository.MerchantAliasRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.CategoryResolver;
+import com.cashcontrol.api.service.CreditCardService;
 import com.cashcontrol.api.service.InvoiceManagementServiceImpl;
 import com.cashcontrol.api.service.MerchantAliasService;
 import org.junit.jupiter.api.BeforeEach;
@@ -64,6 +65,7 @@ class InvoiceManagementServiceTest {
     @Mock private TransactionRepository transactionRepository;
     @Mock private MerchantAliasRepository merchantAliasRepository;
     @Mock private MerchantAliasService merchantAliasService;
+    @Mock private CreditCardService creditCardService;
 
     private InvoiceManagementServiceImpl service;
     private UUID userId;
@@ -73,7 +75,9 @@ class InvoiceManagementServiceTest {
         userId = UUID.randomUUID();
         service = new InvoiceManagementServiceImpl(
                 invoiceRepository, invoiceItemRepository, creditCardRepository,
-                new CategoryResolver(categoryRepository), transactionRepository, merchantAliasRepository, merchantAliasService);
+                new CategoryResolver(categoryRepository), transactionRepository, merchantAliasRepository, merchantAliasService,
+                creditCardService);
+        when(transactionRepository.sumPaymentsForInvoice(any())).thenReturn(java.math.BigDecimal.ZERO);
 
         when(invoiceItemRepository.findAllByInvoice_IdAndCancelledAtIsNull(any(), any()))
                 .thenReturn(new PageImpl<>(List.of()));

@@ -79,6 +79,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -170,6 +171,11 @@ class FaturaImportServiceTest {
         when(transactionRepository.save(any(Transaction.class))).thenAnswer(call -> call.getArgument(0));
         when(installmentSeriesRepository.save(any(InstallmentSeries.class)))
                 .thenAnswer(call -> call.getArgument(0));
+        // O total de verdade é o da entidade; o rotativo da fatura seguinte não entra aqui.
+        doAnswer(call -> {
+            call.<Invoice>getArgument(0).addToTotal(call.getArgument(1));
+            return null;
+        }).when(creditCardService).adjustInvoiceTotal(any(), any());
         when(creditCardService.getOrCreateInvoice(any(), any())).thenAnswer(call -> {
             CreditCard card = call.getArgument(0);
             InvoiceCycleInfo cycle = call.getArgument(1);
@@ -769,8 +775,8 @@ class FaturaImportServiceTest {
         // 10,00 já lançados + 55,19 + 110,00 do PDF.
         assertThat(invoiceA.getTotalAmount()).isEqualByComparingTo("175.19");
         assertThat(invoiceB.getTotalAmount()).isEqualByComparingTo("336.81");
-        verify(invoiceRepository).save(invoiceA);
-        verify(invoiceRepository).save(invoiceB);
+        verify(creditCardService).adjustInvoiceTotal(eq(invoiceA), any());
+        verify(creditCardService).adjustInvoiceTotal(eq(invoiceB), any());
     }
 
     @Test
@@ -831,8 +837,9 @@ class FaturaImportServiceTest {
     }
 
     @Test
-    void commit_reopensAnInvoicePaidByARealPaymentWhenNewRowsArrive() {
-        // Pagamento real não acompanha o total: o que entrou depois é dívida nova.
+    void commit_turnsAnInvoicePaidByARealPaymentPartialWhenNewRowsArrive() {
+        // Pagamento real não acompanha o total: o que entrou depois é dívida nova, que vai
+        // para o rotativo da fatura seguinte.
         invoiceA.setTotalAmount(new BigDecimal("10.00"));
         invoiceA.setPaidAmount(new BigDecimal("10.00"));
         invoiceA.setStatus(InvoiceStatus.PAID);
@@ -841,8 +848,7 @@ class FaturaImportServiceTest {
 
         assertThat(invoiceA.getTotalAmount()).isEqualByComparingTo("175.19");
         assertThat(invoiceA.getPaidAmount()).isEqualByComparingTo("10.00");
-        // Reabre no status que a data dá: a fatura do fixture venceu em 2026-08-07.
-        assertThat(invoiceA.getStatus()).isEqualTo(InvoiceStatus.OVERDUE);
+        assertThat(invoiceA.getStatus()).isEqualTo(InvoiceStatus.PARTIAL);
     }
 
     @Test

@@ -211,7 +211,11 @@ public class TransactionServiceImpl implements TransactionService {
     @Transactional
     public void deleteTransaction(UUID id, UUID userId) {
         Transaction tx = findOwnedTransaction(id, userId);
-        rejectInvoicePayment(tx);
+
+        if (tx.getType() == TransactionType.INVOICE_PAYMENT) {
+            deleteInvoicePayment(tx);
+            return;
+        }
 
         if (tx.getTransferGroupId() != null) {
             throw new BusinessRuleException(
@@ -367,13 +371,29 @@ public class TransactionServiceImpl implements TransactionService {
     }
 
     /**
-     * O pagamento de fatura já quitou a fatura e as compras dela: alterá-lo ou removê-lo
-     * sozinho deixaria a fatura PAGA sem o dinheiro que a pagou.
+     * O pagamento de fatura já quitou a fatura e as compras dela: alterá-lo ou cancelá-lo
+     * sozinho deixaria a fatura PAGA sem o dinheiro que a pagou. Para desfazer, exclui-se
+     * ({@link #deleteInvoicePayment}), que devolve o valor à fatura.
      */
     private void rejectInvoicePayment(Transaction tx) {
         if (tx.getType() == TransactionType.INVOICE_PAYMENT) {
-            throw new BusinessRuleException("Pagamentos de fatura não podem ser alterados, cancelados ou excluídos.");
+            throw new BusinessRuleException(
+                    "Pagamentos de fatura não podem ser alterados nem cancelados. Exclua o pagamento para desfazê-lo.");
         }
+    }
+
+    private void deleteInvoicePayment(Transaction tx) {
+        if (tx.getPaidInvoice() == null) {
+            throw new BusinessRuleException(
+                    "Este pagamento é anterior ao vínculo com a fatura e não pode ser excluído.");
+        }
+        UUID invoiceId = tx.getPaidInvoice().getId();
+        BigDecimal amount = tx.getAmount().negate();
+
+        attachmentService.deleteAllForTransactions(List.of(tx.getId()));
+        transactionRepository.delete(tx);
+        transactionRepository.flush();
+        creditCardService.revertInvoicePayment(invoiceId, amount);
     }
 
     private Transaction findOwnedTransaction(UUID id, UUID userId) {
