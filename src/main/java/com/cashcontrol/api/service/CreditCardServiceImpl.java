@@ -190,7 +190,7 @@ public class CreditCardServiceImpl implements CreditCardService {
         item = invoiceItemRepository.save(item);
 
         // Update invoice total
-        invoice.setTotalAmount(invoice.getTotalAmount().add(request.amount()));
+        invoice.addToTotal(request.amount());
         invoiceRepository.save(invoice);
 
         return InvoiceMapper.toItemResponse(item);
@@ -298,7 +298,7 @@ public class CreditCardServiceImpl implements CreditCardService {
             revolving.setRevolving(true);
             invoiceItemRepository.save(revolving);
 
-            nextInvoice.setTotalAmount(nextInvoice.getTotalAmount().add(revolvingAmount));
+            nextInvoice.addToTotal(revolvingAmount);
             invoiceRepository.save(nextInvoice);
         }
 
@@ -380,7 +380,7 @@ public class CreditCardServiceImpl implements CreditCardService {
             item.setTotalInstallments(tx.getTotalInstallments());
         }
         invoiceItemRepository.save(item);
-        invoice.setTotalAmount(invoice.getTotalAmount().add(tx.getAmount()));
+        invoice.addToTotal(tx.getAmount());
         invoiceRepository.save(invoice);
     }
 
@@ -429,12 +429,12 @@ public class CreditCardServiceImpl implements CreditCardService {
             subtractFromInvoice(item);
             Invoice newInvoice = getOrCreateInvoice(card, newCycle);
             item.setInvoice(newInvoice);
-            newInvoice.setTotalAmount(newInvoice.getTotalAmount().add(tx.getAmount()));
+            newInvoice.addToTotal(tx.getAmount());
             invoiceRepository.save(newInvoice);
         } else {
             BigDecimal delta = tx.getAmount().subtract(item.getAmount());
             if (delta.compareTo(BigDecimal.ZERO) != 0) {
-                currentInvoice.setTotalAmount(currentInvoice.getTotalAmount().add(delta));
+                currentInvoice.addToTotal(delta);
                 invoiceRepository.save(currentInvoice);
             }
         }
@@ -491,7 +491,7 @@ public class CreditCardServiceImpl implements CreditCardService {
 
     private void subtractFromInvoice(InvoiceItem item) {
         Invoice invoice = item.getInvoice();
-        invoice.setTotalAmount(invoice.getTotalAmount().subtract(item.getAmount()));
+        invoice.addToTotal(item.getAmount().negate());
         invoiceRepository.save(invoice);
     }
 

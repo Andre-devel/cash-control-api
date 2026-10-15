@@ -9,7 +9,6 @@ import com.cashcontrol.api.domain.entity.InstallmentSeries;
 import com.cashcontrol.api.domain.entity.Invoice;
 import com.cashcontrol.api.domain.entity.InvoiceImportFormat;
 import com.cashcontrol.api.domain.entity.InvoiceItem;
-import com.cashcontrol.api.domain.entity.InvoiceStatus;
 import com.cashcontrol.api.domain.entity.PaymentMethod;
 import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.Transaction;
@@ -214,14 +213,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
         }
 
         tally.addedByInvoice.forEach((invoice, added) -> {
-            // Uma fatura quitada que recebe lançamento novo continua quitada: o pagamento
-            // acompanha o total, senão ela ficaria PAGA devendo a diferença. Só vale para a
-            // quitada por inteiro — numa parcial, o que falta pagar é real e tem de aparecer.
-            boolean wasFullyPaid = invoice.getStatus() == InvoiceStatus.PAID;
-            invoice.setTotalAmount(invoice.getTotalAmount().add(added));
-            if (wasFullyPaid) {
-                invoice.setPaidAmount(invoice.getTotalAmount());
-            }
+            invoice.addToTotal(added);
             invoiceRepository.save(invoice);
         });
 

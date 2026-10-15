@@ -90,4 +90,26 @@ public class Invoice {
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
+    /**
+     * Soma {@code delta} (negativo para estornar) ao total, mantendo o status coerente.
+     *
+     * <p>Só a fatura PAGA precisa de ajuste. Quitada sem transação ("marcar como paga") é uma
+     * declaração do usuário de que está tudo pago, então o pago acompanha o total. Quitada por
+     * pagamento real não pode inventar dinheiro: se o total passar do que foi pago, ela volta a
+     * dever e reabre; se cair abaixo, fica PAGA com o excedente registrado em {@code paidAmount}.
+     *
+     * <p>PARCIAL fica como está: o restante dela já virou item rotativo na fatura seguinte.
+     */
+    public void addToTotal(BigDecimal delta) {
+        totalAmount = totalAmount.add(delta);
+        if (status != InvoiceStatus.PAID) {
+            return;
+        }
+        if (paidWithoutTransaction) {
+            paidAmount = totalAmount;
+        } else if (paidAmount.compareTo(totalAmount) < 0) {
+            status = InvoiceStatus.OPEN;
+        }
+    }
 }

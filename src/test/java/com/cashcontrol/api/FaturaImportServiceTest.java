@@ -815,11 +815,12 @@ class FaturaImportServiceTest {
 
     @Test
     void commit_keepsAFullyPaidInvoiceSettledWhenNewRowsArrive() {
-        // Importar o mês seguinte de um histórico já quitado não pode deixar a fatura
-        // PAGA devendo a diferença.
+        // Importar o mês seguinte de um histórico já quitado (pelo "fatura já paga" de uma
+        // importação anterior) não pode deixar a fatura PAGA devendo a diferença.
         invoiceA.setTotalAmount(new BigDecimal("10.00"));
         invoiceA.setPaidAmount(new BigDecimal("10.00"));
         invoiceA.setStatus(InvoiceStatus.PAID);
+        invoiceA.setPaidWithoutTransaction(true);
 
         FaturaImportResultResponse result = commit(commitRowsFromPreview());
 
@@ -827,6 +828,20 @@ class FaturaImportServiceTest {
         assertThat(invoiceA.getTotalAmount()).isEqualByComparingTo("175.19");
         assertThat(invoiceA.getPaidAmount()).isEqualByComparingTo("175.19");
         assertThat(invoiceA.getStatus()).isEqualTo(InvoiceStatus.PAID);
+    }
+
+    @Test
+    void commit_reopensAnInvoicePaidByARealPaymentWhenNewRowsArrive() {
+        // Pagamento real não acompanha o total: o que entrou depois é dívida nova.
+        invoiceA.setTotalAmount(new BigDecimal("10.00"));
+        invoiceA.setPaidAmount(new BigDecimal("10.00"));
+        invoiceA.setStatus(InvoiceStatus.PAID);
+
+        commit(commitRowsFromPreview());
+
+        assertThat(invoiceA.getTotalAmount()).isEqualByComparingTo("175.19");
+        assertThat(invoiceA.getPaidAmount()).isEqualByComparingTo("10.00");
+        assertThat(invoiceA.getStatus()).isEqualTo(InvoiceStatus.OPEN);
     }
 
     @Test
