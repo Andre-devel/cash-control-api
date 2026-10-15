@@ -103,7 +103,7 @@ class AuthServiceTest {
 
         MessageResponse response = authService.register(new RegisterRequest("user@example.com", "Str0ng!Pass123", true));
 
-        assertThat(response.message()).contains("verification");
+        assertThat(response.message()).contains("verificar o e-mail");
         verify(emailService).sendEmailVerification(anyString(), anyString(), any());
     }
 
@@ -113,7 +113,7 @@ class AuthServiceTest {
 
         MessageResponse response = authService.register(new RegisterRequest("user@example.com", "Str0ng!Pass123", true));
 
-        assertThat(response.message()).contains("verification");
+        assertThat(response.message()).contains("verificar o e-mail");
         verify(emailService).sendAccountAlreadyExistsEmail("user@example.com");
         verify(userRepository, never()).save(any());
     }

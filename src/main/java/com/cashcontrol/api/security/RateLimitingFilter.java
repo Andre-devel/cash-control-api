@@ -58,7 +58,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
             String correlationId = CorrelationIdHolder.get().toString();
             response.getWriter().write(
-                    "{\"errorCode\":\"RATE_LIMITED\",\"message\":\"Too many requests.\",\"correlationId\":\"" +
+                    "{\"errorCode\":\"RATE_LIMITED\",\"message\":\"Muitas requisições. Tente novamente em instantes.\",\"correlationId\":\"" +
                     correlationId + "\"}");
 
             log.debug("Rate limit exceeded on path: {}", path);

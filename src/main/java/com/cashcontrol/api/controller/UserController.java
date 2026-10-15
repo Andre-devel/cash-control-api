@@ -146,7 +146,7 @@ public class UserController {
             @Valid @RequestBody AdminCreateUserRequest request,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         userService.adminCreateUser(principal.getUser().getId(), request.email(), request.roleIds());
-        return new MessageResponse("User created successfully.");
+        return new MessageResponse("Usuário criado com sucesso.");
     }
 
     @Operation(summary = "Disable user account (admin)", description = "Transitions the user to INACTIVE and invalidates all previously issued JWTs. Requires `user:update` permission.")

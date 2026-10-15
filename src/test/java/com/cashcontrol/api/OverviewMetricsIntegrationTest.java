@@ -137,7 +137,7 @@ class OverviewMetricsIntegrationTest {
 
         assertThat(result.totalAmount()).isEqualByComparingTo("400.00");
         boolean hasUncategorized = result.entries().stream()
-                .anyMatch(e -> "UNCATEGORIZED".equals(e.categoryName()));
+                .anyMatch(e -> "Sem categoria".equals(e.categoryName()));
         assertThat(hasUncategorized).isTrue();
     }
 

@@ -127,7 +127,7 @@ class PartialPaymentTest {
                 .toList();
         assertThat(revolvingItems).hasSize(1);
         assertThat(revolvingItems.get(0).getAmount()).isEqualByComparingTo("300.00");
-        assertThat(revolvingItems.get(0).getDescription()).contains("Revolving balance from");
+        assertThat(revolvingItems.get(0).getDescription()).contains("Saldo rotativo de");
 
         // Next invoice should have totalAmount = 300
         var nextInvoice = revolvingItems.get(0).getInvoice();

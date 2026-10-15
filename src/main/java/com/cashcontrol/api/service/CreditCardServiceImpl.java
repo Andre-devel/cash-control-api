@@ -276,7 +276,7 @@ public class CreditCardServiceImpl implements CreditCardService {
             InvoiceItem revolving = new InvoiceItem();
             revolving.setUserId(userId);
             revolving.setInvoice(nextInvoice);
-            revolving.setDescription("Revolving balance from " + invoice.getReferenceMonth());
+            revolving.setDescription("Saldo rotativo de " + invoice.getReferenceMonth());
             revolving.setAmount(revolvingAmount);
             revolving.setCompetenceDate(nextInvoice.getClosingDate().withDayOfMonth(1));
             revolving.setRevolving(true);

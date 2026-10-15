@@ -55,7 +55,7 @@ public class AccountServiceImpl implements AccountService {
         BigDecimal initialBalance = request.initialBalance();
         if (initialBalance != null && initialBalance.compareTo(BigDecimal.ZERO) != 0) {
             Transaction seed = buildManualAdjustment(account, userId, initialBalance,
-                    "Initial balance", LocalDate.now());
+                    "Saldo inicial", LocalDate.now());
             transactionRepository.save(seed);
         }
 
@@ -164,7 +164,7 @@ public class AccountServiceImpl implements AccountService {
         LocalDate date = request.date() != null ? request.date() : LocalDate.now();
         String description = request.description() != null && !request.description().isBlank()
                 ? request.description()
-                : "Manual adjustment";
+                : "Ajuste manual";
 
         Transaction tx = buildManualAdjustment(account, userId, request.amount(), description, date);
         transactionRepository.save(tx);
@@ -196,7 +196,7 @@ public class AccountServiceImpl implements AccountService {
         LocalDate date = request.date() != null ? request.date() : LocalDate.now();
         String description = request.description() != null && !request.description().isBlank()
                 ? request.description()
-                : "Transfer";
+                : "Transferência";
         PaymentMethod paymentMethod = resolveDefaultPaymentMethod();
 
         // Source leg: negative amount represents debit from the account

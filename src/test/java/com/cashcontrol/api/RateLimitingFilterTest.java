@@ -88,7 +88,7 @@ class RateLimitingFilterTest {
         assertThat(response.getStatusCode().value()).isEqualTo(429);
         assertThat(response.getHeaders().getFirst("Retry-After")).isNotNull();
         assertThat(response.getBody()).contains("RATE_LIMITED");
-        assertThat(response.getBody()).contains("Too many requests.");
+        assertThat(response.getBody()).contains("Muitas requisições");
         assertThat(response.getBody()).contains("correlationId");
     }
 

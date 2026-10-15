@@ -93,7 +93,7 @@ public class DashboardServiceImpl implements DashboardService {
             BigDecimal amount = (BigDecimal) row[1];
             String name = categoryRepository.findById(categoryId)
                     .map(c -> c.getName())
-                    .orElse("Unknown");
+                    .orElse("Desconhecida");
             BigDecimal pct = total.compareTo(BigDecimal.ZERO) == 0
                     ? BigDecimal.ZERO
                     : amount.multiply(BigDecimal.valueOf(100)).divide(total, 2, RoundingMode.HALF_UP);
@@ -104,7 +104,7 @@ public class DashboardServiceImpl implements DashboardService {
             BigDecimal pct = total.compareTo(BigDecimal.ZERO) == 0
                     ? BigDecimal.ZERO
                     : uncategorized.multiply(BigDecimal.valueOf(100)).divide(total, 2, RoundingMode.HALF_UP);
-            entries.add(new CategoryPieChartResponse.Entry(null, "UNCATEGORIZED", uncategorized, pct));
+            entries.add(new CategoryPieChartResponse.Entry(null, "Sem categoria", uncategorized, pct));
         }
 
         return new CategoryPieChartResponse(entries, total);
@@ -296,7 +296,7 @@ public class DashboardServiceImpl implements DashboardService {
                     UUID catId = (UUID) row[0];
                     BigDecimal amount = (BigDecimal) row[1];
                     String name = categoryRepository.findById(catId)
-                            .map(c -> c.getName()).orElse("Unknown");
+                            .map(c -> c.getName()).orElse("Desconhecida");
                     BigDecimal pct = total.compareTo(BigDecimal.ZERO) == 0
                             ? BigDecimal.ZERO
                             : amount.multiply(BigDecimal.valueOf(100)).divide(total, 2, RoundingMode.HALF_UP);

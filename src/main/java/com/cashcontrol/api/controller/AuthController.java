@@ -220,7 +220,7 @@ public class AuthController {
     @PostMapping("/password-reset/request")
     public MessageResponse initiatePasswordReset(@Valid @RequestBody PasswordResetRequest request) {
         passwordResetService.initiateReset(request.email());
-        return new MessageResponse("If the email is registered, a reset link has been sent.");
+        return new MessageResponse("Se o e-mail estiver cadastrado, enviamos um link para redefinir a senha.");
     }
 
     @Operation(
@@ -240,7 +240,7 @@ public class AuthController {
     @PostMapping("/password-reset/confirm")
     public MessageResponse completePasswordReset(@Valid @RequestBody PasswordResetCompleteRequest request) {
         passwordResetService.completeReset(request.token(), request.newPassword());
-        return new MessageResponse("Password reset successful.");
+        return new MessageResponse("Senha redefinida com sucesso.");
     }
 
     @Operation(
@@ -261,7 +261,7 @@ public class AuthController {
             @Parameter(description = "Email verification token from the verification email", required = true)
             @RequestParam @NotBlank String token) {
         emailVerificationService.verifyEmail(token);
-        return new MessageResponse("Email verified successfully.");
+        return new MessageResponse("E-mail verificado com sucesso.");
     }
 
     @Operation(
@@ -282,7 +282,7 @@ public class AuthController {
     @PostMapping("/email/verify/resend")
     public MessageResponse resendVerification(@Valid @RequestBody ResendVerificationRequest request) {
         emailVerificationService.resendVerification(request.email());
-        return new MessageResponse("If the email is pending verification, a new verification email has been sent.");
+        return new MessageResponse("Se o e-mail estiver aguardando verificação, enviamos um novo link.");
     }
 
     @Operation(
@@ -306,7 +306,7 @@ public class AuthController {
             @Valid @RequestBody EmailChangeRequest request,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         emailVerificationService.initiateEmailChange(principal.getUser().getId(), request.newEmail());
-        return new MessageResponse("A verification email has been sent to the new address.");
+        return new MessageResponse("Enviamos um e-mail de verificação para o novo endereço.");
     }
 
     @Operation(

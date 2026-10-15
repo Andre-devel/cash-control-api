@@ -68,7 +68,7 @@ public class AuthServiceImpl implements AuthService {
             } catch (Exception e) {
                 log.warn("Failed to send account-exists email to {}: {}", dataMasker.maskEmail(request.email()), e.getMessage());
             }
-            return MessageResponse.of("Registration successful. Please check your inbox for an email verification link.");
+            return MessageResponse.of("Cadastro realizado. Confira sua caixa de entrada para verificar o e-mail.");
         }
 
         User user = new User();
@@ -108,7 +108,7 @@ public class AuthServiceImpl implements AuthService {
         auditService.record(AuditEventSlug.USER_REGISTERED, AuditOutcomeSlug.SUCCESS, null, saved.getId(),
                 Map.of("email", dataMasker.maskEmail(saved.getEmail())));
 
-        return MessageResponse.of("Registration successful. Please check your inbox for an email verification link.");
+        return MessageResponse.of("Cadastro realizado. Confira sua caixa de entrada para verificar o e-mail.");
     }
 
     @Override

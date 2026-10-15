@@ -139,7 +139,7 @@ class DashboardServiceTest {
         assertThat(result.entries()).hasSize(2);
         assertThat(result.entries().get(0).categoryName()).isEqualTo("Food");
         assertThat(result.entries().get(0).percentage()).isEqualByComparingTo("75.00");
-        assertThat(result.entries().get(1).categoryName()).isEqualTo("UNCATEGORIZED");
+        assertThat(result.entries().get(1).categoryName()).isEqualTo("Sem categoria");
         assertThat(result.entries().get(1).percentage()).isEqualByComparingTo("25.00");
     }
 

@@ -38,7 +38,7 @@ class AuthIntegrationTest extends BaseIntegrationTest {
 
         MessageResponse resp = authService.register(new RegisterRequest(email, "Str0ng!Pass123", true));
 
-        assertThat(resp.message()).contains("verification");
+        assertThat(resp.message()).contains("verificar o e-mail");
         User user = userRepository.findByEmailAndDeletedAtIsNull(email).orElseThrow();
         assertThat(user.getAccountStatus().getSlug()).isEqualTo(UserSlugConstants.STATUS_PENDING_VERIFICATION);
         assertThat(noOpEmailService.wasEmailSentTo(email, NoOpEmailService.EmailType.VERIFICATION)).isTrue();
@@ -61,7 +61,7 @@ class AuthIntegrationTest extends BaseIntegrationTest {
 
         MessageResponse secondResp = authService.register(new RegisterRequest(email, "Str0ng!Pass123", true));
 
-        assertThat(secondResp.message()).contains("verification");
+        assertThat(secondResp.message()).contains("verificar o e-mail");
         assertThat(noOpEmailService.wasEmailSentTo(email, NoOpEmailService.EmailType.ACCOUNT_ALREADY_EXISTS)).isTrue();
     }
 
