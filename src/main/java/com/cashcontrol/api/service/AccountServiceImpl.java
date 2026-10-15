@@ -24,7 +24,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -70,8 +72,12 @@ public class AccountServiceImpl implements AccountService {
                 ? accountRepository.findAllByUserIdAndDeletedAtIsNullOrderBySortOrderAscCreatedAtAsc(userId)
                 : accountRepository.findAllByUserIdAndDeletedAtIsNullAndArchivedAtIsNullOrderBySortOrderAscCreatedAtAsc(userId);
 
+        Map<UUID, BigDecimal> balances = new HashMap<>();
+        for (Object[] row : transactionRepository.sumPaidAmountByAccountForUser(userId)) {
+            balances.put((UUID) row[0], (BigDecimal) row[1]);
+        }
         return accounts.stream()
-                .map(a -> toResponse(a, computeBalance(a.getId(), userId)))
+                .map(a -> toResponse(a, balances.getOrDefault(a.getId(), BigDecimal.ZERO)))
                 .toList();
     }
 

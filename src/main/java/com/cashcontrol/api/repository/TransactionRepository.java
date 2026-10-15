@@ -81,6 +81,19 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("accountId") UUID accountId,
             @Param("userId") UUID userId);
 
+    /** O mesmo saldo de {@link #sumPaidAmountByAccountIdAndUserId}, de todas as contas numa consulta: {@code [accountId, saldo]}. */
+    @Query("SELECT t.account.id, COALESCE(SUM(CASE " +
+           "WHEN t.type = com.cashcontrol.api.domain.entity.TransactionType.INCOME " +
+           "  OR t.type = com.cashcontrol.api.domain.entity.TransactionType.REFUND THEN t.amount " +
+           "WHEN t.type = com.cashcontrol.api.domain.entity.TransactionType.EXPENSE THEN -t.amount " +
+           "ELSE t.amount END), 0) " +
+           "FROM Transaction t " +
+           "WHERE t.userId = :userId " +
+           "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
+           "AND t.creditCard IS NULL " +
+           "GROUP BY t.account.id")
+    List<Object[]> sumPaidAmountByAccountForUser(@Param("userId") UUID userId);
+
     /**
      * Marca como PAGAS as compras de uma fatura — o que o pagamento dela significa para cada
      * compra. Só as que ainda estão em aberto: canceladas continuam canceladas.

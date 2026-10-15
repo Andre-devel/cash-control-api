@@ -130,7 +130,7 @@ class DashboardServiceTest {
         when(transactionRepository.sumUncategorized(
                 eq(userId), eq(TransactionType.EXPENSE), eq(from), eq(to), eq(null)))
                 .thenReturn(new BigDecimal("100.00"));
-        when(categoryRepository.findById(catId)).thenReturn(Optional.of(cat));
+        when(categoryRepository.findAllById(List.of(catId))).thenReturn(List.of(cat));
 
         CategoryPieChartResponse result = dashboardService.getCategoryPieChart(
                 userId, from, to, null, TransactionType.EXPENSE);

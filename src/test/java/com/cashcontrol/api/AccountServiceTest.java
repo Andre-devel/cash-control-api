@@ -32,6 +32,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -158,8 +159,9 @@ class AccountServiceTest {
     void listAccounts_excludeArchived_returnsOnlyActive() {
         when(accountRepository.findAllByUserIdAndDeletedAtIsNullAndArchivedAtIsNullOrderBySortOrderAscCreatedAtAsc(userId))
                 .thenReturn(List.of(account));
-        when(transactionRepository.sumPaidAmountByAccountIdAndUserId(accountId, userId))
-                .thenReturn(new BigDecimal("100.00"));
+        List<Object[]> balances = new ArrayList<>();
+        balances.add(new Object[] {accountId, new BigDecimal("100.00")});
+        when(transactionRepository.sumPaidAmountByAccountForUser(userId)).thenReturn(balances);
 
         List<AccountResponse> result = accountService.listAccounts(userId, false);
 
@@ -175,12 +177,13 @@ class AccountServiceTest {
 
         when(accountRepository.findAllByUserIdAndDeletedAtIsNullOrderBySortOrderAscCreatedAtAsc(userId))
                 .thenReturn(List.of(account, archived));
-        when(transactionRepository.sumPaidAmountByAccountIdAndUserId(any(), eq(userId)))
-                .thenReturn(BigDecimal.ZERO);
+        when(transactionRepository.sumPaidAmountByAccountForUser(userId)).thenReturn(List.of());
 
         List<AccountResponse> result = accountService.listAccounts(userId, true);
 
         assertThat(result).hasSize(2);
+        // Conta sem lançamento pago não aparece no agrupamento e tem saldo zero.
+        assertThat(result).allSatisfy(r -> assertThat(r.balance()).isEqualByComparingTo(BigDecimal.ZERO));
     }
 
     // ── getAccount ────────────────────────────────────────────────────────────

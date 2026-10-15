@@ -80,6 +80,7 @@ public class DashboardServiceImpl implements DashboardService {
         TransactionType effectiveType = type != null ? type : TransactionType.EXPENSE;
 
         List<Object[]> rows = transactionRepository.findCategoryBreakdown(userId, effectiveType, from, to, accountId);
+        Map<UUID, String> categoryNames = categoryNamesOf(rows);
         BigDecimal uncategorized = safe(transactionRepository.sumUncategorized(userId, effectiveType, from, to, accountId));
 
         BigDecimal total = rows.stream()
@@ -91,9 +92,7 @@ public class DashboardServiceImpl implements DashboardService {
         for (Object[] row : rows) {
             UUID categoryId = (UUID) row[0];
             BigDecimal amount = (BigDecimal) row[1];
-            String name = categoryRepository.findById(categoryId)
-                    .map(c -> c.getName())
-                    .orElse("Desconhecida");
+            String name = categoryNames.getOrDefault(categoryId, "Desconhecida");
             BigDecimal pct = total.compareTo(BigDecimal.ZERO) == 0
                     ? BigDecimal.ZERO
                     : amount.multiply(BigDecimal.valueOf(100)).divide(total, 2, RoundingMode.HALF_UP);
@@ -288,6 +287,7 @@ public class DashboardServiceImpl implements DashboardService {
 
         List<Object[]> rows = transactionRepository.findCategoryBreakdown(
                 userId, TransactionType.EXPENSE, from, to, null);
+        Map<UUID, String> categoryNames = categoryNamesOf(rows);
         BigDecimal total = rows.stream().map(r -> (BigDecimal) r[1])
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
@@ -295,8 +295,7 @@ public class DashboardServiceImpl implements DashboardService {
                 .map(row -> {
                     UUID catId = (UUID) row[0];
                     BigDecimal amount = (BigDecimal) row[1];
-                    String name = categoryRepository.findById(catId)
-                            .map(c -> c.getName()).orElse("Desconhecida");
+                    String name = categoryNames.getOrDefault(catId, "Desconhecida");
                     BigDecimal pct = total.compareTo(BigDecimal.ZERO) == 0
                             ? BigDecimal.ZERO
                             : amount.multiply(BigDecimal.valueOf(100)).divide(total, 2, RoundingMode.HALF_UP);
@@ -322,6 +321,14 @@ public class DashboardServiceImpl implements DashboardService {
         return newVal.subtract(oldVal)
                 .multiply(BigDecimal.valueOf(100))
                 .divide(oldVal.abs(), 2, RoundingMode.HALF_UP);
+    }
+
+    /** Nomes das categorias de um breakdown numa consulta só, em vez de uma por linha. */
+    private Map<UUID, String> categoryNamesOf(List<Object[]> rows) {
+        List<UUID> ids = rows.stream().map(r -> (UUID) r[0]).toList();
+        Map<UUID, String> names = new HashMap<>();
+        categoryRepository.findAllById(ids).forEach(c -> names.put(c.getId(), c.getName()));
+        return names;
     }
 
     private BigDecimal safe(BigDecimal value) {
