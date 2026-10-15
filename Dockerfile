@@ -29,4 +29,7 @@ USER appuser
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
   CMD wget -qO- http://localhost:8080/actuator/health || exit 1
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Fuso fixo: as regras de negócio usam LocalDate.now() (status PAGO/PENDENTE, vencidas,
+# recorrências) e os @Scheduled rodam no fuso da JVM. Em UTC, o job das 01:00 rodava às
+# 22:00 de Brasília do dia anterior e marcava como vencida a conta que vence "hoje".
+ENTRYPOINT ["java", "-Duser.timezone=America/Sao_Paulo", "-jar", "app.jar"]
