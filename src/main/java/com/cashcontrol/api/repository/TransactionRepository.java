@@ -203,6 +203,9 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
     int markOverdueAll(@Param("today") LocalDate today);
 
     // ── Dashboard queries ─────────────────────────────────────────────────────
+    // Saldo e patrimônio olham só contas ativas (nem arquivadas nem excluídas): são o retrato
+    // de agora. Fluxo do período (receitas, despesas, categorias, maiores gastos, contas a
+    // vencer) exclui só as excluídas: arquivar uma conta não apaga o que se gastou por ela.
 
     @Query("SELECT COALESCE(SUM(CASE " +
            "WHEN t.type = com.cashcontrol.api.domain.entity.TransactionType.INCOME " +
@@ -233,6 +236,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     @Query("SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
            "WHERE t.userId = :userId " +
+           "AND t.account.deletedAt IS NULL " +
            "AND t.type = :type " +
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
            "AND t.paymentDate >= :from AND t.paymentDate <= :to " +
@@ -246,6 +250,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     @Query("SELECT t.category.id, SUM(t.amount) FROM Transaction t " +
            "WHERE t.userId = :userId " +
+           "AND t.account.deletedAt IS NULL " +
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
            "AND t.type = :type " +
            "AND t.paymentDate >= :from AND t.paymentDate <= :to " +
@@ -262,6 +267,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     @Query("SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
            "WHERE t.userId = :userId " +
+           "AND t.account.deletedAt IS NULL " +
            "AND t.type = :type " +
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
            "AND t.paymentDate >= :from AND t.paymentDate <= :to " +
@@ -276,6 +282,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     @Query("SELECT t FROM Transaction t " +
            "WHERE t.userId = :userId " +
+           "AND t.account.deletedAt IS NULL " +
            "AND t.status IN :statuses " +
            "AND t.paymentDate <= :deadline " +
            "ORDER BY t.paymentDate ASC")
@@ -287,6 +294,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     @Query("SELECT t FROM Transaction t " +
            "WHERE t.userId = :userId " +
+           "AND t.account.deletedAt IS NULL " +
            "AND t.type = com.cashcontrol.api.domain.entity.TransactionType.EXPENSE " +
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
            "AND t.paymentDate >= :from AND t.paymentDate <= :to " +
@@ -326,6 +334,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
                    "WHERE user_id = :userId AND status = 'PAID' AND type IN ('INCOME', 'EXPENSE') " +
                    "AND payment_date BETWEEN :from AND :to " +
                    "AND (CAST(:accountId AS uuid) IS NULL OR account_id = CAST(:accountId AS uuid)) " +
+                   "AND account_id IN (SELECT id FROM accounts WHERE deleted_at IS NULL) " +
                    "GROUP BY TO_CHAR(payment_date, 'YYYY-MM'), type " +
                    "ORDER BY TO_CHAR(payment_date, 'YYYY-MM') ASC",
            nativeQuery = true)

@@ -1,5 +1,10 @@
 server:
   port: ${SERVER_PORT:8080}
+  # A API só escuta em 127.0.0.1 atrás do Caddy (docker-compose.yml), então todo request
+  # chega com o IP do proxy. Com isto o ForwardedHeaderFilter aplica o X-Forwarded-For que o
+  # Caddy define e getRemoteAddr() passa a ser o IP do cliente em todo lugar (rate limit,
+  # bloqueio por força bruta, auditoria) — sem cada filtro ler o cabeçalho por conta própria.
+  forward-headers-strategy: framework
 
 spring:
   application:

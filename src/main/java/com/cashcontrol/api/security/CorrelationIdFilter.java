@@ -30,7 +30,7 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
 
         log.debug("Incoming request [{} {}]", request.getMethod(), request.getRequestURI());
 
-        String ip = extractIp(request);
+        String ip = request.getRemoteAddr();
         String userAgent = request.getHeader("User-Agent");
 
         try {
@@ -45,13 +45,6 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
         }
     }
 
-    private static String extractIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
-    }
 
     private static void invokeChain(HttpServletRequest req, HttpServletResponse res, FilterChain chain) {
         try {

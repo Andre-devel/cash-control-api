@@ -43,7 +43,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
         int maxRequests = appProperties.getSecurity().getRateLimitRequestsPerMinute();
         long windowMillis = appProperties.getSecurity().getRateLimitWindowSeconds() * 1000L;
-        String ip = extractIp(request);
+        String ip = request.getRemoteAddr();
 
         RateLimitBucket bucket = buckets.computeIfAbsent(ip, k -> new RateLimitBucket());
 
@@ -65,13 +65,6 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         }
     }
 
-    private static String extractIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
-    }
 
     public void clearBucketsForTesting() {
         buckets.clear();
