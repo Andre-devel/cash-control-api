@@ -65,7 +65,7 @@ class OAuth2IntegrationTest {
         assertThat(oauthAccountRepository.findAll())
                 .anyMatch(oa -> providerUserId.equals(oa.getProviderUserId()));
 
-        assertThat(response.getRedirectedUrl()).contains("?token=");
+        assertThat(response.getRedirectedUrl()).doesNotContain("token=");
     }
 
     @Test
@@ -98,7 +98,7 @@ class OAuth2IntegrationTest {
         assertThat(oauthAccountRepository.findAll())
                 .anyMatch(oa -> providerUserId.equals(oa.getProviderUserId()));
 
-        assertThat(response.getRedirectedUrl()).contains("?token=");
+        assertThat(response.getRedirectedUrl()).doesNotContain("token=");
     }
 
     @Test

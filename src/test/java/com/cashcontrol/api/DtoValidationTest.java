@@ -94,6 +94,12 @@ class DtoValidationTest {
         assertThat(violationFields(req)).contains("consentAccepted");
     }
 
+    @Test
+    void registerRequest_consentMissing_violation() {
+        var req = new RegisterRequest(VALID_EMAIL, VALID_PASSWORD, null);
+        assertThat(violationFields(req)).contains("consentAccepted");
+    }
+
     // =========================================================
     // LoginRequest
     // =========================================================

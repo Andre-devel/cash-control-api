@@ -9,14 +9,13 @@ import com.cashcontrol.api.domain.entity.LoginAttempt;
 import com.cashcontrol.api.domain.entity.OauthAccount;
 import com.cashcontrol.api.domain.entity.OauthProvider;
 import com.cashcontrol.api.domain.entity.User;
+import com.cashcontrol.api.domain.exception.InvalidCredentialsException;
 import com.cashcontrol.api.domain.exception.OAuthProviderException;
 import com.cashcontrol.api.repository.LoginAttemptRepository;
 import com.cashcontrol.api.repository.LookupCache;
 import com.cashcontrol.api.repository.OauthAccountRepository;
 import com.cashcontrol.api.repository.UserRepository;
 import com.cashcontrol.api.security.CorrelationIdHolder;
-import com.cashcontrol.api.security.JwtService;
-import com.cashcontrol.api.security.PermissionResolver;
 import com.cashcontrol.api.security.RefreshTokenCookie;
 import com.cashcontrol.api.service.AccountStatusChecker;
 import com.cashcontrol.api.service.RefreshTokenService;
@@ -34,7 +33,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -46,8 +44,6 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
     private final UserRepository userRepository;
     private final OauthAccountRepository oauthAccountRepository;
     private final LookupCache lookupCache;
-    private final JwtService jwtService;
-    private final PermissionResolver permissionResolver;
     private final AuditService auditService;
     private final AccountStatusChecker accountStatusChecker;
     private final AppProperties appProperties;
@@ -80,7 +76,16 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
 
         User user = resolveUser(userInfo, provider);
 
-        accountStatusChecker.checkAuthenticationEligibility(user);
+        try {
+            accountStatusChecker.checkAuthenticationEligibility(user);
+        } catch (InvalidCredentialsException ex) {
+            // Locked or deleted account: land on the SPA error page instead of a raw API error.
+            log.warn("OAuth2 login refused for user {}: account not eligible", user.getId());
+            auditService.record(AuditEventSlug.AUTH_FAILURE, AuditOutcomeSlug.FAILURE, null, user.getId(),
+                    Map.of("provider", "google"));
+            response.sendRedirect(appProperties.getOauth2FailureRedirectUrl() + "?error=account_unavailable");
+            return;
+        }
 
         if (accountStatusChecker.hasExpiredAutoLockout(user)) {
             user.setAccountStatus(lookupCache.requireAccountStatus(UserSlugConstants.STATUS_ACTIVE));
@@ -89,9 +94,6 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
             user.setLockoutReason(null);
             userRepository.save(user);
         }
-
-        List<String> authorities = permissionResolver.resolveEffectivePermissions(user.getId());
-        String jwt = jwtService.generateToken(user.getId(), authorities, user.getCredentialsUpdatedAt());
 
         auditService.record(AuditEventSlug.AUTH_SUCCESS, AuditOutcomeSlug.SUCCESS, user.getId(), user.getId());
 
@@ -110,7 +112,9 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
                 user, request.getRemoteAddr(), request.getHeader("User-Agent"));
         response.addHeader(HttpHeaders.SET_COOKIE, refreshTokenCookie.build(refreshToken).toString());
 
-        response.sendRedirect(appProperties.getOauth2SuccessRedirectUrl() + "?token=" + jwt);
+        // The access token stays out of the URL (browser history, proxy logs): the frontend
+        // exchanges the refresh cookie set above for one via /auth/refresh.
+        response.sendRedirect(appProperties.getOauth2SuccessRedirectUrl());
     }
 
     private User resolveUser(OAuth2UserInfo userInfo, OauthProvider provider) {
@@ -131,7 +135,18 @@ public class OAuth2AuthenticationSuccessHandler implements AuthenticationSuccess
     }
 
     private User linkExistingUser(User existingUser, OAuth2UserInfo userInfo, OauthProvider provider) {
-        existingUser.setAuthOrigin(lookupCache.requireAuthOrigin(UserSlugConstants.ORIGIN_MIXED));
+        if (UserSlugConstants.STATUS_PENDING_VERIFICATION.equals(existingUser.getAccountStatus().getSlug())) {
+            // Google just proved ownership of this address, but nobody ever proved ownership of the
+            // password set at registration: it may belong to whoever typed someone else's email.
+            // Drop it so only the address owner keeps access; they can set one via password reset.
+            existingUser.setPasswordHash(null);
+            existingUser.setAccountStatus(lookupCache.requireAccountStatus(UserSlugConstants.STATUS_ACTIVE));
+            existingUser.setEmailVerifiedAt(Instant.now());
+            existingUser.setCredentialsUpdatedAt(Instant.now());
+            existingUser.setAuthOrigin(lookupCache.requireAuthOrigin(UserSlugConstants.ORIGIN_GOOGLE));
+        } else {
+            existingUser.setAuthOrigin(lookupCache.requireAuthOrigin(UserSlugConstants.ORIGIN_MIXED));
+        }
         userRepository.save(existingUser);
 
         OauthAccount oauthAccount = buildOauthAccount(existingUser, provider, userInfo);

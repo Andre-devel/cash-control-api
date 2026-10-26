@@ -8,13 +8,12 @@ import com.cashcontrol.api.domain.UserSlugConstants;
 import com.cashcontrol.api.domain.entity.OauthAccount;
 import com.cashcontrol.api.domain.entity.OauthProvider;
 import com.cashcontrol.api.domain.entity.User;
+import com.cashcontrol.api.domain.exception.InvalidCredentialsException;
 import com.cashcontrol.api.domain.exception.OAuthProviderException;
 import com.cashcontrol.api.repository.LoginAttemptRepository;
 import com.cashcontrol.api.repository.LookupCache;
 import com.cashcontrol.api.repository.OauthAccountRepository;
 import com.cashcontrol.api.repository.UserRepository;
-import com.cashcontrol.api.security.JwtService;
-import com.cashcontrol.api.security.PermissionResolver;
 import com.cashcontrol.api.security.oauth2.CookieOAuth2AuthorizationRequestRepository;
 import com.cashcontrol.api.security.oauth2.OAuth2AuthenticationSuccessHandler;
 import com.cashcontrol.api.security.oauth2.OAuth2UserInfo;
@@ -37,7 +36,6 @@ import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -57,8 +55,6 @@ class OAuth2SuccessHandlerTest {
     @Mock private UserRepository userRepository;
     @Mock private OauthAccountRepository oauthAccountRepository;
     @Mock private LookupCache lookupCache;
-    @Mock private JwtService jwtService;
-    @Mock private PermissionResolver permissionResolver;
     @Mock private AuditService auditService;
     @Mock private AccountStatusChecker accountStatusChecker;
     @Mock private AppProperties appProperties;
@@ -105,8 +101,6 @@ class OAuth2SuccessHandlerTest {
         when(dataMasker.maskIp(anyString())).thenReturn("127.0.0.0");
         when(dataMasker.truncateUserAgent(anyString(), anyInt())).thenReturn("TestAgent/1.0");
         when(dataMasker.maskEmail(anyString())).thenReturn("t***@example.com");
-        when(jwtService.generateToken(any(), any(), any())).thenReturn("jwt.token.here");
-        when(permissionResolver.resolveEffectivePermissions(any())).thenReturn(List.of("user:read"));
         when(accountStatusChecker.hasExpiredAutoLockout(any())).thenReturn(false);
         doNothing().when(accountStatusChecker).checkAuthenticationEligibility(any());
 
@@ -116,7 +110,7 @@ class OAuth2SuccessHandlerTest {
     }
 
     @Test
-    void newGoogleUser_createsUserAndOauthAccount_redirectsWithToken() throws Exception {
+    void newGoogleUser_createsUserAndOauthAccount_redirectsToCallback() throws Exception {
         OAuth2UserInfo userInfo = new OAuth2UserInfo("new@example.com", "google-sub-123", "New User");
         when(oAuth2UserInfoExtractor.extract(any())).thenReturn(userInfo);
 
@@ -136,7 +130,7 @@ class OAuth2SuccessHandlerTest {
                 eq(null), any(UUID.class), any());
         verify(auditService).record(eq(AuditEventSlug.AUTH_SUCCESS), eq(AuditOutcomeSlug.SUCCESS),
                 any(UUID.class), any(UUID.class));
-        verify(response).sendRedirect(contains("?token=jwt.token.here"));
+        verify(response).sendRedirect("http://localhost:3000/auth/oauth2/callback");
     }
 
     @Test
@@ -158,11 +152,52 @@ class OAuth2SuccessHandlerTest {
         verify(oauthAccountRepository).save(any(OauthAccount.class));
         verify(auditService).record(eq(AuditEventSlug.ACCOUNT_LINKED_GOOGLE), eq(AuditOutcomeSlug.SUCCESS),
                 any(UUID.class), any(UUID.class), any());
-        verify(response).sendRedirect(contains("?token=jwt.token.here"));
+        verify(response).sendRedirect("http://localhost:3000/auth/oauth2/callback");
     }
 
     @Test
-    void returningGoogleUser_updatesLastUsedAt_redirectsWithToken() throws Exception {
+    void pendingLocalUser_isActivatedAndLosesUnprovenPassword() throws Exception {
+        OAuth2UserInfo userInfo = new OAuth2UserInfo("pending@example.com", "google-sub-321", "Pending User");
+        when(oAuth2UserInfoExtractor.extract(any())).thenReturn(userInfo);
+        when(oauthAccountRepository.findByProviderIdAndProviderUserIdAndUnlinkedAtIsNull(any(), anyString()))
+                .thenReturn(Optional.empty());
+
+        User pendingUser = buildActiveUser(UserSlugConstants.ORIGIN_LOCAL);
+        pendingUser.setAccountStatus(TestEntityFactory.accountStatus(UserSlugConstants.STATUS_PENDING_VERIFICATION));
+        pendingUser.setEmailVerifiedAt(null);
+        pendingUser.setPasswordHash("hash-set-by-whoever-registered");
+        when(userRepository.findByEmailAndDeletedAtIsNull("pending@example.com"))
+                .thenReturn(Optional.of(pendingUser));
+        when(userRepository.save(any())).thenReturn(pendingUser);
+
+        handler.onAuthenticationSuccess(request, response, authentication);
+
+        assertThat(pendingUser.getPasswordHash()).isNull();
+        assertThat(pendingUser.getAccountStatus().getSlug()).isEqualTo(UserSlugConstants.STATUS_ACTIVE);
+        assertThat(pendingUser.getEmailVerifiedAt()).isNotNull();
+        assertThat(pendingUser.getAuthOrigin().getSlug()).isEqualTo(UserSlugConstants.ORIGIN_GOOGLE);
+        verify(response).sendRedirect("http://localhost:3000/auth/oauth2/callback");
+    }
+
+    @Test
+    void ineligibleUser_redirectsToFailureUrlWithoutSession() throws Exception {
+        OAuth2UserInfo userInfo = new OAuth2UserInfo("locked@example.com", "google-sub-654", "Locked User");
+        when(oAuth2UserInfoExtractor.extract(any())).thenReturn(userInfo);
+
+        User lockedUser = buildActiveUser(UserSlugConstants.ORIGIN_GOOGLE);
+        when(oauthAccountRepository.findByProviderIdAndProviderUserIdAndUnlinkedAtIsNull(any(), anyString()))
+                .thenReturn(Optional.of(buildOauthAccount(lockedUser)));
+        doThrow(new InvalidCredentialsException("Falha na autenticação."))
+                .when(accountStatusChecker).checkAuthenticationEligibility(lockedUser);
+
+        handler.onAuthenticationSuccess(request, response, authentication);
+
+        verify(refreshTokenService, never()).issue(any(), any(), any());
+        verify(response).sendRedirect("http://localhost:3000/auth/oauth2/error?error=account_unavailable");
+    }
+
+    @Test
+    void returningGoogleUser_updatesLastUsedAt_redirectsToCallback() throws Exception {
         OAuth2UserInfo userInfo = new OAuth2UserInfo("returning@example.com", "google-sub-789", "Returning User");
         when(oAuth2UserInfoExtractor.extract(any())).thenReturn(userInfo);
 
@@ -178,7 +213,7 @@ class OAuth2SuccessHandlerTest {
         verify(oauthAccountRepository).save(existingAccount);
         verify(auditService).record(eq(AuditEventSlug.AUTH_SUCCESS), eq(AuditOutcomeSlug.SUCCESS),
                 any(UUID.class), any(UUID.class));
-        verify(response).sendRedirect(contains("?token=jwt.token.here"));
+        verify(response).sendRedirect("http://localhost:3000/auth/oauth2/callback");
     }
 
     @Test
