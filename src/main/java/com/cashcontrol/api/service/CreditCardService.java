@@ -1,5 +1,6 @@
 package com.cashcontrol.api.service;
 
+import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.CreditCard;
 import com.cashcontrol.api.domain.entity.Invoice;
 import com.cashcontrol.api.domain.entity.Transaction;
@@ -36,6 +37,13 @@ public interface CreditCardService {
     InvoiceResponse getInvoice(UUID cardId, String referenceMonth, UUID userId, int page, int size);
 
     InvoiceResponse payInvoice(UUID invoiceId, PayInvoiceRequest request, UUID userId);
+
+    /**
+     * Grava o pagamento já validado (fatura e conta do usuário, valor que cabe no restante)
+     * e aplica à fatura. Sobre fatura quitada por "marcar como paga" só liga o pagamento a
+     * ela, sem mexer no pago. Devolve a transação gravada.
+     */
+    Transaction recordInvoicePayment(Invoice invoice, Account sourceAccount, BigDecimal amount, LocalDate paymentDate);
 
     LimitUsageResponse getLimitUsage(UUID cardId, UUID userId);
 

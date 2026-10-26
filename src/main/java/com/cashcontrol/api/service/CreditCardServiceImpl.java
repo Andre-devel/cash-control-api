@@ -249,10 +249,19 @@ public class CreditCardServiceImpl implements CreditCardService {
 
         LocalDate paymentDate = request.paymentDate() != null ? request.paymentDate() : LocalDate.now();
 
+        recordInvoicePayment(invoice, sourceAccount, paymentAmount, paymentDate);
+
+        // Return updated invoice with first page of items
+        return getInvoice(invoice.getCreditCard().getId(), invoice.getReferenceMonth(), userId, 0, 20);
+    }
+
+    @Override
+    public Transaction recordInvoicePayment(Invoice invoice, Account sourceAccount, BigDecimal paymentAmount,
+                                            LocalDate paymentDate) {
         // Saída da conta, não despesa: o gasto são as compras da fatura, marcadas como PAGAS
         // logo abaixo. Como EXPENSE, o dashboard contaria a mesma compra duas vezes.
         Transaction tx = new Transaction();
-        tx.setUserId(userId);
+        tx.setUserId(invoice.getUserId());
         tx.setAccount(sourceAccount);
         tx.setType(TransactionType.INVOICE_PAYMENT);
         tx.setStatus(TransactionStatus.PAID);
@@ -265,6 +274,12 @@ public class CreditCardServiceImpl implements CreditCardService {
         tx.setPaidInvoice(invoice);
         transactionRepository.save(tx);
 
+        // Quitada por "marcar como paga": o usuário já declarou o total pago e as compras já
+        // estão PAGAS. O pagamento só passa a existir na conta; somá-lo ao pago dobraria a quitação.
+        if (invoice.isPaidWithoutTransaction()) {
+            return tx;
+        }
+
         // Na parcial, o que faltou pagar vira item rotativo da fatura seguinte.
         invoice.applyPaidAmount(invoice.getPaidAmount().add(paymentAmount), paymentDate);
         invoiceRepository.save(invoice);
@@ -272,9 +287,7 @@ public class CreditCardServiceImpl implements CreditCardService {
         // Também na parcial: o que faltou pagar virou item rotativo da fatura seguinte, então
         // as compras desta já estão quitadas do ponto de vista delas.
         transactionRepository.markInvoicePurchasesPaid(invoice.getId(), paymentDate);
-
-        // Return updated invoice with first page of items
-        return getInvoice(invoice.getCreditCard().getId(), invoice.getReferenceMonth(), userId, 0, 20);
+        return tx;
     }
 
     @Override

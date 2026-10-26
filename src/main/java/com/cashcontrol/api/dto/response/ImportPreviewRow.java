@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 @Schema(description = "Lançamento do extrato já classificado, ainda não gravado")
@@ -72,5 +73,32 @@ public record ImportPreviewRow(
         boolean duplicate,
 
         @Schema(description = "true quando o histórico não é conhecido e o tipo foi deduzido do sinal do valor")
-        boolean unknownHistory
+        boolean unknownHistory,
+
+        @Schema(description = "true quando o dinheiro saiu da conta. Dá a direção de uma TRANSFER.")
+        boolean outgoing,
+
+        @Schema(description = """
+                Conta do outro lado quando type é TRANSFER: a conta de investimento do usuário, \
+                para aplicação e resgate. Devolver na confirmação.""")
+        UUID transferAccountId,
+
+        @Schema(description = "Nome da conta em transferAccountId", example = "Investimentos")
+        String transferAccountName,
+
+        @Schema(description = """
+                Fatura que a linha paga. Com type INVOICE_PAYMENT, já casada; com EXPENSE e \
+                invoiceAmountMismatch, só uma sugestão para o usuário confirmar.""")
+        UUID invoiceId,
+
+        @Schema(description = "Cartão e mês da fatura em invoiceId", example = "Inter - PF · 2026-09")
+        String invoiceLabel,
+
+        @Schema(description = """
+                true quando a descrição indica pagamento de fatura, mas o valor não bate com o \
+                total da fatura sugerida. A linha fica como despesa até o usuário decidir.""")
+        boolean invoiceAmountMismatch,
+
+        @Schema(description = "Faturas que esta linha de saída pode pagar, as de vencimento mais próximo primeiro")
+        List<ImportInvoiceOption> invoiceOptions
 ) {}

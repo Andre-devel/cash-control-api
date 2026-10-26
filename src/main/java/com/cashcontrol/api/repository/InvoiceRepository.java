@@ -57,4 +57,11 @@ public interface InvoiceRepository extends JpaRepository<Invoice, UUID> {
 
     List<Invoice> findAllByUserIdAndDueDateLessThanEqualAndStatusIn(
             UUID userId, LocalDate dueDate, List<InvoiceStatus> statuses);
+
+    /** Candidatas a casar com um pagamento de fatura lido do extrato; o cartão vem junto para o rótulo. */
+    @Query("SELECT i FROM Invoice i JOIN FETCH i.creditCard " +
+           "WHERE i.userId = :userId AND i.dueDate BETWEEN :from AND :to")
+    List<Invoice> findAllWithCardByUserIdAndDueDateBetween(@Param("userId") UUID userId,
+                                                           @Param("from") LocalDate from,
+                                                           @Param("to") LocalDate to);
 }

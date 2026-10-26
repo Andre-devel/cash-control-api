@@ -2,8 +2,11 @@ package com.cashcontrol.api.service;
 
 import com.cashcontrol.api.config.AppProperties;
 import com.cashcontrol.api.domain.entity.Account;
+import com.cashcontrol.api.domain.entity.AccountType;
 import com.cashcontrol.api.domain.entity.Category;
 import com.cashcontrol.api.domain.entity.CategoryRule;
+import com.cashcontrol.api.domain.entity.Invoice;
+import com.cashcontrol.api.domain.entity.InvoiceStatus;
 import com.cashcontrol.api.domain.entity.PaymentMethod;
 import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.StatementFormat;
@@ -14,6 +17,7 @@ import com.cashcontrol.api.domain.exception.BusinessRuleException;
 import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
 import com.cashcontrol.api.dto.request.ImportCommitRequest;
 import com.cashcontrol.api.dto.request.ImportCommitRow;
+import com.cashcontrol.api.dto.response.ImportInvoiceOption;
 import com.cashcontrol.api.dto.response.ImportPreviewResponse;
 import com.cashcontrol.api.dto.response.ImportPreviewRow;
 import com.cashcontrol.api.dto.response.ImportResultResponse;
@@ -21,6 +25,7 @@ import com.cashcontrol.api.dto.response.ImportRowError;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CategoryRuleRepository;
+import com.cashcontrol.api.repository.InvoiceRepository;
 import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.statement.ParsedStatement;
@@ -36,13 +41,18 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Stream;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -51,15 +61,26 @@ import java.util.stream.Collectors;
 public class StatementImportServiceImpl implements StatementImportService {
 
     /**
-     * Tipos que um extrato de conta corrente pode gerar. TRANSFER e
-     * MANUAL_ADJUSTMENT têm endpoints próprios e semântica de valor com sinal —
-     * não podem entrar por aqui nem que o cliente peça.
+     * Tipos que viram uma transação simples na conta importada. TRANSFER e INVOICE_PAYMENT
+     * também entram, mas pelos fluxos próprios ({@link #importTransfer},
+     * {@link #importInvoicePayment}); MANUAL_ADJUSTMENT nunca.
      */
     private static final Set<TransactionType> IMPORTABLE_TYPES =
             Set.of(TransactionType.INCOME, TransactionType.EXPENSE, TransactionType.REFUND);
 
+    /**
+     * Janela, em dias em volta da data do pagamento, em que o vencimento de uma fatura a
+     * deixa candidata: paga-se até umas duas semanas antes do vencimento, e às vezes com
+     * alguns dias de atraso.
+     */
+    private static final int INVOICE_DUE_DAYS_BEFORE_PAYMENT = 5;
+    private static final int INVOICE_DUE_DAYS_AFTER_PAYMENT = 15;
+
     private final TransactionRepository transactionRepository;
     private final AccountRepository accountRepository;
+    private final InvoiceRepository invoiceRepository;
+    private final AccountService accountService;
+    private final CreditCardService creditCardService;
     private final CategoryRepository categoryRepository;
     private final CategoryRuleRepository categoryRuleRepository;
     private final PaymentMethodRepository paymentMethodRepository;
@@ -92,14 +113,19 @@ public class StatementImportServiceImpl implements StatementImportService {
         CategorySuggester.History history = categorySuggester.loadHistory(
                 userId, statement.rows().stream().map(ParsedStatementRow::description).toList());
         MerchantAliasService.Aliases aliases = merchantAliasService.load(userId);
+        Account investmentAccount = findInvestmentAccount(account, userId);
+        InvoiceMatcher invoices = new InvoiceMatcher(loadInvoiceCandidates(statement.rows(), userId));
 
         List<ImportPreviewRow> rows = new ArrayList<>(statement.rows().size());
         for (int i = 0; i < statement.rows().size(); i++) {
-            rows.add(toPreviewRow(statement.rows().get(i), hashes.get(i), alreadyImported, rules, history, aliases));
+            rows.add(toPreviewRow(statement.rows().get(i), hashes.get(i), alreadyImported, rules, history, aliases,
+                    investmentAccount, invoices));
         }
 
         int duplicateCount = (int) rows.stream().filter(ImportPreviewRow::duplicate).count();
-        int warningCount = (int) rows.stream().filter(ImportPreviewRow::unknownHistory).count();
+        int warningCount = (int) rows.stream()
+                .filter(row -> row.unknownHistory() || row.invoiceAmountMismatch())
+                .count();
 
         return new ImportPreviewResponse(
                 file.getOriginalFilename(),
@@ -138,6 +164,7 @@ public class StatementImportServiceImpl implements StatementImportService {
         List<Transaction> toSave = new ArrayList<>();
         List<ImportRowError> errors = new ArrayList<>();
         int skippedDuplicates = 0;
+        int importedByOwnFlow = 0;
 
         for (ImportCommitRow row : request.rows()) {
             // Antes do desvio de duplicata de propósito: o nome que o usuário deixou na
@@ -149,7 +176,15 @@ public class StatementImportServiceImpl implements StatementImportService {
                 continue;
             }
             try {
-                toSave.add(toTransaction(row, account, userId, paymentMethods, categories));
+                switch (row.type()) {
+                    case TRANSFER -> importTransfer(row, account, userId);
+                    case INVOICE_PAYMENT -> importInvoicePayment(row, account, userId);
+                    default -> {
+                        toSave.add(toTransaction(row, account, userId, paymentMethods, categories));
+                        continue;
+                    }
+                }
+                importedByOwnFlow++;
             } catch (BusinessRuleException | ResourceNotFoundException e) {
                 errors.add(new ImportRowError(row.lineNumber(), e.getMessage()));
             }
@@ -157,17 +192,47 @@ public class StatementImportServiceImpl implements StatementImportService {
 
         transactionRepository.saveAll(toSave);
 
-        return new ImportResultResponse(toSave.size(), skippedDuplicates, errors.size(), errors);
+        return new ImportResultResponse(toSave.size() + importedByOwnFlow, skippedDuplicates, errors.size(), errors);
     }
 
     // ── Prévia ────────────────────────────────────────────────────────────────
 
     private ImportPreviewRow toPreviewRow(ParsedStatementRow row, String externalRef, Set<String> alreadyImported,
                                           List<CategoryRule> rules, CategorySuggester.History history,
-                                          MerchantAliasService.Aliases aliases) {
+                                          MerchantAliasService.Aliases aliases, Account investmentAccount,
+                                          InvoiceMatcher invoices) {
         StatementHistoryMapper.Mapping mapping = historyMapper.map(row.rawHistory(), row.signedAmount());
         CategorySuggester.Suggestion suggestion = categorySuggester.suggest(row.description(), rules, history);
         String alias = merchantAliasService.suggest(row.description(), aliases);
+        BigDecimal amount = row.signedAmount().abs();
+
+        // Aplicação, resgate e pagamento de fatura movem dinheiro sem ser gasto nem renda.
+        // Como despesa/receita inflariam o dashboard (e a fatura contaria em dobro, já que as
+        // compras dela são despesas). Sem conta de investimento ou fatura que case, fica o
+        // que o histórico diz — e o usuário troca na prévia.
+        TransactionType type = mapping.type();
+        boolean outgoing = row.signedAmount().signum() < 0;
+        Account transferAccount = null;
+        Invoice invoice = null;
+        boolean invoiceAmountMismatch = false;
+        if (mapping.investment() && investmentAccount != null) {
+            type = TransactionType.TRANSFER;
+            transferAccount = investmentAccount;
+        } else if (type == TransactionType.EXPENSE && looksLikeInvoicePayment(row.description())) {
+            invoice = invoices.claim(row.date(), amount);
+            if (invoice != null) {
+                // Valor fora da tolerância é sinal de dado errado na fatura ou de outro
+                // pagamento; casar mesmo assim deixaria a fatura PARCIAL e criaria um
+                // rotativo que talvez não exista. Fica a sugestão, a decisão é do usuário.
+                invoiceAmountMismatch = !InvoiceMatcher.amountMatches(invoice, amount);
+                if (!invoiceAmountMismatch) {
+                    type = TransactionType.INVOICE_PAYMENT;
+                }
+            }
+        }
+        List<ImportInvoiceOption> invoiceOptions = outgoing
+                ? invoices.optionsFor(row.date()).stream().map(StatementImportServiceImpl::toInvoiceOption).toList()
+                : List.of();
 
         return new ImportPreviewRow(
                 row.lineNumber(),
@@ -175,8 +240,8 @@ public class StatementImportServiceImpl implements StatementImportService {
                 row.date(),
                 truncateDescription(row.description()),
                 row.rawHistory().trim(),
-                row.signedAmount().abs(),
-                mapping.type(),
+                amount,
+                type,
                 mapping.paymentMethod(),
                 MerchantKey.of(row.description()),
                 alias != null ? truncateDescription(alias) : null,
@@ -186,7 +251,98 @@ public class StatementImportServiceImpl implements StatementImportService {
                 suggestion.subcategoryName(),
                 suggestion.source(),
                 alreadyImported.contains(externalRef),
-                mapping.unknownHistory());
+                mapping.unknownHistory(),
+                outgoing,
+                transferAccount != null ? transferAccount.getId() : null,
+                transferAccount != null ? transferAccount.getName() : null,
+                invoice != null ? invoice.getId() : null,
+                invoice != null ? invoiceLabel(invoice) : null,
+                invoiceAmountMismatch,
+                invoiceOptions);
+    }
+
+    private static ImportInvoiceOption toInvoiceOption(Invoice invoice) {
+        return new ImportInvoiceOption(invoice.getId(), invoiceLabel(invoice), invoice.getTotalAmount(),
+                invoice.getDueDate());
+    }
+
+    private static boolean looksLikeInvoicePayment(String description) {
+        return StatementHistoryMapper.normalize(description).contains("fatura");
+    }
+
+    private static String invoiceLabel(Invoice invoice) {
+        return invoice.getCreditCard().getName() + " · " + invoice.getReferenceMonth();
+    }
+
+    /**
+     * A primeira conta de investimento ativa do usuário, na ordem da tela de contas. Com mais
+     * de uma, a escolha é dessa ordem; o usuário que quiser outra muda a ordem das contas.
+     */
+    private Account findInvestmentAccount(Account importedAccount, UUID userId) {
+        return accountRepository
+                .findAllByUserIdAndDeletedAtIsNullAndArchivedAtIsNullOrderBySortOrderAscCreatedAtAsc(userId)
+                .stream()
+                .filter(candidate -> candidate.getType() == AccountType.INVESTMENT)
+                .filter(candidate -> !candidate.getId().equals(importedAccount.getId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private List<Invoice> loadInvoiceCandidates(List<ParsedStatementRow> rows, UUID userId) {
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+        LocalDate first = rows.stream().map(ParsedStatementRow::date).min(LocalDate::compareTo).orElseThrow();
+        LocalDate last = rows.stream().map(ParsedStatementRow::date).max(LocalDate::compareTo).orElseThrow();
+        return invoiceRepository.findAllWithCardByUserIdAndDueDateBetween(userId,
+                first.minusDays(INVOICE_DUE_DAYS_BEFORE_PAYMENT), last.plusDays(INVOICE_DUE_DAYS_AFTER_PAYMENT));
+    }
+
+    /**
+     * Casa pagamentos do extrato com faturas, uma fatura por pagamento. Fatura já quitada por
+     * um pagamento lançado não é candidata; a quitada por "marcar como paga" é, porque o
+     * pagamento real dela ainda não existe na conta.
+     */
+    private static final class InvoiceMatcher {
+        private final List<Invoice> candidates;
+        private final Set<UUID> claimed = new HashSet<>();
+
+        InvoiceMatcher(List<Invoice> candidates) {
+            this.candidates = candidates;
+        }
+
+        /** Até 1% do total, e no mínimo R$ 1,00: centavos de IOF e arredondamento. */
+        static boolean amountMatches(Invoice invoice, BigDecimal amount) {
+            BigDecimal tolerance = invoice.getTotalAmount().multiply(new BigDecimal("0.01")).max(BigDecimal.ONE);
+            return invoice.getTotalAmount().subtract(amount).abs().compareTo(tolerance) <= 0;
+        }
+
+        /** As que vencem perto da data, para o usuário escolher; não reserva nenhuma. */
+        List<Invoice> optionsFor(LocalDate paymentDate) {
+            return eligible(paymentDate)
+                    .sorted(Comparator.comparing(invoice -> Math.abs(ChronoUnit.DAYS.between(paymentDate, invoice.getDueDate()))))
+                    .toList();
+        }
+
+        Invoice claim(LocalDate paymentDate, BigDecimal amount) {
+            Invoice best = eligible(paymentDate)
+                    .filter(invoice -> !claimed.contains(invoice.getId()))
+                    // Valor mais próximo primeiro; no empate, o vencimento mais próximo.
+                    .min(Comparator.<Invoice, BigDecimal>comparing(invoice -> invoice.getTotalAmount().subtract(amount).abs())
+                            .thenComparing(invoice -> Math.abs(ChronoUnit.DAYS.between(paymentDate, invoice.getDueDate()))))
+                    .orElse(null);
+            if (best != null) {
+                claimed.add(best.getId());
+            }
+            return best;
+        }
+
+        private Stream<Invoice> eligible(LocalDate paymentDate) {
+            return candidates.stream()
+                    .filter(invoice -> invoice.getStatus() != InvoiceStatus.PAID || invoice.isPaidWithoutTransaction())
+                    .filter(invoice -> !invoice.getDueDate().isBefore(paymentDate.minusDays(INVOICE_DUE_DAYS_BEFORE_PAYMENT)))
+                    .filter(invoice -> !invoice.getDueDate().isAfter(paymentDate.plusDays(INVOICE_DUE_DAYS_AFTER_PAYMENT)));
+        }
     }
 
     /**
@@ -212,7 +368,7 @@ public class StatementImportServiceImpl implements StatementImportService {
                                       Map<UUID, Category> categories) {
         if (!IMPORTABLE_TYPES.contains(row.type())) {
             throw new BusinessRuleException(
-                    "Tipo não permitido na importação: " + row.type() + ". Use INCOME, EXPENSE ou REFUND.");
+                    "Tipo não permitido na importação: " + row.type() + ".");
         }
         if (row.paymentMethod() == PaymentMethodSlug.CREDIT_CARD) {
             throw new BusinessRuleException(
@@ -246,6 +402,49 @@ public class StatementImportServiceImpl implements StatementImportService {
         }
 
         return tx;
+    }
+
+    /** Aplicação ou resgate: as duas pernas, com a da conta importada levando o externalRef. */
+    private void importTransfer(ImportCommitRow row, Account account, UUID userId) {
+        if (row.transferAccountId() == null || row.outgoing() == null) {
+            throw new BusinessRuleException("Transferência sem a conta do outro lado.");
+        }
+        Account counterpart = accountRepository.findByIdAndUserIdAndDeletedAtIsNull(row.transferAccountId(), userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Account not found: " + row.transferAccountId()));
+
+        boolean outgoing = row.outgoing();
+        List<Transaction> legs = accountService.transfer(
+                outgoing ? account : counterpart,
+                outgoing ? counterpart : account,
+                row.amount(), row.date(), truncateDescription(row.description()));
+        legs.get(outgoing ? 0 : 1).setExternalRef(row.externalRef());
+    }
+
+    /**
+     * Valida aqui o que {@code payInvoice} validaria: {@code CreditCardService} é
+     * transacional, e uma exceção atravessando o proxy dele marcaria a importação inteira
+     * para rollback, em vez de só reportar a linha.
+     */
+    private void importInvoicePayment(ImportCommitRow row, Account account, UUID userId) {
+        if (row.invoiceId() == null) {
+            throw new BusinessRuleException("Pagamento de fatura sem a fatura.");
+        }
+        Invoice invoice = invoiceRepository.findByIdAndUserId(row.invoiceId(), userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Invoice not found: " + row.invoiceId()));
+
+        if (!invoice.isPaidWithoutTransaction()) {
+            if (invoice.getStatus() == InvoiceStatus.PAID) {
+                throw new BusinessRuleException("A fatura " + invoiceLabel(invoice) + " já está paga.");
+            }
+            BigDecimal remaining = invoice.getTotalAmount().subtract(invoice.getPaidAmount());
+            if (row.amount().compareTo(remaining) > 0) {
+                throw new BusinessRuleException("O valor é maior que o restante da fatura " + invoiceLabel(invoice)
+                                                + " (" + remaining.toPlainString() + ").");
+            }
+        }
+
+        Transaction tx = creditCardService.recordInvoicePayment(invoice, account, row.amount(), row.date());
+        tx.setExternalRef(row.externalRef());
     }
 
     // ── Apoio ─────────────────────────────────────────────────────────────────

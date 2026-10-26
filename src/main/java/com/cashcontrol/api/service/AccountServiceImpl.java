@@ -187,7 +187,22 @@ public class AccountServiceImpl implements AccountService {
 
         Account source = findActiveAccount(request.sourceAccountId(), userId);
         Account destination = findActiveAccount(request.destinationAccountId(), userId);
+        LocalDate date = request.date() != null ? request.date() : LocalDate.now();
 
+        transfer(source, destination, request.amount(), date, request.description());
+    }
+
+    /**
+     * Sem {@code @Transactional} de propósito: entra na transação de quem chama, e uma regra
+     * violada aqui não marca essa transação como rollback-only. O import de extrato depende
+     * disso para reportar o erro na linha e seguir com as demais.
+     */
+    @Override
+    public List<Transaction> transfer(Account source, Account destination, BigDecimal amount,
+                                      LocalDate date, String description) {
+        if (source.getId().equals(destination.getId())) {
+            throw new BusinessRuleException("As contas de origem e destino devem ser diferentes.");
+        }
         if (source.getArchivedAt() != null) {
             throw new BusinessRuleException("A conta de origem está arquivada e não pode ser usada em transferências.");
         }
@@ -199,20 +214,17 @@ public class AccountServiceImpl implements AccountService {
         }
 
         UUID transferGroupId = UUID.randomUUID();
-        LocalDate date = request.date() != null ? request.date() : LocalDate.now();
-        String description = request.description() != null && !request.description().isBlank()
-                ? request.description()
-                : "Transferência";
+        String legDescription = description != null && !description.isBlank() ? description : "Transferência";
         PaymentMethod paymentMethod = resolveDefaultPaymentMethod();
 
         // Source leg: negative amount represents debit from the account
         Transaction sourceLeg = new Transaction();
-        sourceLeg.setUserId(userId);
+        sourceLeg.setUserId(source.getUserId());
         sourceLeg.setAccount(source);
         sourceLeg.setType(TransactionType.TRANSFER);
         sourceLeg.setStatus(TransactionStatus.PAID);
-        sourceLeg.setAmount(request.amount().negate());
-        sourceLeg.setDescription(description);
+        sourceLeg.setAmount(amount.negate());
+        sourceLeg.setDescription(legDescription);
         sourceLeg.setCompetenceDate(date);
         sourceLeg.setPaymentDate(date);
         sourceLeg.setPaymentMethod(paymentMethod);
@@ -220,12 +232,12 @@ public class AccountServiceImpl implements AccountService {
 
         // Destination leg: positive amount represents credit to the account
         Transaction destinationLeg = new Transaction();
-        destinationLeg.setUserId(userId);
+        destinationLeg.setUserId(destination.getUserId());
         destinationLeg.setAccount(destination);
         destinationLeg.setType(TransactionType.TRANSFER);
         destinationLeg.setStatus(TransactionStatus.PAID);
-        destinationLeg.setAmount(request.amount());
-        destinationLeg.setDescription(description);
+        destinationLeg.setAmount(amount);
+        destinationLeg.setDescription(legDescription);
         destinationLeg.setCompetenceDate(date);
         destinationLeg.setPaymentDate(date);
         destinationLeg.setPaymentMethod(paymentMethod);
@@ -233,6 +245,7 @@ public class AccountServiceImpl implements AccountService {
 
         transactionRepository.save(sourceLeg);
         transactionRepository.save(destinationLeg);
+        return List.of(sourceLeg, destinationLeg);
     }
 
     @Override

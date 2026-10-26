@@ -181,6 +181,38 @@ class StatementImportIntegrationTest {
         assertThat(preview().importableCount()).isEqualTo(14);
     }
 
+    @Test
+    void withInvestmentAccount_applicationsAndRedemptionsBecomeTransfers() {
+        UUID investmentId = accountService.createAccount(
+                new CreateAccountRequest("Investimentos", AccountType.INVESTMENT, "BRL", null, 1, null),
+                userId).id();
+        ImportPreviewResponse preview = preview();
+        // Mesma conta do teste de saldo acima; a transferência sai ou entra conforme a direção.
+        BigDecimal expected = preview.rows().stream()
+                .map(row -> switch (row.type()) {
+                    case EXPENSE -> row.amount().negate();
+                    case TRANSFER -> row.outgoing() ? row.amount().negate() : row.amount();
+                    default -> row.amount();
+                })
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        assertThat(commit(preview.rows()).imported()).isEqualTo(17);
+
+        // A conta corrente fecha com o extrato, e o que foi aplicado está na de investimento.
+        assertThat(transactionRepository.sumPaidAmountByAccountIdAndUserId(accountId, userId))
+                .isEqualByComparingTo(expected);
+        // Aplicados 413,00 + 9.000,00; resgatados 155,00 + 3.978,80.
+        assertThat(transactionRepository.sumPaidAmountByAccountIdAndUserId(investmentId, userId))
+                .isEqualByComparingTo("5279.20");
+        assertThat(transactionRepository.findAllByAccount_IdAndUserId(accountId, userId, PageRequest.of(0, 50)))
+                .filteredOn(tx -> tx.getType() == TransactionType.TRANSFER)
+                .hasSize(4)
+                .allSatisfy(tx -> assertThat(tx.getExternalRef()).isNotNull());
+
+        // Reimportar continua sem efeito: o externalRef está na perna da conta importada.
+        assertThat(preview().duplicateCount()).isEqualTo(17);
+    }
+
     // ── apoio ─────────────────────────────────────────────────────────────────
 
     private ImportPreviewResponse preview() {
@@ -191,7 +223,8 @@ class StatementImportIntegrationTest {
         List<ImportCommitRow> approved = rows.stream()
                 .map(row -> new ImportCommitRow(
                         row.lineNumber(), row.externalRef(), row.date(), row.description(), row.description(),
-                        row.amount(), row.type(), row.paymentMethod(), row.suggestedCategoryId()))
+                        row.amount(), row.type(), row.paymentMethod(), row.suggestedCategoryId(),
+                        row.outgoing(), row.transferAccountId(), row.invoiceId()))
                 .toList();
         return statementImportService.commit(
                 new ImportCommitRequest(accountId, StatementFormat.INTER_CSV, approved), userId);

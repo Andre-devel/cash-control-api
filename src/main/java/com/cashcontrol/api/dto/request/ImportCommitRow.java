@@ -42,12 +42,21 @@ public record ImportCommitRow(
         @Schema(description = "Valor positivo. A direção vem de type.", requiredMode = Schema.RequiredMode.REQUIRED, example = "144.06")
         @NotNull @DecimalMin("0.01") @Digits(integer = 17, fraction = 2) BigDecimal amount,
 
-        @Schema(description = "INCOME, EXPENSE ou REFUND", requiredMode = Schema.RequiredMode.REQUIRED, example = "EXPENSE")
+        @Schema(description = "INCOME, EXPENSE, REFUND, TRANSFER ou INVOICE_PAYMENT", requiredMode = Schema.RequiredMode.REQUIRED, example = "EXPENSE")
         @NotNull TransactionType type,
 
         @Schema(description = "Forma de pagamento", requiredMode = Schema.RequiredMode.REQUIRED, example = "PIX")
         @NotNull PaymentMethodSlug paymentMethod,
 
         @Schema(description = "Categoria escolhida ou aceita da sugestão. Opcional.")
-        UUID categoryId
+        UUID categoryId,
+
+        @Schema(description = "Obrigatório em TRANSFER: true quando o dinheiro saiu da conta importada")
+        Boolean outgoing,
+
+        @Schema(description = "Obrigatório em TRANSFER: a conta do outro lado, como veio na prévia")
+        UUID transferAccountId,
+
+        @Schema(description = "Obrigatório em INVOICE_PAYMENT: a fatura quitada, como veio na prévia")
+        UUID invoiceId
 ) {}

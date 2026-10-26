@@ -4,7 +4,10 @@ import com.cashcontrol.api.config.AppProperties;
 import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.AccountType;
 import com.cashcontrol.api.domain.entity.Category;
+import com.cashcontrol.api.domain.entity.CreditCard;
 import com.cashcontrol.api.domain.entity.CategoryRule;
+import com.cashcontrol.api.domain.entity.Invoice;
+import com.cashcontrol.api.domain.entity.InvoiceStatus;
 import com.cashcontrol.api.domain.entity.MerchantAlias;
 import com.cashcontrol.api.domain.entity.PaymentMethod;
 import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
@@ -16,18 +19,23 @@ import com.cashcontrol.api.domain.exception.BusinessRuleException;
 import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
 import com.cashcontrol.api.dto.request.ImportCommitRequest;
 import com.cashcontrol.api.dto.request.ImportCommitRow;
+import com.cashcontrol.api.dto.response.ImportInvoiceOption;
 import com.cashcontrol.api.dto.response.ImportPreviewResponse;
 import com.cashcontrol.api.dto.response.ImportPreviewRow;
 import com.cashcontrol.api.dto.response.ImportResultResponse;
+import com.cashcontrol.api.dto.response.ImportRowError;
 import com.cashcontrol.api.dto.response.SuggestionSource;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CategoryRuleRepository;
+import com.cashcontrol.api.repository.InvoiceRepository;
 import com.cashcontrol.api.repository.MerchantAliasRepository;
 import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
+import com.cashcontrol.api.service.AccountService;
 import com.cashcontrol.api.service.CategoryRuleMatcher;
 import com.cashcontrol.api.service.CategorySuggester;
+import com.cashcontrol.api.service.CreditCardService;
 import com.cashcontrol.api.service.MerchantAliasService;
 import com.cashcontrol.api.service.StatementImportServiceImpl;
 import com.cashcontrol.api.service.statement.InterCsvStatementParser;
@@ -71,6 +79,9 @@ class StatementImportServiceTest {
     @Mock private CategoryRuleRepository categoryRuleRepository;
     @Mock private MerchantAliasRepository merchantAliasRepository;
     @Mock private PaymentMethodRepository paymentMethodRepository;
+    @Mock private InvoiceRepository invoiceRepository;
+    @Mock private AccountService accountService;
+    @Mock private CreditCardService creditCardService;
 
     private StatementImportServiceImpl service;
 
@@ -95,6 +106,9 @@ class StatementImportServiceTest {
         service = new StatementImportServiceImpl(
                 transactionRepository,
                 accountRepository,
+                invoiceRepository,
+                accountService,
+                creditCardService,
                 categoryRepository,
                 categoryRuleRepository,
                 paymentMethodRepository,
@@ -293,7 +307,7 @@ class StatementImportServiceTest {
 
         service.commit(request(new ImportCommitRow(1, "ref-1", LocalDate.parse("2026-08-04"),
                 "Marketplace - assinatura", "Pix Marketplace", new BigDecimal("144.06"),
-                TransactionType.EXPENSE, PaymentMethodSlug.PIX, null)), userId);
+                TransactionType.EXPENSE, PaymentMethodSlug.PIX, null, null, null, null)), userId);
 
         ArgumentCaptor<MerchantAlias> saved = ArgumentCaptor.forClass(MerchantAlias.class);
         verify(merchantAliasRepository).save(saved.capture());
@@ -312,7 +326,7 @@ class StatementImportServiceTest {
         // única leitura segura é que nada foi renomeado.
         service.commit(request(new ImportCommitRow(1, "ref-1", LocalDate.parse("2026-08-04"),
                 "Marketplace - assinatura", null, new BigDecimal("144.06"),
-                TransactionType.EXPENSE, PaymentMethodSlug.PIX, null)), userId);
+                TransactionType.EXPENSE, PaymentMethodSlug.PIX, null, null, null, null)), userId);
 
         verify(merchantAliasRepository, never()).save(any());
     }
@@ -412,7 +426,8 @@ class StatementImportServiceTest {
     void preview_unsupportedFormat_isRejected() {
         givenAccountFound();
         StatementImportServiceImpl withoutParsers = new StatementImportServiceImpl(
-                transactionRepository, accountRepository, categoryRepository, categoryRuleRepository,
+                transactionRepository, accountRepository, invoiceRepository, accountService, creditCardService,
+                categoryRepository, categoryRuleRepository,
                 paymentMethodRepository, new CategorySuggester(transactionRepository, new CategoryRuleMatcher()),
                 new MerchantAliasService(merchantAliasRepository),
                 new StatementHistoryMapper(), new StatementRowHasher(), List.of(), new AppProperties());
@@ -489,21 +504,25 @@ class StatementImportServiceTest {
     }
 
     @Test
-    void commit_rejectsTransferAndManualAdjustment_perRow() {
+    void commit_rejectsManualAdjustmentAndTransferWithoutCounterpart_perRow() {
         givenAccountFound();
         givenNoExistingImports();
         givenPaymentMethods();
 
         ImportResultResponse result = service.commit(request(
-                commitRow("ref-1", "2026-08-04", "Transferência", "10.00",
+                commitRow("ref-1", "2026-08-04", "Ajuste", "10.00",
+                        TransactionType.MANUAL_ADJUSTMENT, PaymentMethodSlug.OTHER, null),
+                commitRow("ref-2", "2026-08-04", "Transferência", "10.00",
                         TransactionType.TRANSFER, PaymentMethodSlug.BANK_TRANSFER, null),
-                commitRow("ref-2", "2026-08-04", "Válida", "20.00",
+                commitRow("ref-3", "2026-08-04", "Válida", "20.00",
                         TransactionType.EXPENSE, PaymentMethodSlug.PIX, null)), userId);
 
         assertThat(result.imported()).isEqualTo(1);
-        assertThat(result.failed()).isEqualTo(1);
-        assertThat(result.errors()).singleElement()
-                .satisfies(e -> assertThat(e.message()).contains("Tipo não permitido"));
+        assertThat(result.failed()).isEqualTo(2);
+        assertThat(result.errors()).extracting(ImportRowError::message)
+                .anySatisfy(m -> assertThat(m).contains("Tipo não permitido"))
+                .anySatisfy(m -> assertThat(m).contains("sem a conta do outro lado"));
+        verify(accountService, never()).transfer(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -584,6 +603,175 @@ class StatementImportServiceTest {
                 .satisfies(e -> assertThat(e.message()).contains("Forma de pagamento não cadastrada"));
     }
 
+    // ── investimento e fatura ─────────────────────────────────────────────────
+
+    @Test
+    void preview_turnsInvestmentRowsIntoTransfersToTheInvestmentAccount() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenNoCategoryRules();
+        Account investment = givenInvestmentAccount();
+
+        ImportPreviewResponse preview = service.preview(fixture(), StatementFormat.INTER_CSV, accountId, userId);
+
+        ImportPreviewRow application = rowWithDescription(preview, "Cdb Pernambucan");
+        assertThat(application.type()).isEqualTo(TransactionType.TRANSFER);
+        assertThat(application.outgoing()).isTrue();
+        assertThat(application.transferAccountId()).isEqualTo(investment.getId());
+        assertThat(application.transferAccountName()).isEqualTo("Investimentos");
+
+        ImportPreviewRow redemption = rowWithDescription(preview, "Cdb Di Flut Tb Pernambucanas Financiadora S.a");
+        assertThat(redemption.type()).isEqualTo(TransactionType.TRANSFER);
+        assertThat(redemption.outgoing()).isFalse();
+
+        assertThat(rowWithDescription(preview, "Pix Marketplace").type()).isEqualTo(TransactionType.EXPENSE);
+    }
+
+    @Test
+    void preview_withoutInvestmentAccount_keepsWhatTheHistorySays() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenNoCategoryRules();
+
+        ImportPreviewResponse preview = service.preview(fixture(), StatementFormat.INTER_CSV, accountId, userId);
+
+        ImportPreviewRow application = rowWithDescription(preview, "Cdb Pernambucan");
+        assertThat(application.type()).isEqualTo(TransactionType.EXPENSE);
+        assertThat(application.transferAccountId()).isNull();
+    }
+
+    @Test
+    void preview_matchesInvoicePaymentsToTheirInvoices() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenNoCategoryRules();
+        Invoice june = invoice("2026-06", "2026-07-10", "2520.82", InvoiceStatus.PAID, true);
+        Invoice july = invoice("2026-07", "2026-08-10", "1617.42", InvoiceStatus.CLOSED, false);
+        // Mesmo valor e vencimento do primeiro pagamento, mas já quitada por um pagamento
+        // lançado: casar com ela registraria a mesma saída duas vezes.
+        Invoice alreadyPaid = invoice("2026-06", "2026-07-10", "2241.47", InvoiceStatus.PAID, false);
+        when(invoiceRepository.findAllWithCardByUserIdAndDueDateBetween(eq(userId), any(), any()))
+                .thenReturn(List.of(june, july, alreadyPaid));
+
+        ImportPreviewResponse preview = service.preview(csv(
+                "07/08/2026;Pagamento efetuado;Pagamento Fatura - FULANO;-1.617,29;100,00",
+                "07/07/2026;Pagamento efetuado;Pagamento Fatura - FULANO;-2.241,47;200,00",
+                "05/01/2026;Pagamento efetuado;Pagamento Fatura - FULANO;-1.260,70;300,00",
+                "13/07/2026;Pagamento efetuado;PORTOSEG SA C FINANC E INVEST;-253,44;400,00"),
+                StatementFormat.INTER_CSV, accountId, userId);
+
+        assertThat(preview.rows())
+                .extracting(ImportPreviewRow::type, ImportPreviewRow::invoiceId, ImportPreviewRow::invoiceAmountMismatch)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(TransactionType.INVOICE_PAYMENT, july.getId(), false),
+                        // 2.241,47 contra 2.520,82: fica a sugestão, mas a linha segue despesa
+                        // até o usuário decidir — casar criaria um rotativo de R$ 279.
+                        org.assertj.core.groups.Tuple.tuple(TransactionType.EXPENSE, june.getId(), true),
+                        // Sem fatura no sistema, o pagamento é o único registro desse gasto.
+                        org.assertj.core.groups.Tuple.tuple(TransactionType.EXPENSE, null, false),
+                        org.assertj.core.groups.Tuple.tuple(TransactionType.EXPENSE, null, false));
+        assertThat(preview.rows().getFirst().invoiceLabel()).isEqualTo("Inter - PF · 2026-07");
+        assertThat(preview.warningCount()).isEqualTo(1);
+        // Opções para escolher à mão: as que vencem perto, sem a já quitada por pagamento lançado.
+        assertThat(preview.rows().get(3).invoiceOptions())
+                .extracting(ImportInvoiceOption::id)
+                .containsExactly(june.getId());
+    }
+
+    @Test
+    void commit_transferOut_createsBothLegsAndTagsTheImportedOne() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenPaymentMethods();
+        Account investment = givenInvestmentAccountFound();
+        Transaction source = new Transaction();
+        Transaction destination = new Transaction();
+        when(accountService.transfer(account, investment, new BigDecimal("9000.00"),
+                LocalDate.parse("2026-02-09"), "Cdb Pernambucan"))
+                .thenReturn(List.of(source, destination));
+
+        ImportResultResponse result = service.commit(request(transferRow("ref-1", "2026-02-09",
+                "Cdb Pernambucan", "9000.00", true, investment.getId())), userId);
+
+        assertThat(result.imported()).isEqualTo(1);
+        assertThat(source.getExternalRef()).isEqualTo("ref-1");
+        assertThat(destination.getExternalRef()).isNull();
+    }
+
+    @Test
+    void commit_transferIn_comesFromTheInvestmentAccount() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenPaymentMethods();
+        Account investment = givenInvestmentAccountFound();
+        Transaction source = new Transaction();
+        Transaction destination = new Transaction();
+        when(accountService.transfer(investment, account, new BigDecimal("155.00"),
+                LocalDate.parse("2026-05-08"), "Resgate"))
+                .thenReturn(List.of(source, destination));
+
+        service.commit(request(transferRow("ref-1", "2026-05-08", "Resgate", "155.00", false,
+                investment.getId())), userId);
+
+        assertThat(destination.getExternalRef()).isEqualTo("ref-1");
+        assertThat(source.getExternalRef()).isNull();
+    }
+
+    @Test
+    void commit_invoicePayment_goesThroughTheCardService() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenPaymentMethods();
+        Invoice july = invoice("2026-07", "2026-08-10", "1617.42", InvoiceStatus.CLOSED, false);
+        when(invoiceRepository.findByIdAndUserId(july.getId(), userId)).thenReturn(Optional.of(july));
+        Transaction payment = new Transaction();
+        when(creditCardService.recordInvoicePayment(july, account, new BigDecimal("1617.29"),
+                LocalDate.parse("2026-08-07"))).thenReturn(payment);
+
+        ImportResultResponse result = service.commit(request(invoicePaymentRow("ref-1", "1617.29", july.getId())),
+                userId);
+
+        assertThat(result.imported()).isEqualTo(1);
+        assertThat(payment.getExternalRef()).isEqualTo("ref-1");
+        verify(transactionRepository).saveAll(List.of());
+    }
+
+    @Test
+    void commit_invoicePayment_onInvoiceSettledWithoutTransaction_isAccepted() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenPaymentMethods();
+        Invoice june = invoice("2026-06", "2026-07-10", "2520.82", InvoiceStatus.PAID, true);
+        when(invoiceRepository.findByIdAndUserId(june.getId(), userId)).thenReturn(Optional.of(june));
+        when(creditCardService.recordInvoicePayment(any(), any(), any(), any())).thenReturn(new Transaction());
+
+        ImportResultResponse result = service.commit(request(invoicePaymentRow("ref-1", "2241.47", june.getId())),
+                userId);
+
+        assertThat(result.imported()).isEqualTo(1);
+    }
+
+    @Test
+    void commit_invoicePayment_rejectsPaidInvoiceAndAmountAboveTheRemaining_perRow() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenPaymentMethods();
+        Invoice paid = invoice("2026-06", "2026-07-10", "2520.82", InvoiceStatus.PAID, false);
+        Invoice july = invoice("2026-07", "2026-08-10", "1617.42", InvoiceStatus.CLOSED, false);
+        when(invoiceRepository.findByIdAndUserId(paid.getId(), userId)).thenReturn(Optional.of(paid));
+        when(invoiceRepository.findByIdAndUserId(july.getId(), userId)).thenReturn(Optional.of(july));
+
+        ImportResultResponse result = service.commit(request(
+                invoicePaymentRow("ref-1", "2520.82", paid.getId()),
+                invoicePaymentRow("ref-2", "1700.00", july.getId())), userId);
+
+        assertThat(result.imported()).isZero();
+        assertThat(result.errors()).extracting(ImportRowError::message)
+                .anySatisfy(m -> assertThat(m).contains("já está paga"))
+                .anySatisfy(m -> assertThat(m).contains("maior que o restante"));
+        verify(creditCardService, never()).recordInvoicePayment(any(), any(), any(), any());
+    }
+
     // ── apoio ─────────────────────────────────────────────────────────────────
 
     private void givenAccountFound() {
@@ -627,7 +815,7 @@ class StatementImportServiceTest {
     private ImportCommitRow commitRow(String externalRef, String date, String description, String amount,
                                       TransactionType type, PaymentMethodSlug paymentMethod, UUID categoryId) {
         return new ImportCommitRow(1, externalRef, LocalDate.parse(date), description, description,
-                new BigDecimal(amount), type, paymentMethod, categoryId);
+                new BigDecimal(amount), type, paymentMethod, categoryId, null, null, null);
     }
 
     private Category category(String name) {
@@ -645,6 +833,68 @@ class StatementImportServiceTest {
         return method;
     }
 
+    private Account givenInvestmentAccount() {
+        Account investment = investmentAccount();
+        when(accountRepository.findAllByUserIdAndDeletedAtIsNullAndArchivedAtIsNullOrderBySortOrderAscCreatedAtAsc(userId))
+                .thenReturn(List.of(account, investment));
+        return investment;
+    }
+
+    private Account givenInvestmentAccountFound() {
+        Account investment = investmentAccount();
+        when(accountRepository.findByIdAndUserIdAndDeletedAtIsNull(investment.getId(), userId))
+                .thenReturn(Optional.of(investment));
+        return investment;
+    }
+
+    private Account investmentAccount() {
+        Account investment = new Account();
+        ReflectionTestUtils.setField(investment, "id", UUID.randomUUID());
+        investment.setUserId(userId);
+        investment.setName("Investimentos");
+        investment.setType(AccountType.INVESTMENT);
+        investment.setCurrencyCode("BRL");
+        return investment;
+    }
+
+    private Invoice invoice(String referenceMonth, String dueDate, String total, InvoiceStatus status,
+                            boolean paidWithoutTransaction) {
+        CreditCard card = new CreditCard();
+        card.setName("Inter - PF");
+        Invoice invoice = new Invoice();
+        ReflectionTestUtils.setField(invoice, "id", UUID.randomUUID());
+        invoice.setUserId(userId);
+        invoice.setCreditCard(card);
+        invoice.setReferenceMonth(referenceMonth);
+        invoice.setDueDate(LocalDate.parse(dueDate));
+        invoice.setTotalAmount(new BigDecimal(total));
+        invoice.setPaidAmount(status == InvoiceStatus.PAID ? new BigDecimal(total) : BigDecimal.ZERO);
+        invoice.setStatus(status);
+        invoice.setPaidWithoutTransaction(paidWithoutTransaction);
+        return invoice;
+    }
+
+    private ImportCommitRow transferRow(String externalRef, String date, String description, String amount,
+                                        boolean outgoing, UUID transferAccountId) {
+        return new ImportCommitRow(1, externalRef, LocalDate.parse(date), description, description,
+                new BigDecimal(amount), TransactionType.TRANSFER, PaymentMethodSlug.BANK_TRANSFER, null,
+                outgoing, transferAccountId, null);
+    }
+
+    private ImportCommitRow invoicePaymentRow(String externalRef, String amount, UUID invoiceId) {
+        return new ImportCommitRow(1, externalRef, LocalDate.parse("2026-08-07"), "Pagamento Fatura",
+                "Pagamento Fatura", new BigDecimal(amount), TransactionType.INVOICE_PAYMENT,
+                PaymentMethodSlug.BANK_TRANSFER, null, true, null, invoiceId);
+    }
+
+    private MultipartFile csv(String... lines) {
+        String content = String.join("\n",
+                "Extrato Conta Corrente", "Conta ;123456789", "Período ;01/01/2026 a 31/08/2026", "Saldo ;0,00", "",
+                "Data Lançamento;Histórico;Descrição;Valor;Saldo") + "\n" + String.join("\n", lines) + "\n";
+        return new MockMultipartFile("file", "extrato.csv", "text/csv",
+                content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
     private MultipartFile fixture() {
         try (InputStream in = getClass().getResourceAsStream("/fixtures/extrato-inter.csv")) {
             return new MockMultipartFile("file", "extrato-inter.csv", "text/csv", in.readAllBytes());
@@ -658,6 +908,9 @@ class StatementImportServiceTest {
         return new StatementImportServiceImpl(
                 transactionRepository,
                 accountRepository,
+                invoiceRepository,
+                accountService,
+                creditCardService,
                 categoryRepository,
                 categoryRuleRepository,
                 paymentMethodRepository,
