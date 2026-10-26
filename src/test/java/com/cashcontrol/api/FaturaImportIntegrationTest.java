@@ -494,7 +494,7 @@ class FaturaImportIntegrationTest {
                         row.lineNumber(), group.suggestedCreditCardId(), group.cardLast4(),
                         row.externalRef(), row.ordinal(), row.date(), row.description(),
                         row.description(), row.amount(), row.installmentNumber(),
-                        row.totalInstallments(), row.suggestedCategoryId()));
+                        row.totalInstallments(), row.suggestedCategoryId(), row.refund()));
             }
         }
         return faturaImportService.commit(new FaturaImportCommitRequest(
@@ -514,7 +514,7 @@ class FaturaImportIntegrationTest {
                         row.lineNumber(), group.suggestedCreditCardId(), group.cardLast4(),
                         row.externalRef(), row.ordinal(), row.date(), row.description(),
                         row.description(), row.amount(), row.installmentNumber(),
-                        row.totalInstallments(), categoryId));
+                        row.totalInstallments(), categoryId, row.refund()));
             }
         }
         return faturaImportService.commit(new FaturaImportCommitRequest(
@@ -534,7 +534,7 @@ class FaturaImportIntegrationTest {
                         row.lineNumber(), group.suggestedCreditCardId(), group.cardLast4(),
                         row.externalRef(), row.ordinal(), row.date(), description,
                         row.description(), row.amount(), row.installmentNumber(),
-                        row.totalInstallments(), row.suggestedCategoryId()));
+                        row.totalInstallments(), row.suggestedCategoryId(), row.refund()));
             }
         }
         return faturaImportService.commit(new FaturaImportCommitRequest(
@@ -557,7 +557,7 @@ class FaturaImportIntegrationTest {
                         row.lineNumber(), group.suggestedCreditCardId(), group.cardLast4(),
                         row.externalRef(), row.ordinal(), row.date(), row.description(),
                         row.description(), row.amount(), row.installmentNumber(),
-                        row.totalInstallments(), row.suggestedCategoryId()));
+                        row.totalInstallments(), row.suggestedCategoryId(), row.refund()));
             }
         }
         return faturaImportService.commit(new FaturaImportCommitRequest(
@@ -578,7 +578,7 @@ class FaturaImportIntegrationTest {
                     row.lineNumber(), cardId, group.cardLast4(),
                     row.externalRef(), row.ordinal(), row.date(), row.description(),
                     row.description(), row.amount(), row.installmentNumber(),
-                    row.totalInstallments(), row.suggestedCategoryId()));
+                    row.totalInstallments(), row.suggestedCategoryId(), row.refund()));
         }
         return faturaImportService.commit(new FaturaImportCommitRequest(
                 InvoiceImportFormat.INTER_FATURA_PDF, preview.referenceMonth(), accountId, approved),

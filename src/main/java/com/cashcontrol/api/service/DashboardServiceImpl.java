@@ -63,8 +63,7 @@ public class DashboardServiceImpl implements DashboardService {
         BigDecimal netWorth = safe(transactionRepository.sumTotalNetWorth(userId));
         BigDecimal monthlyIncome = safe(transactionRepository.sumPaidByTypeAndPaymentDateRange(
                 userId, TransactionType.INCOME, monthStart, monthEnd, null));
-        BigDecimal monthlyExpenses = safe(transactionRepository.sumPaidByTypeAndPaymentDateRange(
-                userId, TransactionType.EXPENSE, monthStart, monthEnd, null));
+        BigDecimal monthlyExpenses = netExpenses(userId, monthStart, monthEnd);
         BigDecimal monthlySavings = monthlyIncome.subtract(monthlyExpenses);
         BigDecimal cashFlow = monthlySavings;
 
@@ -79,9 +78,16 @@ public class DashboardServiceImpl implements DashboardService {
 
         TransactionType effectiveType = type != null ? type : TransactionType.EXPENSE;
 
-        List<Object[]> rows = transactionRepository.findCategoryBreakdown(userId, effectiveType, from, to, accountId);
+        List<Object[]> rows = effectiveType == TransactionType.EXPENSE
+                ? netExpenseBreakdown(userId, from, to, accountId)
+                : transactionRepository.findCategoryBreakdown(userId, effectiveType, from, to, accountId);
         Map<UUID, String> categoryNames = categoryNamesOf(rows);
         BigDecimal uncategorized = safe(transactionRepository.sumUncategorized(userId, effectiveType, from, to, accountId));
+        if (effectiveType == TransactionType.EXPENSE) {
+            uncategorized = uncategorized.subtract(
+                    safe(transactionRepository.sumUncategorized(userId, TransactionType.REFUND, from, to, accountId)))
+                    .max(BigDecimal.ZERO);
+        }
 
         BigDecimal total = rows.stream()
                 .map(r -> (BigDecimal) r[1])
@@ -129,6 +135,8 @@ public class DashboardServiceImpl implements DashboardService {
                 incomeMap.merge(month, amount, BigDecimal::add);
             } else if ("EXPENSE".equals(txType)) {
                 expenseMap.merge(month, amount, BigDecimal::add);
+            } else if ("REFUND".equals(txType)) {
+                expenseMap.merge(month, amount.negate(), BigDecimal::add);
             }
         }
 
@@ -274,6 +282,39 @@ public class DashboardServiceImpl implements DashboardService {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
+    /**
+     * Despesa do período já descontados os estornos — da conta (Pix devolvido, cashback) e do
+     * cartão. O estorno conta no mês em que aconteceu, não no da compra que ele desfaz.
+     */
+    private BigDecimal netExpenses(UUID userId, LocalDate from, LocalDate to) {
+        return safe(transactionRepository.sumPaidByTypeAndPaymentDateRange(
+                        userId, TransactionType.EXPENSE, from, to, null))
+                .subtract(safe(transactionRepository.sumPaidByTypeAndPaymentDateRange(
+                        userId, TransactionType.REFUND, from, to, null)));
+    }
+
+    /**
+     * Despesa por categoria menos os estornos da mesma categoria, no formato de
+     * {@code findCategoryBreakdown}: [categoryId, valor], do maior para o menor. Categoria que
+     * o estorno zerou (ou que só teve estorno) sai da lista — o gráfico é de gasto.
+     */
+    private List<Object[]> netExpenseBreakdown(UUID userId, LocalDate from, LocalDate to, UUID accountId) {
+        Map<UUID, BigDecimal> net = new HashMap<>();
+        for (Object[] row : transactionRepository.findCategoryBreakdown(
+                userId, TransactionType.EXPENSE, from, to, accountId)) {
+            net.merge((UUID) row[0], (BigDecimal) row[1], BigDecimal::add);
+        }
+        for (Object[] row : transactionRepository.findCategoryBreakdown(
+                userId, TransactionType.REFUND, from, to, accountId)) {
+            net.computeIfPresent((UUID) row[0], (id, amount) -> amount.subtract((BigDecimal) row[1]));
+        }
+        return net.entrySet().stream()
+                .filter(entry -> entry.getValue().signum() > 0)
+                .sorted(Map.Entry.<UUID, BigDecimal>comparingByValue().reversed())
+                .map(entry -> new Object[]{entry.getKey(), entry.getValue()})
+                .toList();
+    }
+
     private MonthlyComparisonResponse.MonthMetrics buildMonthMetrics(UUID userId, String month) {
         YearMonth ym = YearMonth.parse(month, MONTH_FORMATTER);
         LocalDate from = ym.atDay(1);
@@ -281,12 +322,10 @@ public class DashboardServiceImpl implements DashboardService {
 
         BigDecimal income = safe(transactionRepository.sumPaidByTypeAndPaymentDateRange(
                 userId, TransactionType.INCOME, from, to, null));
-        BigDecimal expenses = safe(transactionRepository.sumPaidByTypeAndPaymentDateRange(
-                userId, TransactionType.EXPENSE, from, to, null));
+        BigDecimal expenses = netExpenses(userId, from, to);
         BigDecimal savings = income.subtract(expenses);
 
-        List<Object[]> rows = transactionRepository.findCategoryBreakdown(
-                userId, TransactionType.EXPENSE, from, to, null);
+        List<Object[]> rows = netExpenseBreakdown(userId, from, to, null);
         Map<UUID, String> categoryNames = categoryNamesOf(rows);
         BigDecimal total = rows.stream().map(r -> (BigDecimal) r[1])
                 .reduce(BigDecimal.ZERO, BigDecimal::add);

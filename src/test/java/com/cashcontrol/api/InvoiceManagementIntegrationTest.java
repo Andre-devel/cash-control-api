@@ -237,7 +237,7 @@ class InvoiceManagementIntegrationTest {
                         row.lineNumber(), group.suggestedCreditCardId(), group.cardLast4(),
                         row.externalRef(), row.ordinal(), row.date(), row.description(),
                         row.description(), row.amount(), row.installmentNumber(),
-                        row.totalInstallments(), row.suggestedCategoryId()));
+                        row.totalInstallments(), row.suggestedCategoryId(), row.refund()));
             }
         }
         faturaImportService.commit(new FaturaImportCommitRequest(

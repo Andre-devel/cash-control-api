@@ -64,7 +64,7 @@ public record FaturaImportCommitRow(
                 example = "SHOPEE *LarkSpComercio (Parcela 04 de 05)")
         @NotBlank @Size(max = 255) String originalDescription,
 
-        @Schema(description = "Valor positivo da despesa", requiredMode = Schema.RequiredMode.REQUIRED,
+        @Schema(description = "Valor positivo da despesa ou do estorno", requiredMode = Schema.RequiredMode.REQUIRED,
                 example = "55.19")
         @NotNull @DecimalMin("0.01") @Digits(integer = 17, fraction = 2) BigDecimal amount,
 
@@ -75,5 +75,12 @@ public record FaturaImportCommitRow(
         @Positive Integer totalInstallments,
 
         @Schema(description = "Categoria escolhida ou aceita da sugestão. Opcional.")
-        UUID categoryId
-) {}
+        UUID categoryId,
+
+        @Schema(description = "true quando a linha é estorno, como veio na prévia. Ausente vale false.")
+        Boolean refund
+) {
+    public boolean isRefund() {
+        return Boolean.TRUE.equals(refund);
+    }
+}

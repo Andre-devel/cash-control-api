@@ -199,6 +199,68 @@ class DashboardServiceTest {
         assertThat(entry.net()).isEqualByComparingTo("1200.00");
     }
 
+    @Test
+    void getOverviewMetrics_refundsReduceTheMonthExpenses() {
+        when(transactionRepository.sumPaidByTypeAndPaymentDateRange(
+                eq(userId), eq(TransactionType.EXPENSE), any(), any(), eq(null)))
+                .thenReturn(new BigDecimal("1500.00"));
+        when(transactionRepository.sumPaidByTypeAndPaymentDateRange(
+                eq(userId), eq(TransactionType.REFUND), any(), any(), eq(null)))
+                .thenReturn(new BigDecimal("376.52"));
+
+        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId);
+
+        assertThat(result.monthlyExpenses()).isEqualByComparingTo("1123.48");
+    }
+
+    @Test
+    void getCategoryPieChart_refundIsTakenFromItsCategory() {
+        UUID marketplace = UUID.randomUUID();
+        UUID food = UUID.randomUUID();
+        Category marketplaceCategory = new Category();
+        ReflectionTestUtils.setField(marketplaceCategory, "id", marketplace);
+        marketplaceCategory.setName("Marketplace");
+        Category foodCategory = new Category();
+        ReflectionTestUtils.setField(foodCategory, "id", food);
+        foodCategory.setName("Alimentação");
+        LocalDate from = LocalDate.now().withDayOfMonth(1);
+        LocalDate to = LocalDate.now();
+
+        List<Object[]> expenses = new ArrayList<>();
+        expenses.add(new Object[]{marketplace, new BigDecimal("400.00")});
+        expenses.add(new Object[]{food, new BigDecimal("300.00")});
+        List<Object[]> refunds = new ArrayList<>();
+        refunds.add(new Object[]{marketplace, new BigDecimal("250.00")});
+        when(transactionRepository.findCategoryBreakdown(
+                eq(userId), eq(TransactionType.EXPENSE), eq(from), eq(to), eq(null))).thenReturn(expenses);
+        when(transactionRepository.findCategoryBreakdown(
+                eq(userId), eq(TransactionType.REFUND), eq(from), eq(to), eq(null))).thenReturn(refunds);
+        when(transactionRepository.sumUncategorized(any(), any(), any(), any(), any())).thenReturn(BigDecimal.ZERO);
+        when(categoryRepository.findAllById(any())).thenReturn(List.of(marketplaceCategory, foodCategory));
+
+        CategoryPieChartResponse result = dashboardService.getCategoryPieChart(
+                userId, from, to, null, TransactionType.EXPENSE);
+
+        assertThat(result.totalAmount()).isEqualByComparingTo("450.00");
+        // Marketplace caiu para 150 e passou a ser a menor.
+        assertThat(result.entries()).extracting(CategoryPieChartResponse.Entry::categoryName)
+                .containsExactly("Alimentação", "Marketplace");
+        assertThat(result.entries().get(1).totalAmount()).isEqualByComparingTo("150.00");
+    }
+
+    @Test
+    void getMonthlyBarChart_refundsReduceTheMonthExpenses() {
+        String currentLabel = YearMonth.now().toString();
+        List<Object[]> monthlyRows = new ArrayList<>();
+        monthlyRows.add(new Object[]{currentLabel, "EXPENSE", new BigDecimal("800.00")});
+        monthlyRows.add(new Object[]{currentLabel, "REFUND", new BigDecimal("125.82")});
+        when(transactionRepository.findMonthlyIncomeExpense(any(), any(), any(), any())).thenReturn(monthlyRows);
+
+        MonthlyBarChartResponse result = dashboardService.getMonthlyBarChart(userId, 1, null);
+
+        assertThat(result.months().getFirst().expenses()).isEqualByComparingTo("674.18");
+    }
+
     // ── Net Worth Evolution ───────────────────────────────────────────────────
 
     @Test

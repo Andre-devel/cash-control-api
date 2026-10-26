@@ -342,7 +342,7 @@ class FaturaImportServiceTest {
         rows.set(0, new FaturaImportCommitRow(
                 first.lineNumber(), first.creditCardId(), first.cardLast4(), first.externalRef(),
                 first.ordinal(), first.date(), "Loja boa", first.originalDescription(),
-                first.amount(), first.installmentNumber(), first.totalInstallments(), null));
+                first.amount(), first.installmentNumber(), first.totalInstallments(), null, null));
 
         commit(rows);
 
@@ -581,7 +581,7 @@ class FaturaImportServiceTest {
                 parceled.lineNumber(), parceled.creditCardId(), parceled.cardLast4(),
                 parceled.externalRef(), parceled.ordinal(), parceled.date(), "Fone de ouvido",
                 parceled.originalDescription(), parceled.amount(),
-                parceled.installmentNumber(), parceled.totalInstallments(), null);
+                parceled.installmentNumber(), parceled.totalInstallments(), null, null);
 
         commit(List.of(renamed));
 
@@ -635,7 +635,8 @@ class FaturaImportServiceTest {
 
         FaturaImportResultResponse result = commit(commitRowsFromPreview());
 
-        assertThat(result.imported()).isEqualTo(3);
+        // As três parcelas e o estorno da compra à vista que elas substituem.
+        assertThat(result.imported()).isEqualTo(4);
         assertThat(result.futureInstallments()).isZero();
         assertThat(result.failed()).isZero();
         assertThat(capturedTransactions()).extracting(Transaction::getExternalRef).doesNotHaveDuplicates();
@@ -649,6 +650,7 @@ class FaturaImportServiceTest {
         commit(commitRowsFromPreview());
 
         assertThat(captureSavedItems())
+                .filteredOn(item -> item.getAmount().signum() > 0)
                 .hasSize(3)
                 .allSatisfy(item -> {
                     assertThat(item.getInvoice().getReferenceMonth()).isEqualTo(REFERENCE_MONTH);
@@ -675,6 +677,8 @@ class FaturaImportServiceTest {
             assertThat(series.getTotalAmount()).isEqualByComparingTo("125.82"); // 41,94 × 3
         });
         assertThat(capturedTransactions())
+                .filteredOn(tx -> tx.getType() == TransactionType.EXPENSE)
+                .hasSize(3)
                 .allSatisfy(tx -> assertThat(tx.getInstallmentSeries()).isNotNull());
     }
 
@@ -764,6 +768,97 @@ class FaturaImportServiceTest {
                         "EBN *TikTok Shop (Parcela 02 de 03)", new BigDecimal("-41.94"), 2, 3),
                 new ParsedFaturaRow(4, LocalDate.of(2026, 7, 10),
                         "EBN *TikTok Shop (Parcela 03 de 03)", new BigDecimal("-41.94"), 3, 3));
+    }
+
+    // ── estornos ──────────────────────────────────────────────────────────────
+
+    private List<ParsedFaturaRow> purchaseRefundAndPayment() {
+        return List.of(
+                new ParsedFaturaRow(1, LocalDate.of(2026, 7, 9),
+                        "PAGTO DEBITO AUTOMATICO", new BigDecimal("1651.72"), null, null),
+                new ParsedFaturaRow(2, LocalDate.of(2026, 7, 11),
+                        "MERCADOLIVRE*2PRODUTO (Parcela 01 de 03)", new BigDecimal("-255.33"), 1, 3),
+                new ParsedFaturaRow(3, LocalDate.of(2026, 7, 11),
+                        "MERCADOLIVRE*2PRODUTO (Parcela 01 de 03)", new BigDecimal("255.33"), 1, 3),
+                new ParsedFaturaRow(4, LocalDate.of(2026, 7, 6),
+                        "MERCADOLIVRE*MELI", new BigDecimal("96.98"), null, null));
+    }
+
+    @Test
+    void preview_keepsRefundsAndLeavesOutOnlyTheInvoicePayment() {
+        parser.sections = List.of(new ParsedCardSection("1234", purchaseRefundAndPayment()));
+
+        FaturaImportPreviewResponse preview = preview();
+
+        assertThat(preview.excludedPaymentsCount()).isEqualTo(1);
+        assertThat(preview.groups().getFirst().rows())
+                .extracting(FaturaImportPreviewRow::description, FaturaImportPreviewRow::refund)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("MERCADOLIVRE*2PRODUTO (Parcela 01 de 03)", false),
+                        org.assertj.core.groups.Tuple.tuple("MERCADOLIVRE*2PRODUTO (Parcela 01 de 03)", true),
+                        org.assertj.core.groups.Tuple.tuple("MERCADOLIVRE*MELI", true));
+        // O estorno da parcela 1 não tem a chave da própria parcela 1.
+        assertThat(preview.groups().getFirst().rows())
+                .extracting(FaturaImportPreviewRow::externalRef)
+                .doesNotHaveDuplicates();
+    }
+
+    @Test
+    void commit_refundBecomesRefundTransactionAndNegativeInvoiceItem() {
+        parser.sections = List.of(new ParsedCardSection("1234", purchaseRefundAndPayment()));
+
+        FaturaImportResultResponse result = commit(commitRowsFromPreview());
+
+        assertThat(result.imported()).isEqualTo(3);
+        // Só a compra gera as parcelas 2 e 3; o estorno da parcela 1 não promete os seguintes.
+        assertThat(result.futureInstallments()).isEqualTo(2);
+        assertThat(capturedTransactions())
+                .filteredOn(tx -> tx.getType() == TransactionType.REFUND)
+                .extracting(Transaction::getAmount, tx -> tx.getInstallmentSeries() == null)
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple(new BigDecimal("255.33"), true),
+                        org.assertj.core.groups.Tuple.tuple(new BigDecimal("96.98"), true));
+        assertThat(captureSavedItems())
+                .filteredOn(item -> item.getAmount().signum() < 0)
+                .extracting(InvoiceItem::getAmount)
+                .containsExactlyInAnyOrder(new BigDecimal("-255.33"), new BigDecimal("-96.98"));
+        // 255,33 da compra − 255,33 − 96,98 dos estornos.
+        assertThat(invoiceA.getTotalAmount()).isEqualByComparingTo("-96.98");
+    }
+
+    @Test
+    void commit_chargeOnAnInvoiceAlreadyPaid_isPaidOnTheDueDate() {
+        invoiceA.setStatus(InvoiceStatus.PAID);
+        invoiceA.setPaidWithoutTransaction(true);
+        parser.sections = List.of(new ParsedCardSection("1234", List.of(
+                new ParsedFaturaRow(1, LocalDate.of(2026, 7, 6), "MERCADOLIVRE*MELI", new BigDecimal("96.98"),
+                        null, null))));
+
+        commit(commitRowsFromPreview());
+
+        assertThat(capturedTransactions()).singleElement().satisfies(tx -> {
+            assertThat(tx.getStatus()).isEqualTo(TransactionStatus.PAID);
+            assertThat(tx.getPaymentDate()).isEqualTo(invoiceA.getDueDate());
+        });
+    }
+
+    @Test
+    void commit_reimportedRefund_keepsTheInvoiceItemNegative() {
+        parser.sections = List.of(new ParsedCardSection("1234", List.of(
+                new ParsedFaturaRow(1, LocalDate.of(2026, 7, 6), "MERCADOLIVRE*MELI", new BigDecimal("96.98"),
+                        null, null))));
+        List<FaturaImportCommitRow> rows = commitRowsFromPreview();
+        InvoiceItem existing = new InvoiceItem();
+        existing.setInvoice(invoiceA);
+        existing.setAmount(new BigDecimal("-96.98"));
+        existing.setExternalRef(rows.getFirst().externalRef());
+        when(invoiceItemRepository.findAllByExternalRefIn(any(), any())).thenReturn(List.of(existing));
+
+        FaturaImportResultResponse result = commit(rows);
+
+        assertThat(result.skippedDuplicates()).isEqualTo(1);
+        assertThat(existing.getAmount()).isEqualByComparingTo("-96.98");
+        verify(invoiceItemRepository, never()).save(existing);
     }
 
     @Test
@@ -886,7 +981,7 @@ class FaturaImportServiceTest {
 
         FaturaImportCommitRow row = new FaturaImportCommitRow(
                 1, cardA.getId(), "1234", "ref-1", 0, LocalDate.of(2026, 7, 15), "Compra", "Compra",
-                new BigDecimal("10.00"), null, null, UUID.randomUUID());
+                new BigDecimal("10.00"), null, null, UUID.randomUUID(), null);
 
         FaturaImportResultResponse result = commit(List.of(row));
 
@@ -955,7 +1050,7 @@ class FaturaImportServiceTest {
                         row.lineNumber(), group.suggestedCreditCardId(), group.cardLast4(),
                         row.externalRef(), row.ordinal(), row.date(), row.description(),
                         row.description(), row.amount(), row.installmentNumber(),
-                        row.totalInstallments(), null));
+                        row.totalInstallments(), null, row.refund()));
             }
         }
         return rows;
@@ -963,7 +1058,7 @@ class FaturaImportServiceTest {
 
     private FaturaImportCommitRow commitRow(UUID cardId, String externalRef, String description, String amount) {
         return new FaturaImportCommitRow(1, cardId, "1234", externalRef, 0, LocalDate.of(2026, 7, 15),
-                description, description, new BigDecimal(amount), null, null, null);
+                description, description, new BigDecimal(amount), null, null, null, null);
     }
 
     private List<String> hashesOfFirstGroup() {

@@ -348,7 +348,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     @Query(value = "SELECT TO_CHAR(payment_date, 'YYYY-MM') AS month, type, COALESCE(SUM(amount), 0) AS total " +
                    "FROM transactions " +
-                   "WHERE user_id = :userId AND status = 'PAID' AND type IN ('INCOME', 'EXPENSE') " +
+                   "WHERE user_id = :userId AND status = 'PAID' AND type IN ('INCOME', 'EXPENSE', 'REFUND') " +
                    "AND payment_date BETWEEN :from AND :to " +
                    "AND (CAST(:accountId AS uuid) IS NULL OR account_id = CAST(:accountId AS uuid)) " +
                    "AND account_id IN (SELECT id FROM accounts WHERE deleted_at IS NULL) " +

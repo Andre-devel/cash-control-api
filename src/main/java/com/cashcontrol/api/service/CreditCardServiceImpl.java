@@ -351,7 +351,7 @@ public class CreditCardServiceImpl implements CreditCardService {
         item.setInvoice(invoice);
         item.setTransaction(tx);
         item.setDescription(tx.getDescription());
-        item.setAmount(tx.getAmount());
+        item.setAmount(invoiceAmountOf(tx));
         item.setCompetenceDate(tx.getCompetenceDate());
         item.setCategory(tx.getCategory());
         item.setSubcategory(tx.getSubcategory());
@@ -362,7 +362,15 @@ public class CreditCardServiceImpl implements CreditCardService {
             item.setTotalInstallments(tx.getTotalInstallments());
         }
         invoiceItemRepository.save(item);
-        adjustInvoiceTotal(invoice, tx.getAmount());
+        adjustInvoiceTotal(invoice, item.getAmount());
+    }
+
+    /**
+     * Quanto a transação pesa na fatura. Estorno é gravado positivo, como todo REFUND, mas
+     * na fatura é crédito: entra negativo e abate o total.
+     */
+    static BigDecimal invoiceAmountOf(Transaction tx) {
+        return tx.getType() == TransactionType.REFUND ? tx.getAmount().negate() : tx.getAmount();
     }
 
     @Override
@@ -410,15 +418,15 @@ public class CreditCardServiceImpl implements CreditCardService {
             subtractFromInvoice(item);
             Invoice newInvoice = getOrCreateInvoice(card, newCycle);
             item.setInvoice(newInvoice);
-            adjustInvoiceTotal(newInvoice, tx.getAmount());
+            adjustInvoiceTotal(newInvoice, invoiceAmountOf(tx));
         } else {
-            BigDecimal delta = tx.getAmount().subtract(item.getAmount());
+            BigDecimal delta = invoiceAmountOf(tx).subtract(item.getAmount());
             if (delta.compareTo(BigDecimal.ZERO) != 0) {
                 adjustInvoiceTotal(currentInvoice, delta);
             }
         }
 
-        item.setAmount(tx.getAmount());
+        item.setAmount(invoiceAmountOf(tx));
         item.setDescription(tx.getDescription());
         item.setNotes(tx.getNotes());
         item.setCompetenceDate(tx.getCompetenceDate());

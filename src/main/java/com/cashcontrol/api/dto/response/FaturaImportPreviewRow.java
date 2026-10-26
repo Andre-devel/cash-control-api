@@ -71,5 +71,10 @@ public record FaturaImportPreviewRow(
         SuggestionSource suggestionSource,
 
         @Schema(description = "true quando esta linha já foi importada na fatura deste mês")
-        boolean duplicate
+        boolean duplicate,
+
+        @Schema(description = """
+                true quando a linha é um crédito na fatura que não é o pagamento dela: um \
+                estorno. Vira lançamento de estorno, que abate o total da fatura.""")
+        boolean refund
 ) {}

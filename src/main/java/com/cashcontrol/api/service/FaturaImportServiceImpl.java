@@ -7,6 +7,7 @@ import com.cashcontrol.api.domain.entity.CategoryRule;
 import com.cashcontrol.api.domain.entity.CreditCard;
 import com.cashcontrol.api.domain.entity.InstallmentSeries;
 import com.cashcontrol.api.domain.entity.Invoice;
+import com.cashcontrol.api.domain.entity.InvoiceStatus;
 import com.cashcontrol.api.domain.entity.InvoiceImportFormat;
 import com.cashcontrol.api.domain.entity.InvoiceItem;
 import com.cashcontrol.api.domain.entity.PaymentMethod;
@@ -57,6 +58,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -106,10 +108,11 @@ public class FaturaImportServiceImpl implements FaturaImportService {
         int excludedPayments = 0;
 
         for (ParsedCardSection section : fatura.cardSections()) {
-            // Valor positivo na fatura é crédito: pagamento da fatura anterior, estorno.
-            // Não é despesa e não pode virar lançamento — some da prévia e só é contado.
+            // Valor positivo na fatura é crédito. O pagamento da fatura anterior não vira
+            // lançamento aqui — ele sai da conta e entra pelo extrato — e só é contado. O
+            // estorno fica: abate a fatura e a despesa do mês.
             List<ParsedFaturaRow> expenses = section.rows().stream()
-                    .filter(row -> row.signedAmount().signum() < 0)
+                    .filter(row -> row.signedAmount().signum() < 0 || !isInvoicePayment(row))
                     .toList();
             excludedPayments += section.rows().size() - expenses.size();
 
@@ -261,7 +264,19 @@ public class FaturaImportServiceImpl implements FaturaImportService {
                 suggestion.subcategoryId(),
                 suggestion.subcategoryName(),
                 suggestion.source(),
-                alreadyImported.contains(key.externalRef()));
+                alreadyImported.contains(key.externalRef()),
+                row.signedAmount().signum() > 0);
+    }
+
+    /**
+     * Crédito que é o pagamento da fatura anterior ("PAGTO DEBITO AUTOMATICO", "PAGAMENTO
+     * FATURA"). Qualquer outro crédito é estorno; se a regra errar, a linha aparece como
+     * estorno na prévia e o usuário a desmarca.
+     */
+    private static boolean isInvoicePayment(ParsedFaturaRow row) {
+        String description = row.description().toLowerCase(Locale.ROOT);
+        return row.signedAmount().signum() > 0
+               && (description.contains("pagto") || description.contains("pagamento"));
     }
 
     /**
@@ -378,6 +393,10 @@ public class FaturaImportServiceImpl implements FaturaImportService {
     private record PurchaseGroup(List<FaturaImportCommitRow> rows, int total, int lastNumber) {
 
         static PurchaseGroup of(List<FaturaImportCommitRow> rows) {
+            if (rows.getFirst().isRefund()) {
+                // Estorno não tem parcelas a gerar: o da parcela 1 não promete o da 2.
+                return new PurchaseGroup(rows, 1, 1);
+            }
             int total = rows.stream().mapToInt(row -> numberOf(row.totalInstallments())).max().orElse(1);
             int last = rows.stream().mapToInt(row -> numberOf(row.installmentNumber())).max().orElse(1);
             return new PurchaseGroup(rows, total, last);
@@ -446,7 +465,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
     }
 
     private String purchaseKeyOf(FaturaImportCommitRow row) {
-        if (row.totalInstallments() == null || row.totalInstallments() <= 1) {
+        if (row.isRefund() || row.totalInstallments() == null || row.totalInstallments() <= 1) {
             // Compra à vista não tem irmãs: a própria chave da linha isola o grupo.
             return row.externalRef();
         }
@@ -550,7 +569,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
         // uma linha rejeitada não pode deixar transação órfã na transação do banco.
         Category category = resolveCategory(row.categoryId(), context.categories());
 
-        int number = row.installmentNumber() != null ? row.installmentNumber() : 1;
+        int number = row.installmentNumber() != null && !row.isRefund() ? row.installmentNumber() : 1;
         if (number > purchase.total()) {
             throw new BusinessRuleException(
                     "Parcela " + number + " de " + purchase.total() + " é inconsistente.");
@@ -566,7 +585,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
         String originalDescription = truncateDescription(
                 rowHasher.stripInstallmentSuffix(row.originalDescription()));
         saveCharge(invoice, row.externalRef(), competenceDateFor(row.date(), context.referenceMonth(), card),
-                row.amount(), description, originalDescription, card, category,
+                row.amount(), row.isRefund(), description, originalDescription, card, category,
                 series.resolve(category, description), number, purchase.total(), context, tally);
         tally.imported++;
         return true;
@@ -605,7 +624,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
         String description = truncateDescription(rowHasher.stripInstallmentSuffix(row.description()));
         String originalDescription = truncateDescription(
                 rowHasher.stripInstallmentSuffix(row.originalDescription()));
-        saveCharge(invoice, externalRef, competenceDateFor(row.date(), targetMonth, card), row.amount(),
+        saveCharge(invoice, externalRef, competenceDateFor(row.date(), targetMonth, card), row.amount(), false,
                 description, originalDescription, card, category, series.resolve(category, description),
                 number, purchase.total(), context, tally);
         tally.futureInstallments++;
@@ -629,11 +648,13 @@ public class FaturaImportServiceImpl implements FaturaImportService {
         }
 
         InvoiceItem item = context.existing().items().get(row.externalRef());
-        if (item == null || item.getAmount().compareTo(row.amount()) == 0) {
+        // Na fatura o estorno é negativo; na transação, positivo como todo REFUND.
+        BigDecimal itemAmount = row.isRefund() ? row.amount().negate() : row.amount();
+        if (item == null || item.getAmount().compareTo(itemAmount) == 0) {
             return;
         }
-        BigDecimal delta = row.amount().subtract(item.getAmount());
-        item.setAmount(row.amount());
+        BigDecimal delta = itemAmount.subtract(item.getAmount());
+        item.setAmount(itemAmount);
         invoiceItemRepository.save(item);
         if (item.getCancelledAt() == null) {
             // Um item cancelado já foi subtraído do total da fatura; somar a diferença nele
@@ -654,17 +675,25 @@ public class FaturaImportServiceImpl implements FaturaImportService {
      * compra num mês em que o banco não a cobrou.
      */
     private void saveCharge(Invoice invoice, String externalRef, LocalDate competenceDate,
-                            BigDecimal amount, String description, String originalDescription,
+                            BigDecimal amount, boolean refund, String description, String originalDescription,
                             CreditCard card, Category category,
                             InstallmentSeries series, int number, int total,
                             CommitContext context, CommitTally tally) {
         Transaction tx = new Transaction();
         tx.setUserId(context.userId());
         tx.setAccount(context.account());
-        tx.setType(TransactionType.EXPENSE);
+        // Estorno é REFUND positivo, como no extrato; a fatura o recebe negativo, abaixo.
+        tx.setType(refund ? TransactionType.REFUND : TransactionType.EXPENSE);
         // PENDENTE de propósito: o saldo da conta soma só transações PAGAS, e quem tira o
         // dinheiro da conta é o pagamento da fatura. PAGA aqui debitaria a compra duas vezes.
-        tx.setStatus(TransactionStatus.PENDING);
+        // Cartão não entra no saldo (creditCard preenchido), então a fatura já quitada pode
+        // receber a cobrança como PAGA — no vencimento, como a quitação faz com as demais.
+        if (invoice.getStatus() == InvoiceStatus.PAID) {
+            tx.setStatus(TransactionStatus.PAID);
+            tx.setPaymentDate(invoice.getDueDate());
+        } else {
+            tx.setStatus(TransactionStatus.PENDING);
+        }
         tx.setAmount(amount);
         tx.setDescription(description);
         tx.setCompetenceDate(competenceDate);
@@ -685,7 +714,8 @@ public class FaturaImportServiceImpl implements FaturaImportService {
         item.setTransaction(tx);
         item.setDescription(description);
         item.setOriginalDescription(originalDescription);
-        item.setAmount(amount);
+        BigDecimal invoiceAmount = refund ? amount.negate() : amount;
+        item.setAmount(invoiceAmount);
         item.setCompetenceDate(competenceDate);
         item.setCategory(category);
         item.setExternalRef(externalRef);
@@ -696,7 +726,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
         }
         invoiceItemRepository.save(item);
 
-        tally.addedByInvoice.merge(invoice, amount, BigDecimal::add);
+        tally.addedByInvoice.merge(invoice, invoiceAmount, BigDecimal::add);
     }
 
     /**

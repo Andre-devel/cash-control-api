@@ -78,8 +78,11 @@ public class FaturaRowHasher {
         Map<String, Integer> seen = new HashMap<>();
         return rows.stream()
                 .map(row -> {
+                    // Estorno tem identidade própria: o estorno da parcela 1 de uma compra
+                    // não pode ter a chave da própria parcela 1.
                     String identity = identityOf(cardLast4, row.date(), row.description(),
-                            row.signedAmount(), row.installmentNumber(), row.totalInstallments());
+                            row.signedAmount(), row.installmentNumber(), row.totalInstallments())
+                            + (row.signedAmount().signum() > 0 ? "|estorno" : "");
                     int ordinal = seen.merge(identity, 1, Integer::sum) - 1;
                     return new RowKey(sha256(identity + "|#" + ordinal), ordinal);
                 })
@@ -139,8 +142,8 @@ public class FaturaRowHasher {
         return cardLast4
                + "|" + date
                + "|" + normalize(stripInstallmentSuffix(description))
-               // Valor absoluto: só despesas são hasheadas, e assim o sinal deixa de ser
-               // um detalhe que o chamador precisa acertar.
+               // Valor absoluto: o sinal não é detalhe que o chamador precisa acertar. Despesa
+               // e estorno se distinguem pelo sufixo que hashAll acrescenta.
                + "|" + (parceled ? "" : amount.abs().stripTrailingZeros().toPlainString())
                + "|" + (parceled ? installmentNumber + "/" + totalInstallments : "");
     }
