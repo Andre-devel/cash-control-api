@@ -300,6 +300,46 @@ class TransactionRepositoryIntegrationTest {
         assertThat(result.getContent().get(0).getDescription()).isEqualTo("Supermercado Carrefour");
     }
 
+    @Test
+    void findWithFilters_parentCategory_includesSubcategories() {
+        Category parent = createCategory("Alimentação");
+        Category child = createCategory("Restaurante");
+        child.setParent(parent);
+        categoryRepository.save(child);
+        Category other = createCategory("Transporte");
+
+        Transaction onParent = buildTransaction(userId, defaultAccount, TransactionType.EXPENSE, TransactionStatus.PAID,
+                new BigDecimal("10.00"), "Mercado", null, LocalDate.now(), LocalDate.now());
+        onParent.setCategory(parent);
+        Transaction withSubcategory = buildTransaction(userId, defaultAccount, TransactionType.EXPENSE, TransactionStatus.PAID,
+                new BigDecimal("20.00"), "Jantar", null, LocalDate.now(), LocalDate.now());
+        withSubcategory.setCategory(parent);
+        withSubcategory.setSubcategory(child);
+        Transaction childAsCategory = buildTransaction(userId, defaultAccount, TransactionType.EXPENSE, TransactionStatus.PAID,
+                new BigDecimal("30.00"), "Almoço", null, LocalDate.now(), LocalDate.now());
+        childAsCategory.setCategory(child);
+        Transaction unrelated = buildTransaction(userId, defaultAccount, TransactionType.EXPENSE, TransactionStatus.PAID,
+                new BigDecimal("40.00"), "Uber", null, LocalDate.now(), LocalDate.now());
+        unrelated.setCategory(other);
+        Transaction uncategorized = buildTransaction(userId, defaultAccount, TransactionType.EXPENSE, TransactionStatus.PAID,
+                new BigDecimal("50.00"), "Sem categoria", null, LocalDate.now(), LocalDate.now());
+        transactionRepository.saveAll(List.of(onParent, withSubcategory, childAsCategory, unrelated, uncategorized));
+
+        Page<Transaction> byParent = transactionRepository.findWithFilters(
+                userId, null, null, null, parent.getId(),
+                null, null, null, null,
+                null, null, null, false, null, false, PageRequest.of(0, 100));
+        Page<Transaction> byChild = transactionRepository.findWithFilters(
+                userId, null, null, null, child.getId(),
+                null, null, null, null,
+                null, null, null, false, null, false, PageRequest.of(0, 100));
+
+        assertThat(byParent.getContent()).extracting(Transaction::getDescription)
+                .containsExactlyInAnyOrder("Mercado", "Jantar", "Almoço");
+        assertThat(byChild.getContent()).extracting(Transaction::getDescription)
+                .containsExactlyInAnyOrder("Jantar", "Almoço");
+    }
+
     // ── IT-1.1 — sumPaidAmountByAccountIdAndUserId ────────────────────────────
 
     @Test

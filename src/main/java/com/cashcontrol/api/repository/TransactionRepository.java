@@ -157,7 +157,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             AND (:accountId IS NULL OR t.account.id = :accountId)
             AND (:type IS NULL OR t.type = :type)
             AND (:status IS NULL OR t.status = :status)
-            AND (:categoryId IS NULL OR t.category.id = :categoryId)
+            AND (:categoryId IS NULL OR t.category.id = :categoryId OR t.subcategory.id = :categoryId
+                 OR t.category.id IN (SELECT sc.id FROM Category sc WHERE sc.parent.id = :categoryId))
             AND (CAST(:competenceDateFrom AS LocalDate) IS NULL OR t.competenceDate >= :competenceDateFrom)
             AND (CAST(:competenceDateTo AS LocalDate) IS NULL OR t.competenceDate <= :competenceDateTo)
             AND (CAST(:paymentDateFrom AS LocalDate) IS NULL OR t.paymentDate >= :paymentDateFrom)
