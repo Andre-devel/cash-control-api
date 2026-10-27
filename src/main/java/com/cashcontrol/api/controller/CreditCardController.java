@@ -100,6 +100,22 @@ public class CreditCardController {
         return creditCardService.listCards(principal.getUser().getId());
     }
 
+    @Operation(summary = "Get credit card", description = "Returns one credit card of the authenticated user (archived included).")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Card returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Card not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @GetMapping("/{id}")
+    @PreAuthorize("isAuthenticated()")
+    public CreditCardResponse getCard(
+            @Parameter(description = "Credit card UUID", required = true) @PathVariable UUID id,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return creditCardService.getCard(id, principal.getUser().getId());
+    }
+
     @Operation(summary = "Edit credit card", description = "Updates credit card details such as name, brand, issuer, limit, and billing cycle days.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Card updated"),

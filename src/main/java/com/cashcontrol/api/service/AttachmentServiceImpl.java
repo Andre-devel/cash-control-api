@@ -83,6 +83,20 @@ public class AttachmentServiceImpl implements AttachmentService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public AttachmentFile download(UUID transactionId, UUID attachmentId, UUID userId) {
+        Attachment attachment = attachmentRepository.findByIdAndUserIdAndDeletedAtIsNull(attachmentId, userId)
+                .filter(a -> a.getTransaction().getId().equals(transactionId))
+                .orElseThrow(() -> new ResourceNotFoundException("Attachment not found: " + attachmentId));
+
+        return new AttachmentFile(
+                attachment.getOriginalFilename(),
+                attachment.getMimeType(),
+                attachment.getFileSizeBytes(),
+                storagePort.load(attachment.getStorageKey()));
+    }
+
+    @Override
     @Transactional
     public void deleteAttachment(UUID attachmentId, UUID userId) {
         Attachment attachment = attachmentRepository.findByIdAndUserIdAndDeletedAtIsNull(attachmentId, userId)

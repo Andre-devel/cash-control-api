@@ -8,6 +8,7 @@ import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
 import com.cashcontrol.api.dto.response.AttachmentResponse;
 import com.cashcontrol.api.repository.AttachmentRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
+import com.cashcontrol.api.service.AttachmentService;
 import com.cashcontrol.api.service.AttachmentServiceImpl;
 import com.cashcontrol.api.storage.StoragePort;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -207,6 +209,45 @@ class AttachmentServiceTest {
                 .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> attachmentService.getAttachments(transactionId, userId))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    // ── download ──────────────────────────────────────────────────────────────
+
+    @Test
+    void download_ownAttachment_returnsStoredFile() {
+        UUID attachmentId = UUID.randomUUID();
+        Attachment attachment = new Attachment();
+        attachment.setTransaction(transaction);
+        attachment.setOriginalFilename("recibo.pdf");
+        attachment.setMimeType("application/pdf");
+        attachment.setFileSizeBytes(3);
+        attachment.setStorageKey("key-1");
+        ByteArrayResource content = new ByteArrayResource(new byte[] {1, 2, 3});
+
+        when(attachmentRepository.findByIdAndUserIdAndDeletedAtIsNull(attachmentId, userId))
+                .thenReturn(Optional.of(attachment));
+        when(storagePort.load("key-1")).thenReturn(content);
+
+        AttachmentService.AttachmentFile file = attachmentService.download(transactionId, attachmentId, userId);
+
+        assertThat(file.originalFilename()).isEqualTo("recibo.pdf");
+        assertThat(file.mimeType()).isEqualTo("application/pdf");
+        assertThat(file.content()).isSameAs(content);
+    }
+
+    @Test
+    void download_attachmentOfAnotherTransaction_throws() {
+        UUID attachmentId = UUID.randomUUID();
+        Transaction other = new Transaction();
+        ReflectionTestUtils.setField(other, "id", UUID.randomUUID());
+        Attachment attachment = new Attachment();
+        attachment.setTransaction(other);
+
+        when(attachmentRepository.findByIdAndUserIdAndDeletedAtIsNull(attachmentId, userId))
+                .thenReturn(Optional.of(attachment));
+
+        assertThatThrownBy(() -> attachmentService.download(transactionId, attachmentId, userId))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 

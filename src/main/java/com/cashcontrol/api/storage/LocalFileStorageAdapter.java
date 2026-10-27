@@ -2,6 +2,8 @@ package com.cashcontrol.api.storage;
 
 import com.cashcontrol.api.config.AppProperties;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -37,6 +39,15 @@ public class LocalFileStorageAdapter implements StoragePort {
             throw new IllegalStateException("Failed to store file", e);
         }
         return storageKey;
+    }
+
+    @Override
+    public Resource load(String storageKey) {
+        Path target = storageRoot.resolve(storageKey).normalize();
+        if (!target.startsWith(storageRoot) || !Files.isRegularFile(target)) {
+            throw new IllegalStateException("Stored file not found: " + storageKey);
+        }
+        return new FileSystemResource(target);
     }
 
     @Override

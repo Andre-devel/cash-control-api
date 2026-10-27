@@ -26,6 +26,8 @@ public interface CreditCardService {
 
     List<CreditCardResponse> listCards(UUID userId);
 
+    CreditCardResponse getCard(UUID id, UUID userId);
+
     CreditCardResponse editCard(UUID id, EditCardRequest request, UUID userId);
 
     CreditCardResponse archiveCard(UUID id, UUID userId);

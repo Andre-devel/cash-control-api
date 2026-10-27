@@ -110,6 +110,12 @@ public class CreditCardServiceImpl implements CreditCardService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public CreditCardResponse getCard(UUID id, UUID userId) {
+        return toResponse(findActiveCard(id, userId));
+    }
+
+    @Override
     public CreditCardResponse editCard(UUID id, EditCardRequest request, UUID userId) {
         CreditCard card = findActiveCard(id, userId);
 

@@ -1,6 +1,7 @@
 package com.cashcontrol.api.service;
 
 import com.cashcontrol.api.dto.response.AttachmentResponse;
+import org.springframework.core.io.Resource;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Collection;
@@ -13,6 +14,8 @@ public interface AttachmentService {
 
     List<AttachmentResponse> getAttachments(UUID transactionId, UUID userId);
 
+    AttachmentFile download(UUID transactionId, UUID attachmentId, UUID userId);
+
     void deleteAttachment(UUID attachmentId, UUID userId);
 
     // Hard-deletes every attachment row (live or soft-deleted) tied to these transactions,
@@ -20,4 +23,6 @@ public interface AttachmentService {
     // delete to clear the attachments_transaction_id_fkey — cascading is fine here because
     // the transaction itself is gone, so nothing is left for the attachment to reference.
     void deleteAllForTransactions(Collection<UUID> transactionIds);
+
+    record AttachmentFile(String originalFilename, String mimeType, long fileSizeBytes, Resource content) {}
 }
