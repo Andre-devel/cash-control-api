@@ -177,6 +177,13 @@ class AccountIntegrationTest {
                 new CreateAccountRequest("Seed Only", AccountType.CHECKING, "BRL", null, 0,
                         new BigDecimal("100.00")), userId);
 
+        assertThatThrownBy(() -> accountService.deleteAccount(account.id(), userId))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("tem saldo");
+
+        // Zerado o saldo, os ajustes não seguram a conta.
+        accountService.manualAdjustment(account.id(),
+                new ManualAdjustmentRequest(new BigDecimal("-100.00"), null, LocalDate.now()), userId);
         accountService.deleteAccount(account.id(), userId);
 
         assertThatThrownBy(() -> accountService.getAccount(account.id(), userId))

@@ -86,7 +86,7 @@ class CategoryServiceIntegrationTest {
         systemOnly.forEach(c -> assertThat(c.userId()).isNull());
 
         categoryService.createCategory(new CreateCategoryRequest("Pets", null, null, null, 0), userId);
-        categoryService.createCategory(new CreateCategoryRequest("Viagens", null, null, null, 1), userId);
+        categoryService.createCategory(new CreateCategoryRequest("Viagens a trabalho", null, null, null, 1), userId);
 
         List<CategoryResponse> all = categoryService.listCategories(userId, false, false);
         assertThat(all.size()).isEqualTo(systemCount + 2);

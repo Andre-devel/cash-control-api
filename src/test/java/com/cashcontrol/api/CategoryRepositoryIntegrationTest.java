@@ -106,6 +106,23 @@ class CategoryRepositoryIntegrationTest {
     }
 
     @Test
+    void existsNameInScope_coversSystemCategoriesAndIgnoresCase() {
+        Category systemRoot = categoryRepository.findAllSystemCategories().stream()
+                .filter(c -> c.getParent() == null).findFirst().orElseThrow();
+        String systemName = systemRoot.getName();
+
+        assertThat(categoryRepository.existsNameInScope(userId, null, systemName.toUpperCase(), null)).isTrue();
+        assertThat(categoryRepository.existsNameInScope(userId, null, "Pets", null)).isFalse();
+
+        Category pets = createUserCategory(userId, "Pets", null);
+        assertThat(categoryRepository.existsNameInScope(userId, null, "pets", null)).isTrue();
+        assertThat(categoryRepository.existsNameInScope(userId, null, "Pets", pets.getId())).isFalse();
+        assertThat(categoryRepository.existsNameInScope(UUID.randomUUID(), null, "Pets", null)).isFalse();
+        assertThat(categoryRepository.existsNameInScope(userId, systemRoot.getId(), "Pets", null)).isFalse();
+        assertThat(categoryRepository.existsNameInScope(userId, pets.getId(), systemName, null)).isFalse();
+    }
+
+    @Test
     void findTopCategoriesByFrequency_ranksHigherFrequencyFirst() {
         Category catA = createUserCategory(userId, "FreqCatA", null);
         Category catB = createUserCategory(userId, "FreqCatB", null);

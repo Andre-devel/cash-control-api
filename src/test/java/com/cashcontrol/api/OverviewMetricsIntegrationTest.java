@@ -104,7 +104,8 @@ class OverviewMetricsIntegrationTest {
     @Test
     void getOverviewMetrics_archivedAccounts_excludedFromTotalBalance() {
         createPaidTransaction(checkingAccountId, TransactionType.INCOME, "1000.00");
-        accountService.archiveAccount(checkingAccountId, userId);
+        // Conta com saldo não arquiva pela API; simula uma arquivada antes dessa regra.
+        jdbcTemplate.update("UPDATE accounts SET archived_at = NOW() WHERE id = ?", checkingAccountId);
 
         OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId);
 

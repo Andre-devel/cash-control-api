@@ -3,6 +3,7 @@ package com.cashcontrol.api.service;
 import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.Category;
 import com.cashcontrol.api.domain.entity.CategoryRule;
+import com.cashcontrol.api.domain.entity.HiddenSystemCategory;
 import com.cashcontrol.api.domain.exception.BusinessRuleException;
 import com.cashcontrol.api.domain.exception.ConflictException;
 import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
@@ -15,6 +16,7 @@ import com.cashcontrol.api.dto.response.CategorySuggestionResponse;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CategoryRuleRepository;
+import com.cashcontrol.api.repository.HiddenSystemCategoryRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -27,6 +29,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -42,6 +45,7 @@ public class CategoryServiceImpl implements CategoryService {
     private final CategoryRuleRepository categoryRuleRepository;
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
+    private final HiddenSystemCategoryRepository hiddenSystemCategoryRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -49,10 +53,12 @@ public class CategoryServiceImpl implements CategoryService {
         List<Category> all = new ArrayList<>();
         all.addAll(categoryRepository.findAllSystemCategories());
         all.addAll(categoryRepository.findAllByUserId(userId));
+        Set<UUID> hiddenSystem = hiddenSystemCategoryRepository.findCategoryIdsByUserId(userId);
 
+        // Subcategoria de pai oculto sai junto: só as raízes visíveis carregam filhos abaixo.
         Stream<Category> filtered = all.stream();
         if (!includeHidden) {
-            filtered = filtered.filter(c -> !c.isHidden());
+            filtered = filtered.filter(c -> !isHidden(c, hiddenSystem));
         }
         if (!includeArchived) {
             filtered = filtered.filter(c -> !c.isArchived());
@@ -68,7 +74,7 @@ public class CategoryServiceImpl implements CategoryService {
                 .filter(c -> c.getParent() == null)
                 .sorted(Comparator.comparingInt(Category::getSortOrder)
                         .thenComparing(c -> c.getCreatedAt() != null ? c.getCreatedAt() : Instant.EPOCH))
-                .map(root -> toCategoryResponse(root, childrenByParent.getOrDefault(root.getId(), Collections.emptyList())))
+                .map(root -> toCategoryResponse(root, childrenByParent.getOrDefault(root.getId(), Collections.emptyList()), hiddenSystem))
                 .collect(Collectors.toList());
     }
 
@@ -85,7 +91,7 @@ public class CategoryServiceImpl implements CategoryService {
         }
 
         UUID parentId = parent != null ? parent.getId() : null;
-        if (categoryRepository.existsByUserIdAndParentIdAndNameAndArchivedAtIsNull(userId, parentId, request.name())) {
+        if (categoryRepository.existsNameInScope(userId, parentId, request.name(), null)) {
             throw new ConflictException("Já existe uma categoria com o nome '" + request.name() + "' neste escopo.");
         }
 
@@ -113,7 +119,7 @@ public class CategoryServiceImpl implements CategoryService {
 
         if (request.name() != null && !request.name().equals(category.getName())) {
             UUID parentId = category.getParent() != null ? category.getParent().getId() : null;
-            if (categoryRepository.existsByUserIdAndParentIdAndNameAndArchivedAtIsNullAndIdNot(userId, parentId, request.name(), id)) {
+            if (categoryRepository.existsNameInScope(userId, parentId, request.name(), id)) {
                 throw new ConflictException("Já existe uma categoria com o nome '" + request.name() + "' neste escopo.");
             }
             category.setName(request.name());
@@ -133,9 +139,22 @@ public class CategoryServiceImpl implements CategoryService {
         Category category = categoryRepository.findByIdVisibleToUser(id, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + id));
 
-        category.setHidden(hidden);
-        category = categoryRepository.save(category);
-        return toCategoryResponse(category, Collections.emptyList());
+        if (category.getUserId() != null) {
+            category.setHidden(hidden);
+            category = categoryRepository.save(category);
+            return toCategoryResponse(category, Collections.emptyList());
+        }
+
+        // Categoria do sistema é de todos: a escolha fica numa tabela por usuário (V34).
+        if (hidden && !hiddenSystemCategoryRepository.existsByUserIdAndCategoryId(userId, id)) {
+            HiddenSystemCategory entry = new HiddenSystemCategory();
+            entry.setUserId(userId);
+            entry.setCategoryId(id);
+            hiddenSystemCategoryRepository.save(entry);
+        } else if (!hidden) {
+            hiddenSystemCategoryRepository.deleteByUserIdAndCategoryId(userId, id);
+        }
+        return toCategoryResponse(category, Collections.emptyList(), hidden ? Set.of(id) : Set.of());
     }
 
     @Override
@@ -256,11 +275,21 @@ public class CategoryServiceImpl implements CategoryService {
 
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
+    /** {@code is_hidden} só vale para categorias do usuário; as do sistema vêm de {@code hiddenSystem}. */
+    private static boolean isHidden(Category category, Set<UUID> hiddenSystem) {
+        return category.getUserId() == null ? hiddenSystem.contains(category.getId()) : category.isHidden();
+    }
+
     private CategoryResponse toCategoryResponse(Category category, List<Category> subcategories) {
+        return toCategoryResponse(category, subcategories, Set.of());
+    }
+
+    private CategoryResponse toCategoryResponse(Category category, List<Category> subcategories,
+                                                Set<UUID> hiddenSystem) {
         List<CategoryResponse> subResponses = subcategories.stream()
                 .sorted(Comparator.comparingInt(Category::getSortOrder)
                         .thenComparing(c -> c.getCreatedAt() != null ? c.getCreatedAt() : Instant.EPOCH))
-                .map(sub -> toCategoryResponse(sub, Collections.emptyList()))
+                .map(sub -> toCategoryResponse(sub, Collections.emptyList(), hiddenSystem))
                 .collect(Collectors.toList());
 
         return new CategoryResponse(
@@ -273,7 +302,7 @@ public class CategoryServiceImpl implements CategoryService {
                 category.getIcon(),
                 category.getSortOrder(),
                 category.isDefault(),
-                category.isHidden(),
+                isHidden(category, hiddenSystem),
                 category.isArchived(),
                 category.getArchivedAt(),
                 subResponses,

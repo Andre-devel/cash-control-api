@@ -28,7 +28,15 @@ public interface CategoryRepository extends JpaRepository<Category, UUID> {
 
     boolean existsByUserIdAndParentIdAndName(UUID userId, UUID parentId, String name);
 
-    boolean existsByUserIdAndParentIdAndNameAndArchivedAtIsNull(UUID userId, UUID parentId, String name);
-
-    boolean existsByUserIdAndParentIdAndNameAndArchivedAtIsNullAndIdNot(UUID userId, UUID parentId, String name, UUID excludeId);
+    /**
+     * Nome já usado no mesmo nível (mesmo pai) por uma categoria ativa do usuário ou do
+     * sistema, sem diferenciar maiúsculas. {@code excludeId} é a própria categoria na edição.
+     */
+    @Query("SELECT COUNT(c) > 0 FROM Category c " +
+           "WHERE ((c.userId = :userId AND c.archivedAt IS NULL) OR c.userId IS NULL) " +
+           "AND ((:parentId IS NULL AND c.parent IS NULL) OR c.parent.id = :parentId) " +
+           "AND LOWER(c.name) = LOWER(:name) " +
+           "AND (:excludeId IS NULL OR c.id <> :excludeId)")
+    boolean existsNameInScope(@Param("userId") UUID userId, @Param("parentId") UUID parentId,
+                              @Param("name") String name, @Param("excludeId") UUID excludeId);
 }

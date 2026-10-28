@@ -68,11 +68,11 @@ class DashboardServiceIntegrationTest {
     @Test
     void getCategoryPieChart_correctBreakdown() {
         var moradia = categoryService.createCategory(
-                new CreateCategoryRequest("Moradia", null, null, null, 0), userId);
+                new CreateCategoryRequest("Casa própria", null, null, null, 0), userId);
         var alimentacao = categoryService.createCategory(
-                new CreateCategoryRequest("Alimentação", null, null, null, 1), userId);
+                new CreateCategoryRequest("Comida", null, null, null, 1), userId);
         var saude = categoryService.createCategory(
-                new CreateCategoryRequest("Saúde", null, null, null, 2), userId);
+                new CreateCategoryRequest("Bem-estar", null, null, null, 2), userId);
 
         LocalDate today = LocalDate.now();
         createPaidExpense("Aluguel", "500.00", today, moradia.id());
@@ -89,7 +89,7 @@ class DashboardServiceIntegrationTest {
         assertThat(result.entries()).hasSize(3);
 
         var moradiaEntry = result.entries().stream()
-                .filter(e -> "Moradia".equals(e.categoryName()))
+                .filter(e -> "Casa própria".equals(e.categoryName()))
                 .findFirst().orElseThrow();
         assertThat(moradiaEntry.totalAmount()).isEqualByComparingTo("500.00");
         assertThat(moradiaEntry.percentage()).isEqualByComparingTo("50.00");
@@ -100,7 +100,7 @@ class DashboardServiceIntegrationTest {
         assertThat(sumOfPercentages).isEqualByComparingTo("100.00");
 
         // Moradia should be the first (largest) entry
-        assertThat(result.entries().get(0).categoryName()).isEqualTo("Moradia");
+        assertThat(result.entries().get(0).categoryName()).isEqualTo("Casa própria");
     }
 
     @Test

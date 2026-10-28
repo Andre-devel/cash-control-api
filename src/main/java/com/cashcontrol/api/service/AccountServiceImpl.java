@@ -24,8 +24,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Currency;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -49,7 +51,7 @@ public class AccountServiceImpl implements AccountService {
         account.setUserId(userId);
         account.setName(request.name());
         account.setType(request.type());
-        account.setCurrencyCode(request.currencyCode() != null ? request.currencyCode() : "BRL");
+        account.setCurrencyCode(resolveCurrency(request.currencyCode()));
         account.setDescription(request.description());
         account.setSortOrder(request.sortOrder() != null ? request.sortOrder() : 0);
         account = accountRepository.save(account);
@@ -119,6 +121,7 @@ public class AccountServiceImpl implements AccountService {
         if (account.getArchivedAt() != null) {
             throw new BusinessRuleException("A conta já está arquivada.");
         }
+        requireZeroBalance(id, userId, "arquivada");
         account.setArchivedAt(Instant.now());
         account = accountRepository.save(account);
         return toResponse(account, computeBalance(id, userId));
@@ -150,6 +153,7 @@ public class AccountServiceImpl implements AccountService {
             throw new BusinessRuleException(
                     "A conta não pode ser excluída porque possui transações. Arquive-a em vez disso.");
         }
+        requireZeroBalance(id, userId, "excluída");
 
         account.setDeletedAt(Instant.now());
         accountRepository.save(account);
@@ -265,6 +269,30 @@ public class AccountServiceImpl implements AccountService {
 
         attachmentService.deleteAllForTransactions(legs.stream().map(Transaction::getId).toList());
         transactionRepository.deleteAll(legs);
+    }
+
+    /** Código ISO 4217 em maiúsculas; BRL quando omitido. */
+    private static String resolveCurrency(String code) {
+        if (code == null || code.isBlank()) {
+            return "BRL";
+        }
+        String normalized = code.trim().toUpperCase(Locale.ROOT);
+        try {
+            return Currency.getInstance(normalized).getCurrencyCode();
+        } catch (IllegalArgumentException e) {
+            throw new BusinessRuleException("Moeda inválida: '" + code + "'. Use um código ISO 4217, como BRL.");
+        }
+    }
+
+    /**
+     * Conta arquivada ou excluída sai do patrimônio; com saldo, o dinheiro sumiria dos totais.
+     * O usuário zera antes com transferência ou ajuste.
+     */
+    private void requireZeroBalance(UUID id, UUID userId, String action) {
+        if (computeBalance(id, userId).signum() != 0) {
+            throw new BusinessRuleException("A conta tem saldo e não pode ser " + action
+                    + ". Transfira o saldo para outra conta ou ajuste-o para zero antes.");
+        }
     }
 
     private Account findActiveAccount(UUID id, UUID userId) {

@@ -135,6 +135,29 @@ class AccountServiceTest {
     }
 
     @Test
+    void createAccount_invalidCurrency_throwsBusinessRuleException() {
+        when(accountRepository.existsByUserIdAndNameAndDeletedAtIsNull(userId, "My Account")).thenReturn(false);
+
+        CreateAccountRequest request = new CreateAccountRequest("My Account", AccountType.CHECKING, "xyz", null, 0, null);
+
+        assertThatThrownBy(() -> accountService.createAccount(request, userId))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("Moeda inválida");
+        verify(accountRepository, never()).save(any());
+    }
+
+    @Test
+    void createAccount_lowercaseCurrency_isNormalized() {
+        when(accountRepository.existsByUserIdAndNameAndDeletedAtIsNull(userId, "My Account")).thenReturn(false);
+        when(accountRepository.save(any(Account.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        CreateAccountRequest request = new CreateAccountRequest("My Account", AccountType.CHECKING, "usd", null, 0, null);
+        AccountResponse response = accountService.createAccount(request, userId);
+
+        assertThat(response.currencyCode()).isEqualTo("USD");
+    }
+
+    @Test
     void createAccount_zeroInitialBalance_doesNotSeedTransaction() {
         when(accountRepository.existsByUserIdAndNameAndDeletedAtIsNull(userId, "Empty")).thenReturn(false);
         when(accountRepository.save(any(Account.class))).thenAnswer(inv -> {
@@ -259,6 +282,20 @@ class AccountServiceTest {
     }
 
     @Test
+    void archiveAccount_withBalance_throwsBusinessRuleException() {
+        when(accountRepository.findByIdAndUserIdAndDeletedAtIsNull(accountId, userId))
+                .thenReturn(Optional.of(account));
+        when(transactionRepository.sumPaidAmountByAccountIdAndUserId(accountId, userId))
+                .thenReturn(new BigDecimal("0.01"));
+
+        assertThatThrownBy(() -> accountService.archiveAccount(accountId, userId))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("tem saldo");
+        assertThat(account.getArchivedAt()).isNull();
+        verify(accountRepository, never()).save(any());
+    }
+
+    @Test
     void archiveAccount_alreadyArchived_throwsBusinessRuleException() {
         account.setArchivedAt(Instant.now());
         when(accountRepository.findByIdAndUserIdAndDeletedAtIsNull(accountId, userId))
@@ -321,6 +358,22 @@ class AccountServiceTest {
         accountService.deleteAccount(accountId, userId);
 
         assertThat(account.getDeletedAt()).isNotNull();
+    }
+
+    @Test
+    void deleteAccount_adjustmentsWithBalance_throwsBusinessRuleException() {
+        when(accountRepository.findByIdAndUserIdAndDeletedAtIsNull(accountId, userId))
+                .thenReturn(Optional.of(account));
+        when(transactionRepository.existsByAccount_IdAndUserIdAndStatusNotAndTypeNot(
+                accountId, userId, TransactionStatus.CANCELLED, TransactionType.MANUAL_ADJUSTMENT))
+                .thenReturn(false);
+        when(transactionRepository.sumPaidAmountByAccountIdAndUserId(accountId, userId))
+                .thenReturn(new BigDecimal("-50.00"));
+
+        assertThatThrownBy(() -> accountService.deleteAccount(accountId, userId))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("tem saldo");
+        assertThat(account.getDeletedAt()).isNull();
     }
 
     @Test

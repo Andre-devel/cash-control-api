@@ -3,6 +3,7 @@ package com.cashcontrol.api;
 import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.Category;
 import com.cashcontrol.api.domain.entity.CategoryRule;
+import com.cashcontrol.api.domain.entity.HiddenSystemCategory;
 import com.cashcontrol.api.domain.exception.BusinessRuleException;
 import com.cashcontrol.api.domain.exception.ConflictException;
 import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
@@ -14,6 +15,7 @@ import com.cashcontrol.api.dto.response.CategoryRuleResponse;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CategoryRuleRepository;
+import com.cashcontrol.api.repository.HiddenSystemCategoryRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.CategoryResolver;
 import com.cashcontrol.api.service.CategoryServiceImpl;
@@ -28,6 +30,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -45,6 +48,7 @@ class CategoryServiceTest {
     @Mock private CategoryRuleRepository categoryRuleRepository;
     @Mock private AccountRepository accountRepository;
     @Mock private TransactionRepository transactionRepository;
+    @Mock private HiddenSystemCategoryRepository hiddenSystemCategoryRepository;
     private CategoryServiceImpl categoryService;
 
     private UUID userId;
@@ -53,7 +57,7 @@ class CategoryServiceTest {
     void setUp() {
         userId = UUID.randomUUID();
         categoryService = new CategoryServiceImpl(categoryRepository, new CategoryResolver(categoryRepository),
-                categoryRuleRepository, accountRepository, transactionRepository);
+                categoryRuleRepository, accountRepository, transactionRepository, hiddenSystemCategoryRepository);
     }
 
     // ── listCategories ────────────────────────────────────────────────────────
@@ -116,6 +120,35 @@ class CategoryServiceTest {
     }
 
     @Test
+    void listCategories_systemCategoryHiddenOnlyForUserWhoHidIt() {
+        Category housing = buildCategory(null, null, "Moradia", true, false, false);
+        ReflectionTestUtils.setField(housing, "id", UUID.randomUUID());
+        Category food = buildCategory(null, null, "Alimentação", true, false, false);
+        ReflectionTestUtils.setField(food, "id", UUID.randomUUID());
+
+        when(categoryRepository.findAllSystemCategories()).thenReturn(List.of(housing, food));
+        when(categoryRepository.findAllByUserId(userId)).thenReturn(List.of());
+        when(hiddenSystemCategoryRepository.findCategoryIdsByUserId(userId)).thenReturn(Set.of(housing.getId()));
+
+        assertThat(categoryService.listCategories(userId, false, false))
+                .extracting(CategoryResponse::name).containsExactly("Alimentação");
+        assertThat(categoryService.listCategories(userId, true, false))
+                .filteredOn(CategoryResponse::isHidden)
+                .extracting(CategoryResponse::name).containsExactly("Moradia");
+    }
+
+    @Test
+    void listCategories_hiddenParentHidesSubcategories() {
+        Category root = buildCategory(userId, null, "Investimentos", false, true, false);
+        Category sub = buildCategory(userId, root, "CDB", false, false, false);
+
+        when(categoryRepository.findAllSystemCategories()).thenReturn(List.of());
+        when(categoryRepository.findAllByUserId(userId)).thenReturn(List.of(root, sub));
+
+        assertThat(categoryService.listCategories(userId, false, false)).isEmpty();
+    }
+
+    @Test
     void listCategories_nestsSubcategoriesUnderParents() {
         Category root = buildCategory(userId, null, "Root", false, false, false);
         Category sub = buildCategory(userId, root, "Sub", false, false, false);
@@ -135,7 +168,7 @@ class CategoryServiceTest {
 
     @Test
     void createCategory_rootCategory_success() {
-        when(categoryRepository.existsByUserIdAndParentIdAndNameAndArchivedAtIsNull(userId, null, "Groceries"))
+        when(categoryRepository.existsNameInScope(userId, null, "Groceries", null))
                 .thenReturn(false);
         when(categoryRepository.save(any())).thenAnswer(inv -> {
             Category c = inv.getArgument(0);
@@ -158,7 +191,7 @@ class CategoryServiceTest {
         ReflectionTestUtils.setField(parent, "id", parentId);
 
         when(categoryRepository.findByIdVisibleToUser(eq(parentId), any())).thenReturn(Optional.of(parent));
-        when(categoryRepository.existsByUserIdAndParentIdAndNameAndArchivedAtIsNull(userId, parentId, "Restaurants"))
+        when(categoryRepository.existsNameInScope(userId, parentId, "Restaurants", null))
                 .thenReturn(false);
         when(categoryRepository.save(any())).thenAnswer(inv -> {
             Category c = inv.getArgument(0);
@@ -193,7 +226,7 @@ class CategoryServiceTest {
 
     @Test
     void createCategory_duplicateName_throws409() {
-        when(categoryRepository.existsByUserIdAndParentIdAndNameAndArchivedAtIsNull(userId, null, "Food"))
+        when(categoryRepository.existsNameInScope(userId, null, "Food", null))
                 .thenReturn(true);
 
         assertThatThrownBy(() -> categoryService.createCategory(
@@ -220,7 +253,7 @@ class CategoryServiceTest {
         ReflectionTestUtils.setField(cat, "id", catId);
 
         when(categoryRepository.findByIdAndUserId(catId, userId)).thenReturn(Optional.of(cat));
-        when(categoryRepository.existsByUserIdAndParentIdAndNameAndArchivedAtIsNullAndIdNot(userId, null, "New Name", catId))
+        when(categoryRepository.existsNameInScope(userId, null, "New Name", catId))
                 .thenReturn(false);
         when(categoryRepository.save(any())).thenReturn(cat);
 
@@ -251,7 +284,7 @@ class CategoryServiceTest {
         ReflectionTestUtils.setField(cat, "id", catId);
 
         when(categoryRepository.findByIdAndUserId(catId, userId)).thenReturn(Optional.of(cat));
-        when(categoryRepository.existsByUserIdAndParentIdAndNameAndArchivedAtIsNullAndIdNot(userId, null, "Conflict Name", catId))
+        when(categoryRepository.existsNameInScope(userId, null, "Conflict Name", catId))
                 .thenReturn(true);
 
         assertThatThrownBy(() -> categoryService.editCategory(catId,
@@ -286,17 +319,36 @@ class CategoryServiceTest {
     }
 
     @Test
-    void setHidden_systemCategory_success() {
+    void setHidden_systemCategory_storesPerUserAndKeepsSharedRow() {
         UUID catId = UUID.randomUUID();
         Category cat = buildCategory(null, null, "Housing", true, false, false);
         ReflectionTestUtils.setField(cat, "id", catId);
 
         when(categoryRepository.findByIdVisibleToUser(catId, userId)).thenReturn(Optional.of(cat));
-        when(categoryRepository.save(any())).thenReturn(cat);
 
         CategoryResponse response = categoryService.setHidden(catId, true, userId);
 
         assertThat(response.isHidden()).isTrue();
+        assertThat(cat.isHidden()).isFalse();
+        verify(categoryRepository, never()).save(any());
+        ArgumentCaptor<HiddenSystemCategory> captor = ArgumentCaptor.forClass(HiddenSystemCategory.class);
+        verify(hiddenSystemCategoryRepository).save(captor.capture());
+        assertThat(captor.getValue().getUserId()).isEqualTo(userId);
+        assertThat(captor.getValue().getCategoryId()).isEqualTo(catId);
+    }
+
+    @Test
+    void setHidden_showSystemCategory_removesPerUserEntry() {
+        UUID catId = UUID.randomUUID();
+        Category cat = buildCategory(null, null, "Housing", true, false, false);
+        ReflectionTestUtils.setField(cat, "id", catId);
+
+        when(categoryRepository.findByIdVisibleToUser(catId, userId)).thenReturn(Optional.of(cat));
+
+        CategoryResponse response = categoryService.setHidden(catId, false, userId);
+
+        assertThat(response.isHidden()).isFalse();
+        verify(hiddenSystemCategoryRepository).deleteByUserIdAndCategoryId(userId, catId);
     }
 
     @Test

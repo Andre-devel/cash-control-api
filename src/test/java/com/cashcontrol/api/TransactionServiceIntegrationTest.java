@@ -126,7 +126,7 @@ class TransactionServiceIntegrationTest {
     @Test
     void createTransaction_categoryRuleAutoApplied() {
         var healthCategory = categoryService.createCategory(
-                new CreateCategoryRequest("Saúde", null, null, null, 0), userId);
+                new CreateCategoryRequest("Bem-estar", null, null, null, 0), userId);
         categoryService.createRule(
                 new CreateCategoryRuleRequest("farmácia", healthCategory.id(), null, null, 0), userId);
 
@@ -138,7 +138,7 @@ class TransactionServiceIntegrationTest {
                 userId);
 
         assertThat(tx.categoryId()).isEqualTo(healthCategory.id());
-        assertThat(tx.categoryName()).isEqualTo("Saúde");
+        assertThat(tx.categoryName()).isEqualTo("Bem-estar");
     }
 
     @Test

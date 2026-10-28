@@ -10,6 +10,8 @@ import com.cashcontrol.api.dto.response.AccountResponse;
 import com.cashcontrol.api.service.AccountService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import com.cashcontrol.api.domain.entity.Account;
+import com.cashcontrol.api.repository.AccountRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -18,6 +20,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -32,6 +35,7 @@ class TransferIntegrationTest {
 
     @Autowired private AccountService accountService;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private AccountRepository accountRepository;
 
     private UUID userId;
     private AccountResponse sourceAccount;
@@ -103,7 +107,10 @@ class TransferIntegrationTest {
 
     @Test
     void createTransfer_archivedSource_throwsBusinessRuleException() {
-        accountService.archiveAccount(sourceAccount.id(), userId);
+        // Conta com saldo não arquiva pela API; simula uma arquivada antes dessa regra.
+        Account source = accountRepository.findById(sourceAccount.id()).orElseThrow();
+        source.setArchivedAt(Instant.now());
+        accountRepository.saveAndFlush(source);
 
         TransferRequest request = new TransferRequest(
                 sourceAccount.id(), destinationAccount.id(),

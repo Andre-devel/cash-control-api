@@ -165,7 +165,7 @@ class CategoryApiIntegrationTest {
         UUID accountId = accountService.createAccount(
                 new CreateAccountRequest("Test Account", AccountType.CHECKING, "BRL", null, 0, null), userId).id();
         CategoryResponse category = categoryService.createCategory(
-                new CreateCategoryRequest("Alimentação", null, null, null, 0), userId);
+                new CreateCategoryRequest("Comida de rua", null, null, null, 0), userId);
 
         for (int i = 0; i < 3; i++) {
             transactionService.createTransaction(new CreateTransactionRequest(
@@ -185,7 +185,7 @@ class CategoryApiIntegrationTest {
     @Test
     void createAndListCategoryRules_works() throws Exception {
         CategoryResponse category = categoryService.createCategory(
-                new CreateCategoryRequest("Saúde", null, null, null, 0), userId);
+                new CreateCategoryRequest("Bem-estar", null, null, null, 0), userId);
 
         String ruleBody = """
                 {
@@ -214,7 +214,7 @@ class CategoryApiIntegrationTest {
     @Test
     void deleteRule_returns204AndRuleRemovedFromList() throws Exception {
         CategoryResponse category = categoryService.createCategory(
-                new CreateCategoryRequest("Transporte", null, null, null, 0), userId);
+                new CreateCategoryRequest("Locomoção", null, null, null, 0), userId);
 
         String ruleBody = """
                 {
