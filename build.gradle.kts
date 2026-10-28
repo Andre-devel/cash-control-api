@@ -15,7 +15,7 @@ version = "0.0.1-SNAPSHOT"
 springBoot {
     buildInfo {
         properties {
-            additional.set(mapOf("commit" to (System.getenv("GIT_COMMIT") ?: "unknown")))
+            additional.set(mapOf("commit" to (System.getenv("GIT_COMMIT") ?: "dev")))
         }
     }
 }
