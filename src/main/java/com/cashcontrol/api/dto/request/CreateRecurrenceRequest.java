@@ -1,5 +1,6 @@
 package com.cashcontrol.api.dto.request;
 
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.RecurrenceFrequency;
 import com.cashcontrol.api.domain.entity.TransactionType;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -39,5 +40,11 @@ public record CreateRecurrenceRequest(
         LocalDate endDate,
 
         @Schema(description = "Recurrence frequency determining the interval between generated instances", required = true)
-        @NotNull RecurrenceFrequency frequency
+        @NotNull RecurrenceFrequency frequency,
+
+        @Schema(description = "Payment method of generated transactions. Defaults to OTHER.")
+        PaymentMethodSlug paymentMethod,
+
+        @Schema(description = "Credit card UUID. Required when paymentMethod is CREDIT_CARD; occurrences go to the card invoices.")
+        UUID creditCardId
 ) {}

@@ -4,7 +4,7 @@ import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.Category;
 import com.cashcontrol.api.domain.entity.DeleteRecurrenceStrategy;
 import com.cashcontrol.api.domain.entity.PaymentMethod;
-import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
+import com.cashcontrol.api.domain.entity.CreditCard;
 import com.cashcontrol.api.domain.entity.RecurrenceRule;
 import com.cashcontrol.api.domain.entity.RecurrenceStatus;
 import com.cashcontrol.api.domain.entity.Transaction;
@@ -21,7 +21,6 @@ import com.cashcontrol.api.dto.response.RecurrenceCreationResponse;
 import com.cashcontrol.api.dto.response.RecurrenceRuleResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.repository.AccountRepository;
-import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.RecurrenceRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
@@ -31,7 +30,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -48,8 +50,8 @@ public class RecurrenceServiceImpl implements RecurrenceService {
     private final AccountRepository accountRepository;
     private final CategoryResolver categoryResolver;
     private final RecurrenceGeneratorService generatorService;
-    private final PaymentMethodRepository paymentMethodRepository;
     private final TransactionService transactionService;
+    private final CreditCardService creditCardService;
 
     @Override
     @Transactional
@@ -69,6 +71,16 @@ public class RecurrenceServiceImpl implements RecurrenceService {
         Category category = categoryResolver.resolve(request.categoryId(), userId);
         Category subcategory = categoryResolver.resolveSubcategory(request.subcategoryId(), category, userId);
 
+        PaymentMethod paymentMethod = transactionService.resolvePaymentMethod(request.paymentMethod());
+        CreditCard creditCard = transactionService.validateAndResolveCreditCard(
+                request.creditCardId(), paymentMethod.getSlug(), userId);
+        if (creditCard != null && request.type() == TransactionType.INCOME) {
+            throw new BusinessRuleException("Receitas não podem ser lançadas no cartão de crédito.");
+        }
+        if (request.endDate() != null && request.endDate().isBefore(request.startDate())) {
+            throw new BusinessRuleException("A data de fim não pode ser anterior à data de início.");
+        }
+
         RecurrenceRule rule = new RecurrenceRule();
         rule.setUserId(userId);
         rule.setAccount(account);
@@ -81,19 +93,21 @@ public class RecurrenceServiceImpl implements RecurrenceService {
         rule.setSubcategory(subcategory);
         rule.setStartDate(request.startDate());
         rule.setEndDate(request.endDate());
+        rule.setPaymentMethod(paymentMethod);
+        rule.setCreditCard(creditCard);
 
-        LocalDate today = LocalDate.now();
         LocalDate firstDate = request.startDate();
         rule.setNextOccurrenceDate(firstDate);
 
         rule = recurrenceRepository.save(rule);
 
         // Create first instance immediately
-        Transaction firstInstance = buildTransaction(rule, firstDate, today);
+        Transaction firstInstance = buildTransaction(rule, firstDate);
         firstInstance = transactionRepository.save(firstInstance);
+        creditCardService.createInvoiceItemForTransaction(firstInstance);
 
         // Pre-generate up to LOOKAHEAD_PERIODS future instances
-        LocalDate nextDate = generatorService.nextOccurrence(firstDate, request.frequency());
+        LocalDate nextDate = generatorService.nextOccurrence(firstDate, firstDate, request.frequency());
         List<Transaction> upcoming = new ArrayList<>();
         int generated = 1;
 
@@ -101,13 +115,13 @@ public class RecurrenceServiceImpl implements RecurrenceService {
             if (rule.getEndDate() != null && nextDate.isAfter(rule.getEndDate())) {
                 break;
             }
-            upcoming.add(buildTransaction(rule, nextDate, today));
-            nextDate = generatorService.nextOccurrence(nextDate, request.frequency());
+            upcoming.add(buildTransaction(rule, nextDate));
+            nextDate = generatorService.nextOccurrence(firstDate, nextDate, request.frequency());
             generated++;
         }
 
         if (!upcoming.isEmpty()) {
-            transactionRepository.saveAll(upcoming);
+            transactionRepository.saveAll(upcoming).forEach(creditCardService::createInvoiceItemForTransaction);
         }
 
         // Advance nextOccurrenceDate to after last pre-generated instance
@@ -173,6 +187,7 @@ public class RecurrenceServiceImpl implements RecurrenceService {
                 .collect(Collectors.toList());
 
         transactionRepository.saveAll(updated);
+        updated.forEach(creditCardService::syncInvoiceItemForTransaction);
 
         return new EditRecurrenceResult(toRuleResponse(rule), updated.size());
     }
@@ -207,6 +222,7 @@ public class RecurrenceServiceImpl implements RecurrenceService {
             tx.setCancelledAt(now);
         }
         transactionRepository.saveAll(toCancelFuture);
+        toCancelFuture.forEach(creditCardService::syncInvoiceItemForTransaction);
 
         rule = recurrenceRepository.save(rule);
         return toRuleResponse(rule);
@@ -232,38 +248,53 @@ public class RecurrenceServiceImpl implements RecurrenceService {
             throw new BusinessRuleException("Apenas recorrências PAUSADAS podem ser retomadas. Status atual: " + rule.getStatus());
         }
 
+        Instant pausedAt = rule.getPausedAt();
         rule.setStatus(RecurrenceStatus.ACTIVE);
         rule.setPausedAt(null);
         rule.setResumeAt(null);
 
-        // Re-generate instances from today forward
+        // Retoma no calendário da regra (mesmo dia das ocorrências), a partir de hoje. As datas
+        // que a pausa cancelou voltam a valer; o período passado da pausa fica cancelado.
         LocalDate today = LocalDate.now();
-        LocalDate nextDate = (rule.getNextOccurrenceDate() != null && !rule.getNextOccurrenceDate().isBefore(today))
-                ? rule.getNextOccurrenceDate()
-                : today;
-
-        // Check end date
-        if (rule.getEndDate() != null && nextDate.isAfter(rule.getEndDate())) {
-            rule.setStatus(RecurrenceStatus.ENDED);
-            rule.setNextOccurrenceDate(null);
-            rule = recurrenceRepository.save(rule);
-            return rule;
+        LocalDate current = rule.getStartDate();
+        while (current.isBefore(today)) {
+            current = generatorService.nextOccurrence(rule.getStartDate(), current, rule.getFrequency());
         }
 
-        List<Transaction> newInstances = new ArrayList<>();
-        int generated = 0;
-        LocalDate current = nextDate;
+        Map<LocalDate, Transaction> openByDate = new HashMap<>();
+        Map<LocalDate, Transaction> cancelledByPause = new HashMap<>();
+        for (Transaction tx : transactionRepository.findAllByRecurrenceRule_Id(rule.getId())) {
+            if (tx.getCompetenceDate().isBefore(today)) continue;
+            if (tx.getStatus() != TransactionStatus.CANCELLED) {
+                openByDate.put(tx.getCompetenceDate(), tx);
+            } else if (pausedAt != null && tx.getCancelledAt() != null && !tx.getCancelledAt().isBefore(pausedAt)) {
+                cancelledByPause.put(tx.getCompetenceDate(), tx);
+            }
+        }
 
+        List<Transaction> reactivated = new ArrayList<>();
+        List<Transaction> created = new ArrayList<>();
+        int generated = 0;
         while (generated < LOOKAHEAD_PERIODS) {
             if (rule.getEndDate() != null && current.isAfter(rule.getEndDate())) break;
-            newInstances.add(buildTransaction(rule, current, today));
-            current = generatorService.nextOccurrence(current, rule.getFrequency());
+            if (!openByDate.containsKey(current)) {
+                Transaction cancelled = cancelledByPause.get(current);
+                if (cancelled != null) {
+                    applyRule(cancelled, rule);
+                    cancelled.setStatus(TransactionStatus.PENDING);
+                    cancelled.setCancelledAt(null);
+                    cancelled.setPaymentDate(null);
+                    reactivated.add(cancelled);
+                } else {
+                    created.add(buildTransaction(rule, current));
+                }
+            }
+            current = generatorService.nextOccurrence(rule.getStartDate(), current, rule.getFrequency());
             generated++;
         }
 
-        if (!newInstances.isEmpty()) {
-            transactionRepository.saveAll(newInstances);
-        }
+        transactionRepository.saveAll(reactivated).forEach(creditCardService::syncInvoiceItemForTransaction);
+        transactionRepository.saveAll(created).forEach(creditCardService::createInvoiceItemForTransaction);
 
         rule.setNextOccurrenceDate(current);
         if (rule.getEndDate() != null && current.isAfter(rule.getEndDate())) {
@@ -271,8 +302,7 @@ public class RecurrenceServiceImpl implements RecurrenceService {
             rule.setNextOccurrenceDate(null);
         }
 
-        rule = recurrenceRepository.save(rule);
-        return rule;
+        return recurrenceRepository.save(rule);
     }
 
     @Override
@@ -297,6 +327,7 @@ public class RecurrenceServiceImpl implements RecurrenceService {
             tx.setCancelledAt(now);
         }
         transactionRepository.saveAll(toCancel);
+        toCancel.forEach(creditCardService::syncInvoiceItemForTransaction);
 
         rule.setDeletedAt(now);
         rule.setStatus(RecurrenceStatus.DELETED);
@@ -309,9 +340,10 @@ public class RecurrenceServiceImpl implements RecurrenceService {
     @Override
     @Transactional(readOnly = true)
     public List<RecurrenceRuleResponse> listRecurrences(UUID userId) {
-        return recurrenceRepository.findAllByUserIdAndDeletedAtIsNull(userId)
-                .stream()
-                .map(this::toRuleResponse)
+        List<RecurrenceRule> rules = recurrenceRepository.findAllByUserIdAndDeletedAtIsNull(userId);
+        Map<UUID, LocalDate> nextDue = loadNextDueDates(rules.stream().map(RecurrenceRule::getId).toList());
+        return rules.stream()
+                .map(rule -> toRuleResponse(rule, nextDue.get(rule.getId())))
                 .toList();
     }
 
@@ -348,13 +380,13 @@ public class RecurrenceServiceImpl implements RecurrenceService {
                 if (rule.getEndDate() != null && nextDate.isAfter(rule.getEndDate())) {
                     break;
                 }
-                newInstances.add(buildTransaction(rule, nextDate, today));
-                nextDate = generatorService.nextOccurrence(nextDate, rule.getFrequency());
+                newInstances.add(buildTransaction(rule, nextDate));
+                nextDate = generatorService.nextOccurrence(rule.getStartDate(), nextDate, rule.getFrequency());
                 generated++;
             }
 
             if (!newInstances.isEmpty()) {
-                transactionRepository.saveAll(newInstances);
+                transactionRepository.saveAll(newInstances).forEach(creditCardService::createInvoiceItemForTransaction);
                 totalGenerated += newInstances.size();
             }
 
@@ -375,29 +407,48 @@ public class RecurrenceServiceImpl implements RecurrenceService {
                 .orElseThrow(() -> new ResourceNotFoundException("Recurrence rule not found: " + ruleId));
     }
 
-    private Transaction buildTransaction(RecurrenceRule rule, LocalDate date, LocalDate today) {
-        TransactionStatus status = date.isAfter(today) ? TransactionStatus.PENDING : TransactionStatus.PAID;
-
-        PaymentMethod otherMethod = paymentMethodRepository.findBySlug(PaymentMethodSlug.OTHER)
-                .orElseThrow(() -> new ResourceNotFoundException("Payment method OTHER not found"));
-
+    /**
+     * Toda ocorrência nasce PENDENTE, inclusive as de data passada: nada sai da conta sem o
+     * usuário confirmar o pagamento (no cartão, quem quita é o pagamento da fatura).
+     */
+    private Transaction buildTransaction(RecurrenceRule rule, LocalDate date) {
         Transaction tx = new Transaction();
         tx.setUserId(rule.getUserId());
-        tx.setAccount(rule.getAccount());
         tx.setType(rule.getType());
-        tx.setStatus(status);
-        tx.setAmount(rule.getAmount());
-        tx.setDescription(rule.getDescription());
+        tx.setStatus(TransactionStatus.PENDING);
         tx.setCompetenceDate(date);
-        tx.setPaymentDate(status == TransactionStatus.PAID ? date : null);
         tx.setRecurrenceRule(rule);
-        tx.setCategory(rule.getCategory());
-        tx.setSubcategory(rule.getSubcategory());
-        tx.setPaymentMethod(otherMethod);
+        applyRule(tx, rule);
         return tx;
     }
 
+    /** Campos que a ocorrência herda da regra. */
+    private void applyRule(Transaction tx, RecurrenceRule rule) {
+        tx.setAccount(rule.getAccount());
+        tx.setAmount(rule.getAmount());
+        tx.setDescription(rule.getDescription());
+        tx.setCategory(rule.getCategory());
+        tx.setSubcategory(rule.getSubcategory());
+        tx.setPaymentMethod(rule.getPaymentMethod());
+        tx.setCreditCard(rule.getCreditCard());
+    }
+
+    private Map<UUID, LocalDate> loadNextDueDates(Collection<UUID> ruleIds) {
+        Map<UUID, LocalDate> byId = new HashMap<>();
+        if (ruleIds.isEmpty()) {
+            return byId;
+        }
+        for (Object[] row : transactionRepository.findNextOpenOccurrenceByRule(ruleIds, LocalDate.now())) {
+            byId.put((UUID) row[0], (LocalDate) row[1]);
+        }
+        return byId;
+    }
+
     private RecurrenceRuleResponse toRuleResponse(RecurrenceRule rule) {
+        return toRuleResponse(rule, loadNextDueDates(List.of(rule.getId())).get(rule.getId()));
+    }
+
+    private RecurrenceRuleResponse toRuleResponse(RecurrenceRule rule, LocalDate nextDueDate) {
         return new RecurrenceRuleResponse(
                 rule.getId(),
                 rule.getAccount() != null ? rule.getAccount().getId() : null,
@@ -414,6 +465,10 @@ public class RecurrenceServiceImpl implements RecurrenceService {
                 rule.getStartDate(),
                 rule.getEndDate(),
                 rule.getNextOccurrenceDate(),
+                nextDueDate,
+                rule.getPaymentMethod() != null ? rule.getPaymentMethod().getSlug() : null,
+                rule.getCreditCard() != null ? rule.getCreditCard().getId() : null,
+                rule.getCreditCard() != null ? rule.getCreditCard().getName() : null,
                 rule.getPausedAt(),
                 rule.getResumeAt(),
                 rule.getCreatedAt(),

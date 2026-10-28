@@ -71,6 +71,14 @@ public class RecurrenceRule {
     @JoinColumn(name = "subcategory_id")
     private Category subcategory;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "payment_method_id", nullable = false)
+    private PaymentMethod paymentMethod;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "credit_card_id")
+    private CreditCard creditCard;
+
     @Column(name = "start_date", nullable = false)
     private LocalDate startDate;
 

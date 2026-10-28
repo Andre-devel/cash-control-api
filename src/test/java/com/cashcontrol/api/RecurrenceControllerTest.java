@@ -3,6 +3,7 @@ package com.cashcontrol.api;
 import com.cashcontrol.api.config.PostgresTestContainerConfig;
 import com.cashcontrol.api.domain.UserSlugConstants;
 import com.cashcontrol.api.domain.entity.DeleteRecurrenceStrategy;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.RecurrenceFrequency;
 import com.cashcontrol.api.domain.entity.RecurrenceStatus;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
@@ -419,7 +420,8 @@ class RecurrenceControllerTest {
                 new BigDecimal("500.00"), "Monthly rent",
                 null, null, null, null,
                 LocalDate.of(2026, 6, 1), null,
-                LocalDate.of(2026, 7, 1),
+                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 1),
+                PaymentMethodSlug.OTHER, null, null,
                 null, null,
                 Instant.now(), Instant.now()
         );

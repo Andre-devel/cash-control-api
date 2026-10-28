@@ -131,6 +131,15 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     List<Transaction> findAllByRecurrenceRule_IdAndStatusIn(UUID recurrenceRuleId, List<TransactionStatus> statuses);
 
+    /** {@code [ruleId, primeiraCompetenciaEmAbertoAPartirDe(from)]} por regra, numa consulta só. */
+    @Query("SELECT t.recurrenceRule.id, MIN(t.competenceDate) FROM Transaction t " +
+           "WHERE t.recurrenceRule.id IN :ruleIds " +
+           "AND t.status IN (com.cashcontrol.api.domain.entity.TransactionStatus.PENDING, com.cashcontrol.api.domain.entity.TransactionStatus.OVERDUE) " +
+           "AND t.competenceDate >= :from " +
+           "GROUP BY t.recurrenceRule.id")
+    List<Object[]> findNextOpenOccurrenceByRule(@Param("ruleIds") Collection<UUID> ruleIds,
+                                                @Param("from") LocalDate from);
+
     // Um parcelamento é UMA compra fatiada, não N compras. Com :groupInstallments = TRUE a
     // série entra na listagem por uma única linha — a parcela de menor número entre as que
     // sobrevivem aos filtros de status/data. O subselect repete esses filtros para que a

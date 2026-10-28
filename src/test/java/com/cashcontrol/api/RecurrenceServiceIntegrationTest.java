@@ -2,7 +2,9 @@ package com.cashcontrol.api;
 
 import com.cashcontrol.api.config.PostgresTestContainerConfig;
 import com.cashcontrol.api.domain.entity.AccountType;
+import com.cashcontrol.api.domain.entity.CardBrand;
 import com.cashcontrol.api.domain.entity.DeleteRecurrenceStrategy;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.RecurrenceFrequency;
 import com.cashcontrol.api.domain.entity.RecurrenceStatus;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
@@ -10,6 +12,7 @@ import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.domain.exception.BusinessRuleException;
 import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
 import com.cashcontrol.api.dto.request.CreateAccountRequest;
+import com.cashcontrol.api.dto.request.CreateCardRequest;
 import com.cashcontrol.api.dto.request.CreateRecurrenceRequest;
 import com.cashcontrol.api.dto.request.EditRecurrenceRequest;
 import com.cashcontrol.api.dto.request.PauseRecurrenceRequest;
@@ -18,8 +21,10 @@ import com.cashcontrol.api.dto.response.DeleteRecurrenceResult;
 import com.cashcontrol.api.dto.response.EditRecurrenceResult;
 import com.cashcontrol.api.dto.response.RecurrenceCreationResponse;
 import com.cashcontrol.api.dto.response.RecurrenceRuleResponse;
+import com.cashcontrol.api.repository.InvoiceItemRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.AccountService;
+import com.cashcontrol.api.service.CreditCardService;
 import com.cashcontrol.api.service.RecurrenceService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,6 +52,8 @@ class RecurrenceServiceIntegrationTest {
     @Autowired private RecurrenceService recurrenceService;
     @Autowired private AccountService accountService;
     @Autowired private TransactionRepository transactionRepository;
+    @Autowired private CreditCardService creditCardService;
+    @Autowired private InvoiceItemRepository invoiceItemRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
 
     private UUID userId;
@@ -76,7 +83,7 @@ class RecurrenceServiceIntegrationTest {
         RecurrenceCreationResponse response = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("500.00"), "Monthly rent", null, null,
-                        startDate, null, RecurrenceFrequency.MONTHLY),
+                        startDate, null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         assertThat(response.rule()).isNotNull();
@@ -95,7 +102,7 @@ class RecurrenceServiceIntegrationTest {
         RecurrenceCreationResponse response = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("100.00"), "Weekly expense", null, null,
-                        startDate, null, RecurrenceFrequency.MONTHLY),
+                        startDate, null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID ruleId = response.rule().id();
@@ -104,16 +111,83 @@ class RecurrenceServiceIntegrationTest {
     }
 
     @Test
-    void createRecurrence_startDateToday_firstInstanceIsPaid() {
-        LocalDate today = LocalDate.now();
+    void createRecurrence_pastStartDate_occurrencesArePending() {
+        // Nada sai da conta sem o usuário confirmar, nem as ocorrências que já passaram.
         RecurrenceCreationResponse response = recurrenceService.createRecurrence(
-                new CreateRecurrenceRequest(accountId, TransactionType.INCOME,
-                        new BigDecimal("3000.00"), "Salary", null, null,
-                        today, null, RecurrenceFrequency.MONTHLY),
+                new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
+                        new BigDecimal("1500.00"), "Rent", null, null,
+                        LocalDate.now().minusMonths(2), null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
-        assertThat(response.firstInstance().status()).isEqualTo(TransactionStatus.PAID);
-        assertThat(response.firstInstance().paymentDate()).isEqualTo(today);
+        assertThat(response.firstInstance().status()).isEqualTo(TransactionStatus.PENDING);
+        assertThat(response.firstInstance().paymentDate()).isNull();
+        assertThat(transactionRepository.findAllByRecurrenceRule_Id(response.rule().id()))
+                .allMatch(tx -> tx.getStatus() == TransactionStatus.PENDING);
+        // A próxima para o usuário é a primeira em aberto a partir de hoje.
+        assertThat(recurrenceService.getRecurrence(response.rule().id(), userId).nextDueDate())
+                .isEqualTo(LocalDate.now().minusMonths(2).plusMonths(2));
+    }
+
+    @Test
+    void resumeRecurrence_keepsScheduleWithoutGap() {
+        LocalDate startDate = LocalDate.now().plusDays(1);
+        UUID ruleId = recurrenceService.createRecurrence(
+                new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
+                        new BigDecimal("500.00"), "Gym", null, null,
+                        startDate, null, RecurrenceFrequency.MONTHLY, null, null),
+                userId).rule().id();
+        List<LocalDate> originalDates = transactionRepository.findAllByRecurrenceRule_Id(ruleId).stream()
+                .map(tx -> tx.getCompetenceDate()).sorted().toList();
+
+        recurrenceService.pauseRecurrence(ruleId, new PauseRecurrenceRequest(null), userId);
+        RecurrenceRuleResponse resumed = recurrenceService.resumeRecurrence(ruleId, userId);
+
+        var all = transactionRepository.findAllByRecurrenceRule_Id(ruleId);
+        // As ocorrências canceladas pela pausa voltam; nenhuma linha nova, nenhum buraco.
+        assertThat(all).hasSize(originalDates.size());
+        assertThat(all).allMatch(tx -> tx.getStatus() == TransactionStatus.PENDING);
+        assertThat(all.stream().map(tx -> tx.getCompetenceDate()).sorted().toList()).isEqualTo(originalDates);
+        assertThat(resumed.nextDueDate()).isEqualTo(startDate);
+        assertThat(resumed.nextOccurrenceDate()).isEqualTo(startDate.plusMonths(12));
+    }
+
+    @Test
+    void createRecurrence_onCreditCard_goesToInvoices() {
+        UUID cardId = creditCardService.createCard(
+                new CreateCardRequest("Test Card", CardBrand.MASTERCARD, "Itaú", null,
+                        new BigDecimal("10000.00"), 10, 17, null),
+                userId).id();
+
+        RecurrenceCreationResponse created = recurrenceService.createRecurrence(
+                new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
+                        new BigDecimal("39.90"), "Streaming", null, null,
+                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY,
+                        PaymentMethodSlug.CREDIT_CARD, cardId),
+                userId);
+
+        assertThat(created.rule().creditCardId()).isEqualTo(cardId);
+        assertThat(created.rule().paymentMethod()).isEqualTo(PaymentMethodSlug.CREDIT_CARD);
+        var occurrences = transactionRepository.findAllByRecurrenceRule_Id(created.rule().id());
+        assertThat(occurrences).allSatisfy(tx -> {
+            assertThat(tx.getCreditCard().getId()).isEqualTo(cardId);
+            assertThat(invoiceItemRepository.findByTransaction_Id(tx.getId())).isPresent();
+        });
+    }
+
+    @Test
+    void createRecurrence_incomeOnCreditCard_rejected() {
+        UUID cardId = creditCardService.createCard(
+                new CreateCardRequest("Test Card", CardBrand.MASTERCARD, "Itaú", null,
+                        new BigDecimal("10000.00"), 10, 17, null),
+                userId).id();
+
+        assertThatThrownBy(() -> recurrenceService.createRecurrence(
+                new CreateRecurrenceRequest(accountId, TransactionType.INCOME,
+                        new BigDecimal("100.00"), "Cashback", null, null,
+                        LocalDate.now(), null, RecurrenceFrequency.MONTHLY,
+                        PaymentMethodSlug.CREDIT_CARD, cardId),
+                userId))
+                .isInstanceOf(BusinessRuleException.class);
     }
 
     @Test
@@ -124,7 +198,7 @@ class RecurrenceServiceIntegrationTest {
         RecurrenceCreationResponse response = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("200.00"), "Subscription", null, null,
-                        startDate, endDate, RecurrenceFrequency.MONTHLY),
+                        startDate, endDate, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID ruleId = response.rule().id();
@@ -143,7 +217,7 @@ class RecurrenceServiceIntegrationTest {
         assertThatThrownBy(() -> recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("100.00"), "Rent", null, null,
-                        LocalDate.now(), null, RecurrenceFrequency.MONTHLY),
+                        LocalDate.now(), null, RecurrenceFrequency.MONTHLY, null, null),
                 userId))
                 .isInstanceOf(BusinessRuleException.class);
     }
@@ -154,7 +228,7 @@ class RecurrenceServiceIntegrationTest {
         RecurrenceCreationResponse created = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("500.00"), "Monthly rent", null, null,
-                        startDate, null, RecurrenceFrequency.MONTHLY),
+                        startDate, null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID ruleId = created.rule().id();
@@ -179,7 +253,7 @@ class RecurrenceServiceIntegrationTest {
         RecurrenceCreationResponse created = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("100.00"), "Rent", null, null,
-                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY),
+                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID ruleId = created.rule().id();
@@ -197,7 +271,7 @@ class RecurrenceServiceIntegrationTest {
         RecurrenceCreationResponse created = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("500.00"), "Subscription", null, null,
-                        startDate, null, RecurrenceFrequency.MONTHLY),
+                        startDate, null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID ruleId = created.rule().id();
@@ -224,7 +298,7 @@ class RecurrenceServiceIntegrationTest {
         RecurrenceCreationResponse created = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("100.00"), "Rent", null, null,
-                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY),
+                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID ruleId = created.rule().id();
@@ -241,7 +315,7 @@ class RecurrenceServiceIntegrationTest {
         RecurrenceCreationResponse created = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("500.00"), "Subscription", null, null,
-                        startDate, null, RecurrenceFrequency.MONTHLY),
+                        startDate, null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID ruleId = created.rule().id();
@@ -264,7 +338,7 @@ class RecurrenceServiceIntegrationTest {
         RecurrenceCreationResponse created = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("100.00"), "Rent", null, null,
-                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY),
+                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID ruleId = created.rule().id();
@@ -279,7 +353,7 @@ class RecurrenceServiceIntegrationTest {
         RecurrenceCreationResponse created = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("500.00"), "Subscription", null, null,
-                        startDate, null, RecurrenceFrequency.MONTHLY),
+                        startDate, null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID ruleId = created.rule().id();
@@ -301,7 +375,7 @@ class RecurrenceServiceIntegrationTest {
         RecurrenceCreationResponse created = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("500.00"), "Subscription", null, null,
-                        startDate, null, RecurrenceFrequency.MONTHLY),
+                        startDate, null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID ruleId = created.rule().id();
@@ -318,10 +392,14 @@ class RecurrenceServiceIntegrationTest {
         RecurrenceCreationResponse created = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.INCOME,
                         new BigDecimal("3000.00"), "Salary", null, null,
-                        today, null, RecurrenceFrequency.MONTHLY),
+                        today, null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID ruleId = created.rule().id();
+        var first = transactionRepository.findById(created.firstInstance().id()).orElseThrow();
+        first.setStatus(TransactionStatus.PAID);
+        first.setPaymentDate(today);
+        transactionRepository.save(first);
         long paidBefore = transactionRepository.findAllByRecurrenceRule_Id(ruleId).stream()
                 .filter(tx -> tx.getStatus() == TransactionStatus.PAID).count();
 
@@ -337,7 +415,7 @@ class RecurrenceServiceIntegrationTest {
         RecurrenceCreationResponse created = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("100.00"), "Rent", null, null,
-                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY),
+                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID ruleId = created.rule().id();
@@ -352,13 +430,13 @@ class RecurrenceServiceIntegrationTest {
         recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("100.00"), "Rent", null, null,
-                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY),
+                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         RecurrenceCreationResponse toDelete = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("50.00"), "Netflix", null, null,
-                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY),
+                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         recurrenceService.deleteRecurrence(toDelete.rule().id(), DeleteRecurrenceStrategy.FUTURE_ONLY, userId);
@@ -373,7 +451,7 @@ class RecurrenceServiceIntegrationTest {
         RecurrenceCreationResponse created = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("100.00"), "Rent", null, null,
-                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY),
+                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID otherUser = UUID.randomUUID();
@@ -386,7 +464,7 @@ class RecurrenceServiceIntegrationTest {
         RecurrenceCreationResponse created = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("80.00"), "Academia", null, null,
-                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY),
+                        LocalDate.now().plusDays(1), null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
         UUID ruleId = created.rule().id();
         recurrenceService.pauseRecurrence(ruleId, new PauseRecurrenceRequest(LocalDate.now()), userId);

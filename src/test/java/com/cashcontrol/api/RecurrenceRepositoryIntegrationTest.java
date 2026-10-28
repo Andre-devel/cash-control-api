@@ -125,6 +125,7 @@ class RecurrenceRepositoryIntegrationTest {
         rule.setDescription(description);
         rule.setStartDate(LocalDate.now().minusMonths(1));
         rule.setNextOccurrenceDate(nextOccurrence);
+        rule.setPaymentMethod(paymentMethodRepository.findBySlug(PaymentMethodSlug.OTHER).orElseThrow());
         return recurrenceRuleRepository.save(rule);
     }
 

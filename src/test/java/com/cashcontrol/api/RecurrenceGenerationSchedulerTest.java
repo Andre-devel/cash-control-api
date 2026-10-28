@@ -71,7 +71,7 @@ class RecurrenceGenerationSchedulerTest {
         RecurrenceCreationResponse created = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("200.00"), "Monthly rent", null, null,
-                        startDate, null, RecurrenceFrequency.MONTHLY),
+                        startDate, null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID ruleId = created.rule().id();
@@ -98,7 +98,7 @@ class RecurrenceGenerationSchedulerTest {
         RecurrenceCreationResponse created = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("500.00"), "Monthly subscription", null, null,
-                        startDate, null, RecurrenceFrequency.MONTHLY),
+                        startDate, null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID ruleId = created.rule().id();
@@ -131,7 +131,7 @@ class RecurrenceGenerationSchedulerTest {
         RecurrenceCreationResponse created = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.INCOME,
                         new BigDecimal("3000.00"), "Salary", null, null,
-                        startDate, null, RecurrenceFrequency.MONTHLY),
+                        startDate, null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID ruleId = created.rule().id();
@@ -154,7 +154,7 @@ class RecurrenceGenerationSchedulerTest {
         RecurrenceCreationResponse created = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("100.00"), "Short subscription", null, null,
-                        startDate, endDate, RecurrenceFrequency.MONTHLY),
+                        startDate, endDate, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID ruleId = created.rule().id();
@@ -185,7 +185,7 @@ class RecurrenceGenerationSchedulerTest {
         RecurrenceCreationResponse created = recurrenceService.createRecurrence(
                 new CreateRecurrenceRequest(accountId, TransactionType.EXPENSE,
                         new BigDecimal("50.00"), "Paused subscription", null, null,
-                        startDate, null, RecurrenceFrequency.MONTHLY),
+                        startDate, null, RecurrenceFrequency.MONTHLY, null, null),
                 userId);
 
         UUID ruleId = created.rule().id();
