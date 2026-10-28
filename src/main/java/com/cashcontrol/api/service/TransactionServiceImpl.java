@@ -657,7 +657,8 @@ public class TransactionServiceImpl implements TransactionService {
                 tx.getCreatedAt(),
                 tx.getUpdatedAt(),
                 pmResponse,
-                cardResponse
+                cardResponse,
+                tx.getPaidInvoice() != null ? tx.getPaidInvoice().getId() : null
         );
     }
 }

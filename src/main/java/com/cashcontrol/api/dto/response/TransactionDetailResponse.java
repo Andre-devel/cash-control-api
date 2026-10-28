@@ -37,5 +37,6 @@ public record TransactionDetailResponse(
         @Schema(description = "Record creation timestamp") Instant createdAt,
         @Schema(description = "Last update timestamp") Instant updatedAt,
         @Schema(description = "Payment method used for this transaction") PaymentMethodResponse paymentMethod,
-        @Schema(description = "Credit card linked to this transaction. Non-null only when paymentMethod is CREDIT_CARD.") CreditCardRefResponse creditCard
+        @Schema(description = "Credit card linked to this transaction. Non-null only when paymentMethod is CREDIT_CARD.") CreditCardRefResponse creditCard,
+        @Schema(description = "Invoice paid by this INVOICE_PAYMENT. Null for every other type.") UUID paidInvoiceId
 ) {}

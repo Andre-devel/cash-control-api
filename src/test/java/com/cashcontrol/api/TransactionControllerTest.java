@@ -470,7 +470,7 @@ class TransactionControllerTest {
                 Set.of(), null, null,
                 null, null, null,
                 false, null, Instant.now(), Instant.now(),
-                null, null);
+                null, null, null);
     }
 
     private TransactionSummaryResponse buildSummary(UUID id) {

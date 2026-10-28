@@ -465,6 +465,6 @@ class InstallmentControllerTest {
                 null, LocalDate.of(2026, 7, 1), null, null, null,
                 null, null, Set.of(), null, null, UUID.randomUUID(), 1, 3,
                 false, null, Instant.now(), Instant.now(),
-                null, null);
+                null, null, null);
     }
 }

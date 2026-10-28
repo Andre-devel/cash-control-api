@@ -434,7 +434,7 @@ class RecurrenceControllerTest {
                 null, null, null, null,
                 Set.of(), null, null, null, null, null,
                 false, null, Instant.now(), Instant.now(),
-                null, null
+                null, null, null
         );
     }
 }
