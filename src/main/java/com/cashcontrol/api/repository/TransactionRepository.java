@@ -127,6 +127,21 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     List<Transaction> findAllByInstallmentSeries_Id(UUID installmentSeriesId);
 
+    List<Transaction> findAllByInstallmentSeries_IdIn(Collection<UUID> installmentSeriesIds);
+
+    /**
+     * Despesas e receitas que vieram do extrato (têm {@code external_ref}) e ainda são
+     * lançamentos simples na conta: candidatas da reconciliação de importações.
+     */
+    @Query("SELECT t FROM Transaction t JOIN FETCH t.account " +
+           "WHERE t.userId = :userId AND t.externalRef IS NOT NULL AND t.creditCard IS NULL " +
+           "AND t.transferGroupId IS NULL " +
+           "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
+           "AND t.type IN (com.cashcontrol.api.domain.entity.TransactionType.EXPENSE, " +
+           "               com.cashcontrol.api.domain.entity.TransactionType.INCOME) " +
+           "ORDER BY t.competenceDate")
+    List<Transaction> findImportedAccountMovements(@Param("userId") UUID userId);
+
     List<Transaction> findAllByRecurrenceRule_Id(UUID recurrenceRuleId);
 
     List<Transaction> findAllByRecurrenceRule_IdAndStatusIn(UUID recurrenceRuleId, List<TransactionStatus> statuses);

@@ -2,10 +2,15 @@ package com.cashcontrol.api;
 
 import com.cashcontrol.api.config.PostgresTestContainerConfig;
 import com.cashcontrol.api.domain.entity.AccountType;
+import com.cashcontrol.api.domain.entity.CardBrand;
+import com.cashcontrol.api.domain.entity.Invoice;
+import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.StatementFormat;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.dto.request.CreateAccountRequest;
+import com.cashcontrol.api.dto.request.CreateCardRequest;
+import com.cashcontrol.api.dto.request.CreateInstallmentRequest;
 import com.cashcontrol.api.dto.request.CreateCategoryRuleRequest;
 import com.cashcontrol.api.dto.request.ImportCommitRequest;
 import com.cashcontrol.api.dto.request.ImportCommitRow;
@@ -13,9 +18,12 @@ import com.cashcontrol.api.dto.response.CategoryResponse;
 import com.cashcontrol.api.dto.response.ImportPreviewResponse;
 import com.cashcontrol.api.dto.response.ImportPreviewRow;
 import com.cashcontrol.api.dto.response.ImportResultResponse;
+import com.cashcontrol.api.repository.InvoiceRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.AccountService;
 import com.cashcontrol.api.service.CategoryService;
+import com.cashcontrol.api.service.CreditCardService;
+import com.cashcontrol.api.service.InstallmentService;
 import com.cashcontrol.api.service.StatementImportService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,6 +60,9 @@ class StatementImportIntegrationTest {
     @Autowired private AccountService accountService;
     @Autowired private CategoryService categoryService;
     @Autowired private TransactionRepository transactionRepository;
+    @Autowired private CreditCardService creditCardService;
+    @Autowired private InstallmentService installmentService;
+    @Autowired private InvoiceRepository invoiceRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
 
     private UUID userId;
@@ -152,6 +163,29 @@ class StatementImportIntegrationTest {
                 .filteredOn(tx -> tx.getType() == TransactionType.MANUAL_ADJUSTMENT)
                 .singleElement()
                 .satisfies(tx -> assertThat(tx.getCompetenceDate()).isEqualTo(earliest.minusDays(1)));
+    }
+
+    @Test
+    void importedInvoicePayment_keepsItsExternalRef_soReimportIsANoOp() {
+        UUID cardId = creditCardService.createCard(new CreateCardRequest("Inter", CardBrand.MASTERCARD, "Inter",
+                null, new BigDecimal("10000.00"), 10, 17, null), userId).id();
+        installmentService.createInstallmentSeries(new CreateInstallmentRequest(accountId, new BigDecimal("300.00"),
+                3, LocalDate.of(2026, 3, 5), "Loja", null, null, null, PaymentMethodSlug.CREDIT_CARD, cardId), userId);
+        Invoice invoice = invoiceRepository.findAllByCreditCard_IdAndUserIdOrderByReferenceMonthDesc(cardId, userId,
+                PageRequest.of(0, 10)).getContent().getLast();
+        ImportCommitRow payment = new ImportCommitRow(1, "ref-pagamento", invoice.getDueDate(), "Pagamento Fatura",
+                "Pagamento Fatura", invoice.getTotalAmount(), TransactionType.INVOICE_PAYMENT, PaymentMethodSlug.BOLETO,
+                null, true, null, invoice.getId());
+
+        statementImportService.commit(
+                new ImportCommitRequest(accountId, StatementFormat.INTER_CSV, List.of(payment), null), userId);
+        ImportResultResponse again = statementImportService.commit(
+                new ImportCommitRequest(accountId, StatementFormat.INTER_CSV, List.of(payment), null), userId);
+
+        // A quitação limpa o contexto de persistência; sem o save explícito a chave se perdia
+        // e o mesmo pagamento entrava de novo.
+        assertThat(again.skippedDuplicates()).isEqualTo(1);
+        assertThat(again.imported()).isZero();
     }
 
     @Test

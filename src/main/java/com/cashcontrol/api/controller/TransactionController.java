@@ -1,14 +1,17 @@
 package com.cashcontrol.api.controller;
 
+import com.cashcontrol.api.dto.request.ApplyReconciliationRequest;
 import com.cashcontrol.api.dto.request.CreateTransactionRequest;
 import com.cashcontrol.api.dto.request.EditTransactionRequest;
 import com.cashcontrol.api.dto.request.ImportCommitRequest;
 import com.cashcontrol.api.dto.request.MarkAsPaidRequest;
 import com.cashcontrol.api.dto.request.ReceiptCommitRequest;
 import com.cashcontrol.api.dto.request.TransactionFilterRequest;
+import com.cashcontrol.api.dto.response.ApplyReconciliationResult;
 import com.cashcontrol.api.dto.response.AttachmentResponse;
 import com.cashcontrol.api.dto.response.ErrorResponse;
 import com.cashcontrol.api.dto.response.ImportPreviewResponse;
+import com.cashcontrol.api.dto.response.ImportReconciliationResponse;
 import com.cashcontrol.api.dto.response.ImportResultResponse;
 import com.cashcontrol.api.dto.response.ReceiptPreviewResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
@@ -20,6 +23,7 @@ import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.security.AuthenticatedUser;
 import com.cashcontrol.api.service.AttachmentService;
+import com.cashcontrol.api.service.ImportReconciliationService;
 import com.cashcontrol.api.service.ReceiptImportService;
 import com.cashcontrol.api.service.StatementImportService;
 import com.cashcontrol.api.service.TransactionService;
@@ -75,6 +79,7 @@ public class TransactionController {
     private final AttachmentService attachmentService;
     private final StatementImportService statementImportService;
     private final ReceiptImportService receiptImportService;
+    private final ImportReconciliationService importReconciliationService;
 
     @Operation(summary = "Create transaction", description = "Records a new INCOME, EXPENSE, or REFUND transaction for the authenticated user.")
     @ApiResponses({
@@ -286,6 +291,29 @@ public class TransactionController {
             @Parameter(description = "Transaction UUID", required = true) @PathVariable UUID id,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         return transactionService.reactivateTransaction(id, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Preview import reconciliation", description = """
+            Lists corrections for transactions imported before the importer recognized invoice \
+            payments, investment applications and installments from other months: imported \
+            expenses that pay a known invoice, applications/redemptions that should be transfers \
+            to the investment account, and installment purchases split into several series. \
+            Nothing is changed.""")
+    @GetMapping("/import/reconciliation")
+    @PreAuthorize("isAuthenticated()")
+    public ImportReconciliationResponse previewReconciliation(@AuthenticationPrincipal AuthenticatedUser principal) {
+        return importReconciliationService.preview(principal.getUser().getId());
+    }
+
+    @Operation(summary = "Apply import reconciliation", description = """
+            Applies the approved proposals. The analysis is redone on the server and only \
+            proposals that still hold are applied, so repeating the call changes nothing.""")
+    @PostMapping("/import/reconciliation")
+    @PreAuthorize("isAuthenticated()")
+    public ApplyReconciliationResult applyReconciliation(
+            @Valid @RequestBody ApplyReconciliationRequest request,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return importReconciliationService.apply(request, principal.getUser().getId());
     }
 
     @Operation(summary = "Preview statement import", description = """
