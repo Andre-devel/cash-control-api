@@ -362,7 +362,7 @@ class DashboardServiceTest {
     @Test
     void getRecentTransactions_returnsFormattedEntries() {
         Transaction tx = buildTransaction(userId, new BigDecimal("100.00"), TransactionStatus.PAID);
-        when(transactionRepository.findRecentTransactions(eq(userId), any()))
+        when(transactionRepository.findRecentTransactions(eq(userId), any(), any()))
                 .thenReturn(List.of(tx));
 
         List<RecentTransactionResponse> result = dashboardService.getRecentTransactions(userId, 10);

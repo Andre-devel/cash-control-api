@@ -76,7 +76,7 @@ class DashboardControllerTest {
                 new BigDecimal("5000.00"), new BigDecimal("8000.00"),
                 new BigDecimal("3000.00"), new BigDecimal("1500.00"),
                 new BigDecimal("1500.00"), new BigDecimal("1500.00"),
-                "2026-05");
+                "2026-05", new BigDecimal("7000.00"), new BigDecimal("2800.00"), new BigDecimal("1700.00"));
 
         when(dashboardService.getOverviewMetrics(userId)).thenReturn(response);
 

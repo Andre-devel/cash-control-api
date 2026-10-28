@@ -12,5 +12,8 @@ public record OverviewMetricsResponse(
         @Schema(description = "Total PAID EXPENSE transactions with paymentDate in the current calendar month. Serialized as decimal string.", example = "3200.00") BigDecimal monthlyExpenses,
         @Schema(description = "monthlyIncome minus monthlyExpenses. Serialized as decimal string.", example = "2800.00") BigDecimal monthlySavings,
         @Schema(description = "Net income minus expense movement for the current month. Serialized as decimal string.", example = "2800.00") BigDecimal cashFlow,
-        @Schema(description = "Current calendar month in YYYY-MM format", example = "2026-05") String currentMonth
+        @Schema(description = "Current calendar month in YYYY-MM format", example = "2026-05") String currentMonth,
+        @Schema(description = "netWorth at the last day of the previous month. Serialized as decimal string.", example = "24000.00") BigDecimal previousNetWorth,
+        @Schema(description = "monthlyIncome of the previous calendar month. Serialized as decimal string.", example = "5800.00") BigDecimal previousMonthIncome,
+        @Schema(description = "monthlyExpenses of the previous calendar month. Serialized as decimal string.", example = "3500.00") BigDecimal previousMonthExpenses
 ) {}

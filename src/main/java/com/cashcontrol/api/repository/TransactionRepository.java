@@ -386,9 +386,11 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "WHERE t.userId = :userId " +
            "AND t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED " +
            "AND t.account.archivedAt IS NULL AND t.account.deletedAt IS NULL " +
+           "AND t.competenceDate <= :today " +
            "ORDER BY t.competenceDate DESC, t.createdAt DESC")
     List<Transaction> findRecentTransactions(
             @Param("userId") UUID userId,
+            @Param("today") LocalDate today,
             Pageable pageable);
 
     @Query("SELECT COALESCE(SUM(CASE " +

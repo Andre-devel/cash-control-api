@@ -142,6 +142,22 @@ class OverviewMetricsIntegrationTest {
         assertThat(hasUncategorized).isTrue();
     }
 
+    @Test
+    void getOverviewMetrics_previousMonthComparisons() {
+        LocalDate lastMonth = LocalDate.now().withDayOfMonth(1).minusDays(1);
+        createTransaction(checkingAccountId, TransactionType.INCOME, "2000.00", lastMonth, TransactionStatus.PAID);
+        createTransaction(checkingAccountId, TransactionType.EXPENSE, "500.00", lastMonth, TransactionStatus.PAID);
+        createTransaction(investmentAccountId, TransactionType.INCOME, "300.00", lastMonth, TransactionStatus.PAID);
+        createPaidTransaction(checkingAccountId, TransactionType.INCOME, "100.00");
+
+        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId);
+
+        assertThat(result.previousMonthIncome()).isEqualByComparingTo("2300.00");
+        assertThat(result.previousMonthExpenses()).isEqualByComparingTo("500.00");
+        assertThat(result.previousNetWorth()).isEqualByComparingTo("1800.00");
+        assertThat(result.netWorth()).isEqualByComparingTo("1900.00");
+    }
+
     // ── Monthly Bar Chart ─────────────────────────────────────────────────────
 
     @Test
@@ -199,6 +215,19 @@ class OverviewMetricsIntegrationTest {
     }
 
     @Test
+    void getRecentTransactions_skipsFutureDatedEntries() {
+        createPaidTransaction(checkingAccountId, TransactionType.EXPENSE, "50.00");
+        createTransaction(checkingAccountId, TransactionType.EXPENSE, "80.00",
+                LocalDate.now().plusMonths(3), TransactionStatus.PENDING);
+
+        List<RecentTransactionResponse> result = dashboardService.getRecentTransactions(userId, 10);
+
+        assertThat(result).extracting(RecentTransactionResponse::competenceDate)
+                .allSatisfy(date -> assertThat(date).isBeforeOrEqualTo(LocalDate.now()));
+        assertThat(result).hasSize(1);
+    }
+
+    @Test
     void getRecentTransactions_respectsLimit() {
         for (int i = 0; i < 5; i++) {
             createPaidTransaction(checkingAccountId, TransactionType.INCOME, "100.00");
@@ -212,9 +241,14 @@ class OverviewMetricsIntegrationTest {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private void createPaidTransaction(UUID accountId, TransactionType type, String amount) {
-        LocalDate today = LocalDate.now();
+        createTransaction(accountId, type, amount, LocalDate.now(), TransactionStatus.PAID);
+    }
+
+    private void createTransaction(UUID accountId, TransactionType type, String amount,
+                                   LocalDate date, TransactionStatus status) {
         transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, type, new BigDecimal(amount), "Test transaction",
-                today, today, null, null, null, null, null, TransactionStatus.PAID, null, null), userId);
+                date, status == TransactionStatus.PAID ? date : null, null, null, null, null, null,
+                status, null, null), userId);
     }
 }

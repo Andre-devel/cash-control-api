@@ -67,9 +67,18 @@ public class DashboardServiceImpl implements DashboardService {
         BigDecimal monthlySavings = monthlyIncome.subtract(monthlyExpenses);
         BigDecimal cashFlow = monthlySavings;
 
+        // Base dos comparativos dos cards: o mês anterior inteiro, mesmas regras do atual.
+        LocalDate previousStart = monthStart.minusMonths(1);
+        LocalDate previousEnd = monthStart.minusDays(1);
+        BigDecimal previousNetWorth = safe(transactionRepository.sumNetWorthUpTo(userId, previousEnd));
+        BigDecimal previousIncome = safe(transactionRepository.sumPaidByTypeAndPaymentDateRange(
+                userId, TransactionType.INCOME, previousStart, previousEnd, null));
+        BigDecimal previousExpenses = netExpenses(userId, previousStart, previousEnd);
+
         return new OverviewMetricsResponse(
                 totalBalance, netWorth, monthlyIncome, monthlyExpenses,
-                monthlySavings, cashFlow, currentMonth);
+                monthlySavings, cashFlow, currentMonth,
+                previousNetWorth, previousIncome, previousExpenses);
     }
 
     @Override
@@ -264,8 +273,9 @@ public class DashboardServiceImpl implements DashboardService {
     public List<RecentTransactionResponse> getRecentTransactions(UUID userId, int limit) {
         int effectiveLimit = limit > 0 ? limit : 10;
 
+        // Só o que já aconteceu: parcelas e recorrências futuras não são "recentes".
         List<Transaction> transactions = transactionRepository.findRecentTransactions(
-                userId, PageRequest.of(0, effectiveLimit));
+                userId, LocalDate.now(), PageRequest.of(0, effectiveLimit));
 
         return transactions.stream()
                 .map(t -> new RecentTransactionResponse(
