@@ -37,7 +37,11 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -57,9 +61,12 @@ public class InstallmentServiceImpl implements InstallmentService {
     @Override
     @Transactional(readOnly = true)
     public List<InstallmentSeriesResponse> listInstallmentSeries(UUID userId) {
-        return installmentSeriesRepository.findAllByUserId(userId)
-                .stream()
-                .map(this::toSeriesResponse)
+        List<InstallmentSeries> seriesList = installmentSeriesRepository.findAllByUserId(userId);
+        Map<UUID, SeriesProgress> progress = loadProgress(seriesList.stream().map(InstallmentSeries::getId).toList());
+        return seriesList.stream()
+                .sorted(Comparator.comparing(InstallmentSeries::getFirstPaymentDate).reversed()
+                        .thenComparing(InstallmentSeries::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder())))
+                .map(series -> toSeriesResponse(series, progress.get(series.getId())))
                 .toList();
     }
 
@@ -70,6 +77,9 @@ public class InstallmentServiceImpl implements InstallmentService {
         List<TransactionSummaryResponse> installments = transactionRepository
                 .findAllByInstallmentSeries_Id(seriesId)
                 .stream()
+                // Parcelas em ordem; a quitação antecipada (sem número) fica por último.
+                .sorted(Comparator.comparing(Transaction::getInstallmentNumber,
+                        Comparator.nullsLast(Comparator.naturalOrder())))
                 .map(transactionService::toSummary)
                 .toList();
         return new InstallmentSeriesDetailResponse(toSeriesResponse(series), installments);
@@ -262,6 +272,13 @@ public class InstallmentServiceImpl implements InstallmentService {
         if (request.notes() != null) {
             tx.setNotes(request.notes());
         }
+        if (request.competenceDate() != null && !request.competenceDate().equals(tx.getCompetenceDate())) {
+            if (tx.getStatus() != TransactionStatus.PENDING && tx.getStatus() != TransactionStatus.OVERDUE) {
+                throw new BusinessRuleException("Só parcelas em aberto podem mudar de data.");
+            }
+            // No cartão a nova data leva a parcela para a fatura correspondente (sync abaixo).
+            tx.setCompetenceDate(request.competenceDate());
+        }
         if (request.paymentDate() != null) {
             if (tx.getCreditCard() != null) {
                 throw new BusinessRuleException(TransactionService.CARD_PURCHASE_PAID_BY_INVOICE);
@@ -403,15 +420,46 @@ public class InstallmentServiceImpl implements InstallmentService {
                 .orElseThrow(() -> new ResourceNotFoundException("Installment series not found: " + seriesId));
     }
 
+    private record SeriesProgress(
+            BigDecimal totalAmount, int paidCount, int openCount, BigDecimal remainingAmount, LocalDate nextDueDate) {}
+
+    private Map<UUID, SeriesProgress> loadProgress(Collection<UUID> seriesIds) {
+        Map<UUID, SeriesProgress> byId = new HashMap<>();
+        if (seriesIds.isEmpty()) {
+            return byId;
+        }
+        for (Object[] row : transactionRepository.summarizeInstallmentSeriesProgress(seriesIds)) {
+            byId.put((UUID) row[0], new SeriesProgress(
+                    (BigDecimal) row[1],
+                    ((Number) row[2]).intValue(),
+                    ((Number) row[3]).intValue(),
+                    (BigDecimal) row[4],
+                    (LocalDate) row[5]));
+        }
+        return byId;
+    }
+
     private InstallmentSeriesResponse toSeriesResponse(InstallmentSeries series) {
+        return toSeriesResponse(series, loadProgress(List.of(series.getId())).get(series.getId()));
+    }
+
+    private InstallmentSeriesResponse toSeriesResponse(InstallmentSeries series, SeriesProgress progress) {
+        // Série sem transações (não deveria existir) cai no valor planejado.
+        BigDecimal total = progress != null ? progress.totalAmount() : series.getTotalAmount();
+        int paid = progress != null ? progress.paidCount() : 0;
+        int open = progress != null ? progress.openCount() : 0;
         return new InstallmentSeriesResponse(
                 series.getId(),
                 series.getAccount() != null ? series.getAccount().getId() : null,
                 series.getAccount() != null ? series.getAccount().getName() : null,
                 series.getType(),
                 series.getDescription(),
-                series.getTotalAmount(),
+                total,
                 series.getTotalInstallments(),
+                paid,
+                progress != null ? progress.remainingAmount() : BigDecimal.ZERO,
+                progress != null ? progress.nextDueDate() : null,
+                !series.isSettled() && paid > 0 && open == 0,
                 series.getFirstPaymentDate(),
                 series.getCategory() != null ? series.getCategory().getId() : null,
                 series.getCategory() != null ? series.getCategory().getName() : null,

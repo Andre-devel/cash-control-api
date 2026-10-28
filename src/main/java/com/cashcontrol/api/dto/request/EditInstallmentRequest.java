@@ -14,5 +14,6 @@ public record EditInstallmentRequest(
         @Size(max = 5000) String notes,
         LocalDate paymentDate,
         UUID categoryId,
-        UUID subcategoryId
+        UUID subcategoryId,
+        LocalDate competenceDate
 ) {}

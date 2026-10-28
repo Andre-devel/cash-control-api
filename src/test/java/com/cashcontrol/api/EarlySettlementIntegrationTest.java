@@ -257,7 +257,7 @@ class EarlySettlementIntegrationTest {
 
         TransactionDetailResponse edited = installmentService.editInstallment(
                 installmentId,
-                new EditInstallmentRequest(new BigDecimal("150.00"), "Custom amount", null, null, null, null),
+                new EditInstallmentRequest(new BigDecimal("150.00"), "Custom amount", null, null, null, null, null),
                 userId);
 
         assertThat(edited.detached()).isTrue();
@@ -274,7 +274,7 @@ class EarlySettlementIntegrationTest {
         // Test that calling editInstallment with a series transaction UUID that doesn't exist throws 404
         assertThatThrownBy(() -> installmentService.editInstallment(
                 UUID.randomUUID(),
-                new EditInstallmentRequest(null, "Test", null, null, null, null),
+                new EditInstallmentRequest(null, "Test", null, null, null, null, null),
                 userId))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
@@ -291,7 +291,7 @@ class EarlySettlementIntegrationTest {
 
         // Detach the first installment
         installmentService.editInstallment(firstInstallmentId,
-                new EditInstallmentRequest(null, "Detached", null, null, null, null), userId);
+                new EditInstallmentRequest(null, "Detached", null, null, null, null, null), userId);
 
         // Edit the series — should only affect 2 non-detached installments
         EditSeriesResult result = installmentService.editSeries(

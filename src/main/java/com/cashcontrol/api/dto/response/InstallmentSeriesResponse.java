@@ -13,8 +13,15 @@ public record InstallmentSeriesResponse(
         String accountName,
         TransactionType type,
         String description,
+        /** Soma das parcelas não canceladas (mais a quitação, se houver): reflete edições e antecipações. */
         BigDecimal totalAmount,
         int totalInstallments,
+        int paidInstallments,
+        BigDecimal remainingAmount,
+        /** Competência da primeira parcela em aberto; nulo quando não resta nenhuma. */
+        LocalDate nextDueDate,
+        /** Todas as parcelas pagas, sem quitação antecipada. */
+        boolean completed,
         LocalDate firstPaymentDate,
         UUID categoryId,
         String categoryName,

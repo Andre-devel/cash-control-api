@@ -112,6 +112,60 @@ class InstallmentServiceIntegrationTest {
     }
 
     @Test
+    void listInstallmentSeries_reportsProgressAndEditedTotal() {
+        // 1ª parcela hoje nasce paga (fora do cartão); as outras duas ficam em aberto.
+        LocalDate today = LocalDate.now();
+        InstallmentSeriesDetailResponse created = installmentService.createInstallmentSeries(
+                new CreateInstallmentRequest(accountId, new BigDecimal("1000.00"), 3,
+                        today, "Progress test", null, null, null, null, null),
+                userId);
+        UUID secondId = created.installments().get(1).id();
+
+        installmentService.editInstallment(secondId,
+                new EditInstallmentRequest(new BigDecimal("400.00"), null, null, null, null, null, null),
+                userId);
+        entityManager.flush();
+
+        var series = installmentService.listInstallmentSeries(userId).getFirst();
+        assertThat(series.paidInstallments()).isEqualTo(1);
+        assertThat(series.totalAmount()).isEqualByComparingTo("1066.67");
+        assertThat(series.remainingAmount()).isEqualByComparingTo("733.34");
+        assertThat(series.nextDueDate()).isEqualTo(today.plusMonths(1));
+        assertThat(series.completed()).isFalse();
+    }
+
+    @Test
+    void getInstallmentSeriesDetail_ordersByInstallmentNumber() {
+        InstallmentSeriesDetailResponse created = installmentService.createInstallmentSeries(
+                new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3,
+                        LocalDate.now().plusDays(1), "Order test", null, null, null, null, null),
+                userId);
+        // Editar a 1ª a regrava por último; a ordem do detalhe não pode depender disso.
+        installmentService.editInstallment(created.installments().getFirst().id(),
+                new EditInstallmentRequest(null, "Primeira", null, null, null, null, null), userId);
+        entityManager.flush();
+        entityManager.clear();
+
+        var detail = installmentService.getInstallmentSeriesDetail(created.series().id(), userId);
+        assertThat(detail.installments()).extracting("installmentNumber").containsExactly(1, 2, 3);
+    }
+
+    @Test
+    void editInstallment_movesCompetenceDateOfOpenInstallment() {
+        LocalDate first = LocalDate.now().plusDays(1);
+        InstallmentSeriesDetailResponse created = installmentService.createInstallmentSeries(
+                new CreateInstallmentRequest(accountId, new BigDecimal("300.00"), 3,
+                        first, "Date test", null, null, null, null, null),
+                userId);
+        UUID secondId = created.installments().get(1).id();
+
+        var edited = installmentService.editInstallment(secondId,
+                new EditInstallmentRequest(null, null, null, null, null, null, first.plusDays(40)), userId);
+
+        assertThat(edited.competenceDate()).isEqualTo(first.plusDays(40));
+    }
+
+    @Test
     void createInstallmentSeries_amountRemainderOnLastInstallment() {
         LocalDate firstPayment = LocalDate.now().plusDays(1);
         InstallmentSeriesDetailResponse result = installmentService.createInstallmentSeries(
@@ -190,7 +244,7 @@ class InstallmentServiceIntegrationTest {
         // Mark installment 2 as detached by editing it individually
         UUID installment2Id = created.installments().get(1).id();
         installmentService.editInstallment(installment2Id,
-                new EditInstallmentRequest(null, null, null, null, detachedCategory.id(), null),
+                new EditInstallmentRequest(null, null, null, null, detachedCategory.id(), null, null),
                 userId);
 
         // Edit series with the series category — only non-detached PENDING installments should update

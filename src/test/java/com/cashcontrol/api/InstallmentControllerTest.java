@@ -453,7 +453,8 @@ class InstallmentControllerTest {
     private InstallmentSeriesResponse buildSeriesResponse(UUID seriesId) {
         return new InstallmentSeriesResponse(
                 seriesId, UUID.randomUUID(), "Test Account", TransactionType.EXPENSE,
-                "Test purchase", new BigDecimal("300.00"), 3,
+                "Test purchase", new BigDecimal("300.00"), 3, 0, new BigDecimal("300.00"),
+                LocalDate.of(2026, 7, 1), false,
                 LocalDate.of(2026, 7, 1), null, null, false, null,
                 Instant.now(), Instant.now());
     }

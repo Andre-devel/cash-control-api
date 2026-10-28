@@ -226,6 +226,22 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "GROUP BY i.installmentSeries.id")
     List<Object[]> aggregateInstallmentSeries(@Param("seriesIds") Collection<UUID> seriesIds);
 
+    /**
+     * Andamento de cada série para a tela de parcelamentos:
+     * {@code [seriesId, somaNaoCancelada, qtdParcelasPagas, qtdParcelasEmAberto, valorEmAberto, proximoVencimento]}.
+     * A soma inclui a transação de quitação antecipada; as contagens, só as parcelas.
+     */
+    @Query("SELECT t.installmentSeries.id, " +
+           "COALESCE(SUM(CASE WHEN t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED THEN t.amount ELSE 0 END), 0), " +
+           "SUM(CASE WHEN t.installmentNumber IS NOT NULL AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID THEN 1 ELSE 0 END), " +
+           "SUM(CASE WHEN t.installmentNumber IS NOT NULL AND t.status IN (com.cashcontrol.api.domain.entity.TransactionStatus.PENDING, com.cashcontrol.api.domain.entity.TransactionStatus.OVERDUE) THEN 1 ELSE 0 END), " +
+           "COALESCE(SUM(CASE WHEN t.status IN (com.cashcontrol.api.domain.entity.TransactionStatus.PENDING, com.cashcontrol.api.domain.entity.TransactionStatus.OVERDUE) THEN t.amount ELSE 0 END), 0), " +
+           "MIN(CASE WHEN t.installmentNumber IS NOT NULL AND t.status IN (com.cashcontrol.api.domain.entity.TransactionStatus.PENDING, com.cashcontrol.api.domain.entity.TransactionStatus.OVERDUE) THEN t.competenceDate ELSE NULL END) " +
+           "FROM Transaction t " +
+           "WHERE t.installmentSeries.id IN :seriesIds " +
+           "GROUP BY t.installmentSeries.id")
+    List<Object[]> summarizeInstallmentSeriesProgress(@Param("seriesIds") Collection<UUID> seriesIds);
+
     @Modifying(clearAutomatically = true)
     @Query("UPDATE Transaction t SET t.status = com.cashcontrol.api.domain.entity.TransactionStatus.OVERDUE " +
            "WHERE t.userId = :userId " +
