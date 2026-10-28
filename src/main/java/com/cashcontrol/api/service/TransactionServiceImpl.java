@@ -22,6 +22,7 @@ import com.cashcontrol.api.dto.response.PaymentMethodResponse;
 import com.cashcontrol.api.dto.response.TagResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.dto.response.TransactionSummaryResponse;
+import com.cashcontrol.api.dto.response.TransactionTotalsResponse;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.CategoryRuleRepository;
 import com.cashcontrol.api.repository.CreditCardRepository;
@@ -277,6 +278,31 @@ public class TransactionServiceImpl implements TransactionService {
     }
 
     @Override
+    @Transactional
+    public TransactionDetailResponse reactivateTransaction(UUID id, UUID userId) {
+        Transaction tx = findOwnedTransaction(id, userId);
+
+        if (tx.getStatus() != TransactionStatus.CANCELLED) {
+            throw new BusinessRuleException("Só transações canceladas podem ser reativadas.");
+        }
+        // Parcela cancelada é resultado de quitar ou encerrar a série; reativá-la sozinha
+        // desalinharia a série da fatura, como excluir uma parcela avulsa.
+        if (tx.getInstallmentSeries() != null) {
+            throw new BusinessRuleException("Parcelas canceladas não podem ser reativadas individualmente.");
+        }
+
+        tx.setStatus(TransactionStatus.PENDING);
+        tx.setCancelledAt(null);
+        if (tx.getCreditCard() != null) {
+            tx.setPaymentDate(null);
+        }
+
+        tx = transactionRepository.save(tx);
+        creditCardService.syncInvoiceItemForTransaction(tx);
+        return toDetail(tx);
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public Page<TransactionSummaryResponse> listTransactions(TransactionFilterRequest filter, UUID userId, Pageable pageable) {
         Page<Transaction> page = transactionRepository.findWithFilters(
@@ -319,6 +345,56 @@ public class TransactionServiceImpl implements TransactionService {
             SeriesAggregate agg = aggregates.get(tx.getInstallmentSeries().getId());
             return agg != null ? toGroupedSummary(tx, agg) : toSummary(tx);
         });
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public TransactionTotalsResponse summarizeTransactions(TransactionFilterRequest filter, UUID userId) {
+        List<Object[]> rows = transactionRepository.sumByTypeWithFilters(
+                userId,
+                filter.accountId(),
+                filter.type(),
+                filter.status(),
+                filter.categoryId(),
+                filter.competenceDateFrom(),
+                filter.competenceDateTo(),
+                filter.paymentDateFrom(),
+                filter.paymentDateTo(),
+                filter.amountMin(),
+                filter.amountMax(),
+                filter.searchText(),
+                filter.includeCancelled(),
+                filter.paymentMethod()
+        );
+
+        BigDecimal income = BigDecimal.ZERO;
+        BigDecimal expense = BigDecimal.ZERO;
+        BigDecimal invoicePayment = BigDecimal.ZERO;
+        long incomeCount = 0;
+        long expenseCount = 0;
+        long invoicePaymentCount = 0;
+        for (Object[] row : rows) {
+            TransactionType type = (TransactionType) row[0];
+            long count = ((Number) row[1]).longValue();
+            BigDecimal sum = (BigDecimal) row[2];
+            switch (type) {
+                case INCOME, REFUND -> {
+                    income = income.add(sum);
+                    incomeCount += count;
+                }
+                case EXPENSE -> {
+                    expense = expense.add(sum);
+                    expenseCount += count;
+                }
+                case INVOICE_PAYMENT -> {
+                    invoicePayment = invoicePayment.add(sum);
+                    invoicePaymentCount += count;
+                }
+                default -> { }
+            }
+        }
+        return new TransactionTotalsResponse(income, incomeCount, expense, expenseCount,
+                invoicePayment, invoicePaymentCount, income.subtract(expense));
     }
 
     @Override

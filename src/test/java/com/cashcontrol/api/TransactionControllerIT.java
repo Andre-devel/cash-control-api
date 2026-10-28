@@ -217,6 +217,69 @@ class TransactionControllerIT {
                 .andExpect(jsonPath("$.totalElements").value(2));
     }
 
+    @Test
+    void summarizeTransactions_totalsEveryMatchingTransactionNotJustOnePage() throws Exception {
+        LocalDate day = LocalDate.of(2026, 5, 10);
+        transactionService.createTransaction(new CreateTransactionRequest(
+                accountId, TransactionType.INCOME, new BigDecimal("1000.00"), "Salary",
+                day, day, null, null, null, null, null,
+                TransactionStatus.PAID, PaymentMethodSlug.BANK_TRANSFER, null), userId);
+        transactionService.createTransaction(new CreateTransactionRequest(
+                accountId, TransactionType.REFUND, new BigDecimal("20.00"), "Refund",
+                day, null, null, null, null, null, null,
+                TransactionStatus.PENDING, PaymentMethodSlug.PIX, null), userId);
+        transactionService.createTransaction(new CreateTransactionRequest(
+                accountId, TransactionType.EXPENSE, new BigDecimal("300.50"), "Rent",
+                day, null, null, null, null, null, null,
+                TransactionStatus.PENDING, PaymentMethodSlug.BOLETO, null), userId);
+        UUID cancelled = transactionService.createTransaction(new CreateTransactionRequest(
+                accountId, TransactionType.EXPENSE, new BigDecimal("999.00"), "Cancelled",
+                day, day, null, null, null, null, null,
+                TransactionStatus.PAID, PaymentMethodSlug.PIX, null), userId).id();
+        transactionService.cancelTransaction(cancelled, userId);
+        transactionService.createTransaction(new CreateTransactionRequest(
+                accountId, TransactionType.EXPENSE, new BigDecimal("77.00"), "Other month",
+                day.plusMonths(1), day.plusMonths(1), null, null, null, null, null,
+                TransactionStatus.PAID, PaymentMethodSlug.PIX, null), userId);
+
+        mockMvc.perform(get("/api/v1/transactions/summary")
+                        .header("Authorization", bearer())
+                        .param("competenceDateFrom", "2026-05-01")
+                        .param("competenceDateTo", "2026-05-31"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.incomeAmount").value(1020.00))
+                .andExpect(jsonPath("$.incomeCount").value(2))
+                .andExpect(jsonPath("$.expenseAmount").value(300.50))
+                .andExpect(jsonPath("$.expenseCount").value(1))
+                .andExpect(jsonPath("$.invoicePaymentCount").value(0))
+                .andExpect(jsonPath("$.netAmount").value(719.50));
+
+        mockMvc.perform(get("/api/v1/transactions/summary")
+                        .header("Authorization", bearer())
+                        .param("status", "PENDING"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.incomeAmount").value(20.00))
+                .andExpect(jsonPath("$.expenseAmount").value(300.50));
+    }
+
+    @Test
+    void reactivateTransaction_cancelled_returnsToPendingAndRejectsSecondCall() throws Exception {
+        UUID id = transactionService.createTransaction(new CreateTransactionRequest(
+                accountId, TransactionType.EXPENSE, new BigDecimal("40.00"), "Gym",
+                LocalDate.now(), LocalDate.now(), null, null, null, null, null,
+                TransactionStatus.PAID, PaymentMethodSlug.PIX, null), userId).id();
+        transactionService.cancelTransaction(id, userId);
+
+        mockMvc.perform(post("/api/v1/transactions/{id}/reactivate", id)
+                        .header("Authorization", bearer()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PENDING"));
+
+        mockMvc.perform(post("/api/v1/transactions/{id}/reactivate", id)
+                        .header("Authorization", bearer()))
+                .andExpect(status().isUnprocessableEntity());
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private String bearer() {

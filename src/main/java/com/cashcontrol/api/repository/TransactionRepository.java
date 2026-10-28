@@ -191,6 +191,25 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("groupInstallments") boolean groupInstallments,
             Pageable pageable);
 
+    /** {@code [type, quantidade, soma]} das transações não canceladas que casam com o filtro. */
+    @Query("SELECT t.type, COUNT(t), COALESCE(SUM(t.amount), 0) FROM Transaction t " + FILTER_PREDICATES +
+           " AND t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED GROUP BY t.type")
+    List<Object[]> sumByTypeWithFilters(
+            @Param("userId") UUID userId,
+            @Param("accountId") UUID accountId,
+            @Param("type") TransactionType type,
+            @Param("status") TransactionStatus status,
+            @Param("categoryId") UUID categoryId,
+            @Param("competenceDateFrom") LocalDate competenceDateFrom,
+            @Param("competenceDateTo") LocalDate competenceDateTo,
+            @Param("paymentDateFrom") LocalDate paymentDateFrom,
+            @Param("paymentDateTo") LocalDate paymentDateTo,
+            @Param("amountMin") BigDecimal amountMin,
+            @Param("amountMax") BigDecimal amountMax,
+            @Param("searchText") String searchText,
+            @Param("includeCancelled") boolean includeCancelled,
+            @Param("paymentMethod") PaymentMethodSlug paymentMethod);
+
     /**
      * Agregados por série usados para montar a linha colapsada do parcelamento:
      * {@code [seriesId, somaNaoCancelada, qtdPagas, qtdNaoCanceladas, qtdVencidas, ultimoPagamento]}.

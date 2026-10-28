@@ -13,6 +13,7 @@ import com.cashcontrol.api.dto.response.ImportResultResponse;
 import com.cashcontrol.api.dto.response.ReceiptPreviewResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.dto.response.TransactionSummaryResponse;
+import com.cashcontrol.api.dto.response.TransactionTotalsResponse;
 import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.StatementFormat;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
@@ -137,6 +138,41 @@ public class TransactionController {
         return transactionService.listTransactions(filter, principal.getUser().getId(), pageable);
     }
 
+    @Operation(summary = "Summarize transactions", description = """
+            Totals of every transaction matching the same filters as the list (all pages, not just one). \
+            Cancelled transactions never count; income includes refunds; invoice payments have their own total \
+            because the card purchases they settle already count as expenses.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Totals returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @GetMapping("/summary")
+    @PreAuthorize("isAuthenticated()")
+    public TransactionTotalsResponse summarizeTransactions(
+            @Parameter(description = "Filter by account UUID") @RequestParam(required = false) UUID accountId,
+            @Parameter(description = "Filter by transaction type") @RequestParam(required = false) TransactionType type,
+            @Parameter(description = "Filter by status") @RequestParam(required = false) TransactionStatus status,
+            @Parameter(description = "Filter by category UUID") @RequestParam(required = false) UUID categoryId,
+            @Parameter(description = "Competence date from (inclusive)") @RequestParam(required = false) LocalDate competenceDateFrom,
+            @Parameter(description = "Competence date to (inclusive)") @RequestParam(required = false) LocalDate competenceDateTo,
+            @Parameter(description = "Payment date from (inclusive)") @RequestParam(required = false) LocalDate paymentDateFrom,
+            @Parameter(description = "Payment date to (inclusive)") @RequestParam(required = false) LocalDate paymentDateTo,
+            @Parameter(description = "Minimum amount") @RequestParam(required = false) BigDecimal amountMin,
+            @Parameter(description = "Maximum amount") @RequestParam(required = false) BigDecimal amountMax,
+            @Parameter(description = "Full-text search on description and notes") @RequestParam(required = false) String searchText,
+            @Parameter(description = "Filter by payment method slug") @RequestParam(required = false) PaymentMethodSlug paymentMethod,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+
+        TransactionFilterRequest filter = new TransactionFilterRequest(
+                accountId, type, status, categoryId,
+                competenceDateFrom, competenceDateTo,
+                paymentDateFrom, paymentDateTo,
+                amountMin, amountMax, searchText, false, paymentMethod, false);
+
+        return transactionService.summarizeTransactions(filter, principal.getUser().getId());
+    }
+
     @Operation(summary = "Get transaction", description = "Returns full detail of a single transaction.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Transaction returned"),
@@ -229,6 +265,27 @@ public class TransactionController {
             @Parameter(description = "Transaction UUID", required = true) @PathVariable UUID id,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         return transactionService.cancelTransaction(id, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Reactivate transaction", description = """
+            Undoes a cancellation: the transaction goes back to PENDING (the overdue job marks it OVERDUE when its \
+            payment date has passed) and counts again in balances and card invoices. Installments cannot be \
+            reactivated one by one.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Transaction reactivated"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Transaction not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Transaction not cancelled, or an installment",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping("/{id}/reactivate")
+    @PreAuthorize("isAuthenticated()")
+    public TransactionDetailResponse reactivateTransaction(
+            @Parameter(description = "Transaction UUID", required = true) @PathVariable UUID id,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return transactionService.reactivateTransaction(id, principal.getUser().getId());
     }
 
     @Operation(summary = "Preview statement import", description = """

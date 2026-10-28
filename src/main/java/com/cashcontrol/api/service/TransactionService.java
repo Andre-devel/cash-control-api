@@ -10,6 +10,7 @@ import com.cashcontrol.api.dto.request.MarkAsPaidRequest;
 import com.cashcontrol.api.dto.request.TransactionFilterRequest;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.dto.response.TransactionSummaryResponse;
+import com.cashcontrol.api.dto.response.TransactionTotalsResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -34,7 +35,13 @@ public interface TransactionService {
 
     TransactionDetailResponse cancelTransaction(UUID id, UUID userId);
 
+    /** Desfaz o cancelamento: volta para PENDING. Parcelas não podem ser reativadas sozinhas. */
+    TransactionDetailResponse reactivateTransaction(UUID id, UUID userId);
+
     Page<TransactionSummaryResponse> listTransactions(TransactionFilterRequest filter, UUID userId, Pageable pageable);
+
+    /** Totais por tipo de tudo que o filtro casa (todas as páginas). */
+    TransactionTotalsResponse summarizeTransactions(TransactionFilterRequest filter, UUID userId);
 
     TransactionDetailResponse getTransaction(UUID id, UUID userId);
 
