@@ -21,7 +21,8 @@ public class InvoiceCycleCalculator {
      * - If competenceDate.dayOfMonth &lt;= closingDay: charge belongs to current month's invoice
      * - If competenceDate.dayOfMonth &gt; closingDay: charge belongs to next month's invoice
      *
-     * Due date is always in the month AFTER the closing date month.
+     * Due date: same month as the closing date when dueDay &gt; closingDay, next month otherwise
+     * (see {@link #dueDateFor}).
      */
     public InvoiceCycleInfo calculateForCharge(LocalDate competenceDate, int closingDay, int dueDay) {
         YearMonth chargeMonth = YearMonth.from(competenceDate);
@@ -34,7 +35,7 @@ public class InvoiceCycleCalculator {
         }
 
         LocalDate closingDate = closingDateFor(invoiceMonth, closingDay);
-        LocalDate dueDate = dueDateFor(closingDate, dueDay);
+        LocalDate dueDate = dueDateFor(closingDate, closingDay, dueDay);
         String referenceMonth = toReferenceMonth(invoiceMonth);
 
         return new InvoiceCycleInfo(referenceMonth, closingDate, dueDate);
@@ -56,13 +57,22 @@ public class InvoiceCycleCalculator {
     }
 
     /**
-     * Determines the dueDate for a billing cycle.
-     * Due date is always in the month AFTER the closingDate month.
+     * O vencimento é o primeiro {@code dueDay} depois do fechamento: no mesmo mês quando
+     * {@code dueDay > closingDay} (fecha 01/11, vence 10/11), no mês seguinte caso contrário
+     * (fecha 25/10, vence 05/11).
      */
-    public LocalDate dueDateFor(LocalDate closingDate, int dueDay) {
-        YearMonth nextMonth = YearMonth.from(closingDate).plusMonths(1);
-        int actualDay = Math.min(dueDay, nextMonth.lengthOfMonth());
-        return nextMonth.atDay(actualDay);
+    public LocalDate dueDateFor(LocalDate closingDate, int closingDay, int dueDay) {
+        YearMonth dueMonth = YearMonth.from(closingDate).plusMonths(dueInSameMonth(closingDay, dueDay) ? 0 : 1);
+        return dueMonth.atDay(Math.min(dueDay, dueMonth.lengthOfMonth()));
+    }
+
+    /** O mês de referência (o do fechamento) da fatura que vence em {@code dueMonth}. */
+    public YearMonth invoiceMonthForDueMonth(YearMonth dueMonth, int closingDay, int dueDay) {
+        return dueInSameMonth(closingDay, dueDay) ? dueMonth : dueMonth.minusMonths(1);
+    }
+
+    private static boolean dueInSameMonth(int closingDay, int dueDay) {
+        return dueDay > closingDay;
     }
 
     public record InvoiceCycleInfo(String referenceMonth, LocalDate closingDate, LocalDate dueDate) {}

@@ -203,6 +203,12 @@ public class InvoiceManagementServiceImpl implements InvoiceManagementService {
     public InvoiceResponse settle(UUID invoiceId, UUID userId) {
         Invoice invoice = requireInvoice(invoiceId, userId);
 
+        // Fatura ABERTA ainda recebe compras: quitá-la agora faria a próxima compra entrar numa
+        // fatura paga. Mesma tolerância de payInvoice para o intervalo antes do job noturno.
+        if (invoice.getStatus() == InvoiceStatus.OPEN && !LocalDate.now().isAfter(invoice.getClosingDate())) {
+            throw new BusinessRuleException("Não é possível marcar como paga uma fatura ainda ABERTA.");
+        }
+
         boolean paidByRealTransaction = invoice.getStatus() == InvoiceStatus.PAID && !invoice.isPaidWithoutTransaction();
         if (!paidByRealTransaction) {
             invoice.setPaidAmount(invoice.getTotalAmount());
@@ -213,7 +219,7 @@ public class InvoiceManagementServiceImpl implements InvoiceManagementService {
             creditCardService.syncRevolvingItem(invoice);
             // Sem pagamento real não há data de saída do dinheiro; o vencimento é a data em
             // que a fatura foi (ou seria) paga, e coloca o gasto no mês certo do dashboard.
-            transactionRepository.markInvoicePurchasesPaid(invoice.getId(), invoice.getDueDate());
+            creditCardService.syncInvoicePurchases(invoice, invoice.getDueDate());
         }
 
         return getInvoiceById(invoiceId, userId, 0, DEFAULT_PAGE_SIZE);
@@ -244,9 +250,7 @@ public class InvoiceManagementServiceImpl implements InvoiceManagementService {
         invoice.applyPaidAmount(transactionRepository.sumPaymentsForInvoice(invoice.getId()), LocalDate.now());
         invoiceRepository.save(invoice);
         creditCardService.syncRevolvingItem(invoice);
-        if (invoice.getStatus() != InvoiceStatus.PAID && invoice.getStatus() != InvoiceStatus.PARTIAL) {
-            transactionRepository.reopenInvoicePurchases(invoice.getId());
-        }
+        creditCardService.syncInvoicePurchases(invoice, LocalDate.now());
 
         return getInvoiceById(invoiceId, userId, 0, DEFAULT_PAGE_SIZE);
     }

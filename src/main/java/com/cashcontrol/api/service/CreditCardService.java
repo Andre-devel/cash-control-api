@@ -95,4 +95,12 @@ public interface CreditCardService {
      * rotativo, e reabre as compras se a fatura deixou de estar paga.
      */
     void revertInvoicePayment(UUID invoiceId, BigDecimal amount);
+
+    /**
+     * Alinha o status das compras da fatura com o que foi pago: PAGAS quando a fatura está
+     * quitada, PENDENTES caso contrário. Uma fatura PARCIAL conta como quitada quando a fatura
+     * que recebeu o rotativo dela está quitada — o restante foi pago por lá. Por isso a regra
+     * também desce para as faturas cujo rotativo está nesta.
+     */
+    void syncInvoicePurchases(Invoice invoice, LocalDate paymentDate);
 }

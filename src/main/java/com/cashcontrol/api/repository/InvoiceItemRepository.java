@@ -27,6 +27,9 @@ public interface InvoiceItemRepository extends JpaRepository<InvoiceItem, UUID> 
 
     List<InvoiceItem> findAllByRevolvingFromInvoice_IdAndCancelledAtIsNullOrderByCreatedAtAsc(UUID invoiceId);
 
+    /** Os itens rotativos que esta fatura recebeu das faturas PARCIAIS anteriores. */
+    List<InvoiceItem> findAllByInvoice_IdAndRevolvingFromInvoiceIsNotNullAndCancelledAtIsNull(UUID invoiceId);
+
     List<InvoiceItem> findAllByInstallmentSeries_Id(UUID installmentSeriesId);
 
     /**

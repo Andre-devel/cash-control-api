@@ -5,6 +5,7 @@ import com.cashcontrol.api.service.InvoiceCycleCalculator.InvoiceCycleInfo;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -79,15 +80,27 @@ class InvoiceCycleCalculatorTest {
     }
 
     @Test
-    void dueDayClamped_whenDueDay28InFebruaryDueMonth() {
-        // closingDay=20, dueDay=28. If closing is Jan 20, due is in Feb
-        // 2025 Feb has 28 days so dueDay=28 is exactly last day → OK
-        LocalDate competenceDate = LocalDate.of(2025, 1, 10);
-        InvoiceCycleInfo info = calculator.calculateForCharge(competenceDate, 20, 28);
+    void dueDayAfterClosingDay_dueInSameMonth() {
+        // fecha dia 1, vence dia 10: a fatura que fecha em 01/11 vence em 10/11
+        InvoiceCycleInfo info = calculator.calculateForCharge(LocalDate.of(2026, 10, 27), 1, 10);
 
-        assertThat(info.referenceMonth()).isEqualTo("2025-01");
-        assertThat(info.closingDate()).isEqualTo(LocalDate.of(2025, 1, 20));
-        assertThat(info.dueDate()).isEqualTo(LocalDate.of(2025, 2, 28));
+        assertThat(info.referenceMonth()).isEqualTo("2026-11");
+        assertThat(info.closingDate()).isEqualTo(LocalDate.of(2026, 11, 1));
+        assertThat(info.dueDate()).isEqualTo(LocalDate.of(2026, 11, 10));
+    }
+
+    @Test
+    void dueDayEqualToClosingDay_dueInNextMonth() {
+        InvoiceCycleInfo info = calculator.calculateForCharge(LocalDate.of(2026, 10, 5), 10, 10);
+
+        assertThat(info.closingDate()).isEqualTo(LocalDate.of(2026, 10, 10));
+        assertThat(info.dueDate()).isEqualTo(LocalDate.of(2026, 11, 10));
+    }
+
+    @Test
+    void invoiceMonthForDueMonth_followsTheCardCycle() {
+        assertThat(calculator.invoiceMonthForDueMonth(YearMonth.of(2026, 11), 1, 10)).isEqualTo(YearMonth.of(2026, 11));
+        assertThat(calculator.invoiceMonthForDueMonth(YearMonth.of(2026, 11), 25, 5)).isEqualTo(YearMonth.of(2026, 10));
     }
 
     @Test

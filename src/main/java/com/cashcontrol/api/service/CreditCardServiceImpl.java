@@ -141,6 +141,15 @@ public class CreditCardServiceImpl implements CreditCardService {
         if (card.getArchivedAt() != null) {
             throw new BusinessRuleException("O cartão de crédito já está arquivado.");
         }
+        // Arquivado, o cartão some das telas e deixa de receber pagamento pela fatura — a
+        // dívida ficaria sem caminho para ser quitada.
+        BigDecimal outstanding = invoiceRepository.sumOutstandingByCardIdAndStatuses(
+                card.getId(), List.of(InvoiceStatus.OPEN, InvoiceStatus.CLOSED, InvoiceStatus.OVERDUE));
+        if (outstanding.signum() > 0) {
+            throw new BusinessRuleException("O cartão tem faturas a pagar (R$ "
+                    + outstanding.setScale(2, RoundingMode.HALF_UP).toPlainString().replace('.', ',')
+                    + "). Quite-as antes de arquivar.");
+        }
         card.setArchivedAt(Instant.now());
         card = creditCardRepository.save(card);
         return toResponse(card);
@@ -273,7 +282,7 @@ public class CreditCardServiceImpl implements CreditCardService {
         tx.setStatus(TransactionStatus.PAID);
         tx.setAmount(paymentAmount.negate());
         tx.setDescription("Pagamento de fatura — " + invoice.getCreditCard().getName()
-                + " " + invoice.getReferenceMonth());
+                + " " + dueMonthLabel(invoice));
         tx.setCompetenceDate(paymentDate);
         tx.setPaymentDate(paymentDate);
         tx.setPaymentMethod(resolveDefaultPaymentMethod());
@@ -290,9 +299,7 @@ public class CreditCardServiceImpl implements CreditCardService {
         invoice.applyPaidAmount(invoice.getPaidAmount().add(paymentAmount), paymentDate);
         invoiceRepository.save(invoice);
         syncRevolvingItem(invoice);
-        // Também na parcial: o que faltou pagar virou item rotativo da fatura seguinte, então
-        // as compras desta já estão quitadas do ponto de vista delas.
-        transactionRepository.markInvoicePurchasesPaid(invoice.getId(), paymentDate);
+        syncInvoicePurchases(invoice, paymentDate);
         return tx;
     }
 
@@ -556,9 +563,44 @@ public class CreditCardServiceImpl implements CreditCardService {
             syncRevolvingItem(invoice);
         }
 
-        if (invoice.getStatus() != InvoiceStatus.PAID && invoice.getStatus() != InvoiceStatus.PARTIAL) {
-            transactionRepository.reopenInvoicePurchases(invoiceId);
+        syncInvoicePurchases(invoice, LocalDate.now());
+    }
+
+    @Override
+    public void syncInvoicePurchases(Invoice invoice, LocalDate paymentDate) {
+        if (isSettled(invoice)) {
+            transactionRepository.markInvoicePurchasesPaid(invoice.getId(), paymentDate);
+        } else {
+            transactionRepository.reopenInvoicePurchases(invoice.getId());
         }
+        for (InvoiceItem revolving : invoiceItemRepository
+                .findAllByInvoice_IdAndRevolvingFromInvoiceIsNotNullAndCancelledAtIsNull(invoice.getId())) {
+            syncInvoicePurchases(revolving.getRevolvingFromInvoice(), paymentDate);
+        }
+    }
+
+    /** PAGA, ou PARCIAL com o restante quitado na fatura que recebeu o rotativo. */
+    private boolean isSettled(Invoice invoice) {
+        if (invoice.getStatus() == InvoiceStatus.PAID) {
+            return true;
+        }
+        if (invoice.getStatus() != InvoiceStatus.PARTIAL) {
+            return false;
+        }
+        return invoiceItemRepository
+                .findAllByRevolvingFromInvoice_IdAndCancelledAtIsNullOrderByCreatedAtAsc(invoice.getId())
+                .stream().findFirst()
+                .map(revolving -> isSettled(revolving.getInvoice()))
+                .orElse(false);
+    }
+
+    private static final String[] MONTH_LABELS =
+            {"Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"};
+
+    /** {@code Nov 2026}: o mês do vencimento, que é como a interface chama a fatura. */
+    private static String dueMonthLabel(Invoice invoice) {
+        LocalDate due = invoice.getDueDate();
+        return MONTH_LABELS[due.getMonthValue() - 1] + " " + due.getYear();
     }
 
     private CreditCard findActiveCard(UUID id, UUID userId) {

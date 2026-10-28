@@ -216,7 +216,15 @@ class CardPurchaseLifecycleIntegrationTest {
     void paymentWithoutInvoiceLinkCannotBeDeleted() {
         purchase(null);
         UUID paymentId = payInvoice("100.00");
-        jdbcTemplate.update("UPDATE transactions SET paid_invoice_id = NULL WHERE id = ?", paymentId);
+        // Dado legado: sem vínculo e com a descrição de antes, que trazia o reference_month.
+        jdbcTemplate.update("""
+                UPDATE transactions t
+                SET paid_invoice_id = NULL,
+                    description = 'Pagamento de fatura — ' || c.name || ' ' || i.reference_month
+                FROM invoices i
+                JOIN credit_cards c ON c.id = i.credit_card_id
+                WHERE t.id = ? AND i.id = t.paid_invoice_id
+                """, paymentId);
         entityManager.clear();
 
         assertThatThrownBy(() -> transactionService.deleteTransaction(paymentId, userId))
@@ -284,7 +292,15 @@ class CardPurchaseLifecycleIntegrationTest {
     void migrationLinksLegacyPaymentsAndRevolvingItemsByDescription() throws Exception {
         purchase(null);
         UUID paymentId = payInvoice("40.00");
-        jdbcTemplate.update("UPDATE transactions SET paid_invoice_id = NULL WHERE id = ?", paymentId);
+        // Dado legado: sem vínculo e com a descrição de antes, que trazia o reference_month.
+        jdbcTemplate.update("""
+                UPDATE transactions t
+                SET paid_invoice_id = NULL,
+                    description = 'Pagamento de fatura — ' || c.name || ' ' || i.reference_month
+                FROM invoices i
+                JOIN credit_cards c ON c.id = i.credit_card_id
+                WHERE t.id = ? AND i.id = t.paid_invoice_id
+                """, paymentId);
         jdbcTemplate.update("UPDATE invoice_items SET revolving_from_invoice_id = NULL WHERE user_id = ?", userId);
 
         String migration = new String(getClass().getResourceAsStream(
@@ -302,6 +318,57 @@ class CardPurchaseLifecycleIntegrationTest {
                 "SELECT count(*) FROM invoice_items WHERE user_id = ? AND revolving_from_invoice_id = ?",
                 Long.class, userId, invoiceId()))
                 .isEqualTo(1L);
+    }
+
+    @Test
+    void partialPaymentKeepsPurchasesPendingUntilTheRevolvingInvoiceIsPaid() {
+        UUID purchaseId = purchase(null).id();
+
+        payInvoice("40.00");
+        assertThat(transactionRepository.findById(purchaseId).orElseThrow().getStatus())
+                .isEqualTo(TransactionStatus.PENDING);
+
+        // Os 60 restantes estão no rotativo da 2025-02; quitá-la quita a compra de janeiro.
+        creditCardService.payInvoice(invoice("2025-02").getId(),
+                new PayInvoiceRequest(new BigDecimal("60.00"), accountId, LocalDate.now()), userId);
+        entityManager.clear();
+        assertThat(transactionRepository.findById(purchaseId).orElseThrow().getStatus())
+                .isEqualTo(TransactionStatus.PAID);
+
+        UUID nextPayment = transactionRepository.findAll().stream()
+                .filter(t -> t.getUserId().equals(userId) && t.getType() == TransactionType.INVOICE_PAYMENT)
+                .filter(t -> t.getPaidInvoice().getId().equals(invoice("2025-02").getId()))
+                .findFirst().orElseThrow().getId();
+        transactionService.deleteTransaction(nextPayment, userId);
+        entityManager.clear();
+        assertThat(transactionRepository.findById(purchaseId).orElseThrow().getStatus())
+                .isEqualTo(TransactionStatus.PENDING);
+    }
+
+    @Test
+    void openInvoiceCannotBeSettled() {
+        LocalDate today = LocalDate.now();
+        transactionService.createTransaction(new CreateTransactionRequest(
+                accountId, TransactionType.EXPENSE, new BigDecimal("10.00"), "Hoje",
+                today, today, null, null, null, null, null,
+                null, PaymentMethodSlug.CREDIT_CARD, cardId), userId);
+        Invoice open = invoiceRepository.findAll().stream()
+                .filter(i -> i.getCreditCard().getId().equals(cardId) && i.getStatus() == InvoiceStatus.OPEN)
+                .findFirst().orElseThrow();
+
+        assertThatThrownBy(() -> invoiceManagementService.settle(open.getId(), userId))
+                .isInstanceOf(BusinessRuleException.class);
+    }
+
+    @Test
+    void cardWithUnpaidInvoiceCannotBeArchived() {
+        purchase(null);
+
+        assertThatThrownBy(() -> creditCardService.archiveCard(cardId, userId))
+                .isInstanceOf(BusinessRuleException.class);
+
+        payInvoice("100.00");
+        assertThat(creditCardService.archiveCard(cardId, userId).archivedAt()).isNotNull();
     }
 
     @Test

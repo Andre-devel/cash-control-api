@@ -302,11 +302,13 @@ public class FaturaImportServiceImpl implements FaturaImportService {
      * usuário escolhe o cartão à mão, é o {@link #checkDuplicates} que refaz esta
      * mesma consulta com o cartão escolhido.
      */
-    private Set<String> findAlreadyImported(CreditCard card, String referenceMonth,
+    private Set<String> findAlreadyImported(CreditCard card, String fileMonth,
                                             List<String> refs, UUID userId) {
         if (refs.isEmpty()) {
             return Set.of();
         }
+        String referenceMonth = cycleCalculator.toReferenceMonth(
+                invoiceMonthOf(card, YearMonth.parse(fileMonth)));
         return invoiceRepository.findByCreditCard_IdAndReferenceMonth(card.getId(), referenceMonth)
                 .map(invoice -> Set.copyOf(
                         invoiceItemRepository.findExistingExternalRefs(userId, invoice.getId(), refs)))
@@ -338,10 +340,14 @@ public class FaturaImportServiceImpl implements FaturaImportService {
     }
 
     /**
-     * O mês de referência da fatura sai do vencimento, não das datas das compras: uma
-     * parcela comprada em abril e um almoço de julho estão na mesma fatura. O vencimento
-     * é sempre no mês seguinte ao fechamento — mesma convenção do
-     * {@link InvoiceCycleCalculator}.
+     * A chave de mês do PDF, que a prévia devolve e o commit traz de volta: sai do
+     * vencimento, não das datas das compras — uma parcela comprada em abril e um almoço de
+     * julho estão na mesma fatura.
+     *
+     * <p>É o mês anterior ao vencimento, e não o {@code reference_month} da fatura: esse
+     * depende do ciclo do cartão (ver {@link #invoiceMonthOf}), e o cartão só é conhecido
+     * por seção, depois da prévia. Mantém o contrato com o cliente, que rotula a fatura pelo
+     * mês seguinte a esta chave.
      */
     private String referenceMonthOf(LocalDate dueDate) {
         return cycleCalculator.toReferenceMonth(YearMonth.from(dueDate).minusMonths(1));
@@ -794,7 +800,8 @@ public class FaturaImportServiceImpl implements FaturaImportService {
     }
 
     /**
-     * A competência de uma cobrança que o PDF colocou na fatura {@code invoiceMonth}.
+     * A competência de uma cobrança que o PDF da chave {@code fileMonth} colocou na fatura
+     * {@code invoiceMonth} do cartão.
      *
      * <p>A fatura repete a data da compra em toda parcela — a 4 de 5 de uma compra de abril
      * continua datada de abril —, então a competência tem de ser deslocada. O deslocamento
@@ -808,7 +815,8 @@ public class FaturaImportServiceImpl implements FaturaImportService {
      * {@code syncInvoiceItemForTransaction} recalcular o ciclo pela competência e mudar o
      * item de fatura.
      */
-    private LocalDate competenceDateFor(LocalDate purchaseDate, YearMonth invoiceMonth, CreditCard card) {
+    private LocalDate competenceDateFor(LocalDate purchaseDate, YearMonth fileMonth, CreditCard card) {
+        YearMonth invoiceMonth = invoiceMonthOf(card, fileMonth);
         YearMonth chargeMonth = purchaseDate.getDayOfMonth() <= card.getClosingDay()
                 ? invoiceMonth
                 : invoiceMonth.minusMonths(1);
@@ -845,14 +853,21 @@ public class FaturaImportServiceImpl implements FaturaImportService {
         return card;
     }
 
-    private Invoice resolveInvoice(CreditCard card, YearMonth referenceMonth) {
+    private Invoice resolveInvoice(CreditCard card, YearMonth fileMonth) {
+        YearMonth referenceMonth = invoiceMonthOf(card, fileMonth);
         LocalDate closingDate = cycleCalculator.closingDateFor(referenceMonth, card.getClosingDay());
         InvoiceCycleInfo cycleInfo = new InvoiceCycleInfo(
                 cycleCalculator.toReferenceMonth(referenceMonth),
                 closingDate,
-                cycleCalculator.dueDateFor(closingDate, card.getDueDay()));
+                cycleCalculator.dueDateFor(closingDate, card.getClosingDay(), card.getDueDay()));
 
         return creditCardService.getOrCreateInvoice(card, cycleInfo);
+    }
+
+    /** A fatura do cartão que vence no mês seguinte à chave {@code fileMonth} do PDF. */
+    private YearMonth invoiceMonthOf(CreditCard card, YearMonth fileMonth) {
+        return cycleCalculator.invoiceMonthForDueMonth(
+                fileMonth.plusMonths(1), card.getClosingDay(), card.getDueDay());
     }
 
     // ── Apoio ─────────────────────────────────────────────────────────────────
