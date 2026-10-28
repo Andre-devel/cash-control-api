@@ -32,7 +32,6 @@ import com.cashcontrol.api.repository.CategoryRuleRepository;
 import com.cashcontrol.api.repository.CreditCardRepository;
 import com.cashcontrol.api.repository.InstallmentSeriesRepository;
 import com.cashcontrol.api.repository.InvoiceItemRepository;
-import com.cashcontrol.api.repository.InvoiceRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.InvoiceCycleCalculator.InvoiceCycleInfo;
 import com.cashcontrol.api.service.fatura.FaturaParser;
@@ -71,7 +70,6 @@ import java.util.stream.Collectors;
 public class FaturaImportServiceImpl implements FaturaImportService {
 
     private final CreditCardRepository creditCardRepository;
-    private final InvoiceRepository invoiceRepository;
     private final InvoiceItemRepository invoiceItemRepository;
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
@@ -118,10 +116,8 @@ public class FaturaImportServiceImpl implements FaturaImportService {
 
             CreditCard suggested = suggestCard(section.cardLast4(), userId).orElse(null);
             List<RowKey> keys = rowHasher.hashAll(section.cardLast4(), expenses);
-            Set<String> alreadyImported = suggested == null
-                    ? Set.of()
-                    : findAlreadyImported(suggested, referenceMonth,
-                            keys.stream().map(RowKey::externalRef).toList(), userId);
+            Set<String> alreadyImported = findAlreadyImported(
+                    keys.stream().map(RowKey::externalRef).toList(), userId);
 
             List<FaturaImportPreviewRow> rows = new ArrayList<>(expenses.size());
             for (int i = 0; i < expenses.size(); i++) {
@@ -295,24 +291,21 @@ public class FaturaImportServiceImpl implements FaturaImportService {
     }
 
     /**
-     * Quais linhas já entraram na fatura deste mês, para o cartão informado.
+     * Quais linhas já entraram no sistema.
      *
-     * <p>Depende do cartão: é a fatura dele que diz o que já foi importado. Na prévia
-     * só existe cartão quando os 4 dígitos do PDF casaram com um cadastrado; quando o
-     * usuário escolhe o cartão à mão, é o {@link #checkDuplicates} que refaz esta
-     * mesma consulta com o cartão escolhido.
+     * <p>Mesmo alcance da confirmação ({@link #loadExistingCharges}): qualquer item de fatura
+     * do usuário com a chave, e não só os da fatura deste mês. A parcela gerada por estimativa
+     * numa importação anterior mora na fatura em que ela cai, e a chave inclui os 4 dígitos do
+     * cartão — com escopos diferentes, a prévia prometia importar linhas que a confirmação
+     * descartava como já existentes.
      */
-    private Set<String> findAlreadyImported(CreditCard card, String fileMonth,
-                                            List<String> refs, UUID userId) {
+    private Set<String> findAlreadyImported(List<String> refs, UUID userId) {
         if (refs.isEmpty()) {
             return Set.of();
         }
-        String referenceMonth = cycleCalculator.toReferenceMonth(
-                invoiceMonthOf(card, YearMonth.parse(fileMonth)));
-        return invoiceRepository.findByCreditCard_IdAndReferenceMonth(card.getId(), referenceMonth)
-                .map(invoice -> Set.copyOf(
-                        invoiceItemRepository.findExistingExternalRefs(userId, invoice.getId(), refs)))
-                .orElseGet(Set::of);
+        return invoiceItemRepository.findAllByExternalRefIn(userId, Set.copyOf(refs)).stream()
+                .map(InvoiceItem::getExternalRef)
+                .collect(Collectors.toSet());
     }
 
     /**
@@ -331,8 +324,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
         // Só valida o formato: a consulta usa a string, que é como o mês é gravado.
         parseReferenceMonth(request.referenceMonth());
 
-        Set<String> duplicates = findAlreadyImported(
-                card, request.referenceMonth(), request.externalRefs(), userId);
+        Set<String> duplicates = findAlreadyImported(request.externalRefs(), userId);
 
         // Devolvidos na ordem em que o cliente perguntou, para uma resposta estável.
         return new FaturaImportDuplicateCheckResponse(
@@ -498,7 +490,9 @@ public class FaturaImportServiceImpl implements FaturaImportService {
         for (List<PurchaseGroup> purchases : purchasesByCard.values()) {
             for (PurchaseGroup purchase : purchases) {
                 purchase.rows().forEach(row -> refs.add(row.externalRef()));
-                for (int number = purchase.lastNumber() + 1; number <= purchase.total(); number++) {
+                // Todas as parcelas da compra, não só as seguintes: as anteriores, de uma
+                // importação de outro mês, dizem a que série esta compra já pertence.
+                for (int number = 1; number <= purchase.total(); number++) {
                     refs.add(generatedRefOf(purchase, number));
                 }
             }
@@ -764,9 +758,30 @@ public class FaturaImportServiceImpl implements FaturaImportService {
                 return null;
             }
             if (series == null) {
-                series = create(category, description);
+                series = existing().orElseGet(() -> create(category, description));
             }
             return series;
+        }
+
+        /**
+         * A série que outra importação já criou para esta compra — a fatura de outro mês trouxe
+         * outras parcelas dela. Sem isto, importar os PDFs fora de ordem partia a mesma compra
+         * em várias séries, cada uma com parte das parcelas.
+         */
+        private Optional<InstallmentSeries> existing() {
+            for (int number = 1; number <= purchase.total(); number++) {
+                Transaction tx = context.existing().transactions().get(generatedRefOf(purchase, number));
+                if (tx != null && tx.getInstallmentSeries() != null) {
+                    InstallmentSeries found = tx.getInstallmentSeries();
+                    LocalDate first = competenceDateFor(
+                            purchase.rows().getFirst().date(), context.referenceMonth(), card);
+                    if (first.isBefore(found.getFirstPaymentDate())) {
+                        found.setFirstPaymentDate(first);
+                    }
+                    return Optional.of(found);
+                }
+            }
+            return Optional.empty();
         }
 
         /**

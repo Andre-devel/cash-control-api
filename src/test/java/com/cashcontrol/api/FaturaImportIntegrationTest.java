@@ -426,8 +426,9 @@ class FaturaImportIntegrationTest {
 
         FaturaImportPreviewResponse second = preview();
         FaturaImportGroupPreview reread = second.groups().getFirst();
-        // A prévia continua sem saber: ela olhou a fatura do cartão que sugeriu.
-        assertThat(reread.rows()).noneMatch(FaturaImportPreviewRow::duplicate);
+        // A prévia já sabe: olha as chaves do usuário inteiro, como a confirmação, e não só a
+        // fatura do cartão que sugeriu — confirmar no cartão sugerido descartaria essas linhas.
+        assertThat(reread.rows()).allMatch(FaturaImportPreviewRow::duplicate);
 
         FaturaImportDuplicateCheckResponse duplicates = faturaImportService.checkDuplicates(
                 new FaturaImportDuplicateCheckRequest(virtualCardId, second.referenceMonth(),

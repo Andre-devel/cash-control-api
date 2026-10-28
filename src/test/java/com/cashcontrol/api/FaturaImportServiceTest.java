@@ -32,7 +32,6 @@ import com.cashcontrol.api.repository.MerchantAliasRepository;
 import com.cashcontrol.api.repository.CreditCardRepository;
 import com.cashcontrol.api.repository.InstallmentSeriesRepository;
 import com.cashcontrol.api.repository.InvoiceItemRepository;
-import com.cashcontrol.api.repository.InvoiceRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.CategoryRuleMatcher;
 import com.cashcontrol.api.service.CategorySuggester;
@@ -89,7 +88,6 @@ class FaturaImportServiceTest {
     private static final String REFERENCE_MONTH = "2026-07";
 
     @Mock private CreditCardRepository creditCardRepository;
-    @Mock private InvoiceRepository invoiceRepository;
     @Mock private InvoiceItemRepository invoiceItemRepository;
     @Mock private AccountRepository accountRepository;
     @Mock private TransactionRepository transactionRepository;
@@ -130,7 +128,6 @@ class FaturaImportServiceTest {
         // testa a integração entre eles, que é o que o import de fato faz.
         service = new FaturaImportServiceImpl(
                 creditCardRepository,
-                invoiceRepository,
                 invoiceItemRepository,
                 accountRepository,
                 transactionRepository,
@@ -153,10 +150,6 @@ class FaturaImportServiceTest {
                 .thenReturn(List.of(cardA));
         when(creditCardRepository.findAllByUserIdAndLast4DigitsAndDeletedAtIsNull(userId, "5678"))
                 .thenReturn(List.of(cardB));
-        when(invoiceRepository.findByCreditCard_IdAndReferenceMonth(any(), any()))
-                .thenReturn(Optional.empty());
-        when(invoiceItemRepository.findExistingExternalRefs(any(), any(), anyList()))
-                .thenReturn(List.of());
         when(invoiceItemRepository.findAllByExternalRefIn(any(), any())).thenReturn(List.of());
         when(transactionRepository.findAllByExternalRefIn(any(), any(), any())).thenReturn(List.of());
         when(creditCardRepository.findByIdAndUserIdAndDeletedAtIsNull(cardA.getId(), userId))
@@ -362,12 +355,14 @@ class FaturaImportServiceTest {
     }
 
     @Test
-    void preview_flagsRowsAlreadyImportedIntoThatMonthsInvoice() {
-        when(invoiceRepository.findByCreditCard_IdAndReferenceMonth(cardA.getId(), REFERENCE_MONTH))
-                .thenReturn(Optional.of(invoiceA));
+    void preview_flagsRowsAlreadyImported_withTheSameScopeAsTheCommit() {
+        // A chave pode estar em qualquer fatura do usuário (a parcela estimada vive no mês em
+        // que cai): é o mesmo critério que a confirmação usa para descartar a linha.
         List<String> hashes = hashesOfFirstGroup();
-        when(invoiceItemRepository.findExistingExternalRefs(userId, invoiceA.getId(), hashes))
-                .thenReturn(List.of(hashes.getFirst()));
+        InvoiceItem existing = new InvoiceItem();
+        existing.setInvoice(invoiceB);
+        existing.setExternalRef(hashes.getFirst());
+        when(invoiceItemRepository.findAllByExternalRefIn(eq(userId), any())).thenReturn(List.of(existing));
 
         FaturaImportPreviewResponse preview = preview();
 
@@ -377,9 +372,8 @@ class FaturaImportServiceTest {
     }
 
     @Test
-    void preview_marksNothingAsDuplicateWhenTheInvoiceDoesNotExistYet() {
+    void preview_marksNothingAsDuplicateWhenNoItemHasTheKey() {
         assertThat(preview().duplicateCount()).isZero();
-        verify(invoiceItemRepository, never()).findExistingExternalRefs(any(), any(), anyList());
     }
 
     @Test
@@ -609,6 +603,27 @@ class FaturaImportServiceTest {
         assertThat(result.imported()).isEqualTo(1);
         assertThat(result.futureInstallments()).isZero();
         assertThat(result.skippedDuplicates()).isZero();
+    }
+
+    @Test
+    void commit_joinsTheSeriesThatAnotherMonthsImportCreatedForThePurchase() {
+        // A fatura de fevereiro já trouxe a parcela 2 desta compra e criou a série; a de abril,
+        // importada depois, tem de continuar nela em vez de abrir outra.
+        InstallmentSeries series = new InstallmentSeries();
+        ReflectionTestUtils.setField(series, "id", UUID.randomUUID());
+        series.setFirstPaymentDate(LocalDate.of(2026, 2, 4));
+        String parcel2 = new FaturaRowHasher().hashInstallment("1234", LocalDate.of(2026, 4, 4),
+                "LOJA DE TESTE (Parcela 02 de 05)", 2, 5, 0);
+        Transaction earlier = existingCharge(parcel2, "55.19");
+        earlier.setInstallmentSeries(series);
+        when(transactionRepository.findAllByExternalRefIn(eq(userId), eq(account.getId()), any()))
+                .thenReturn(List.of(earlier));
+
+        commit(List.of(commitRowsFromPreview().getFirst()));
+
+        assertThat(capturedTransactions())
+                .allSatisfy(tx -> assertThat(tx.getInstallmentSeries()).isSameAs(series));
+        verify(installmentSeriesRepository, never()).save(any(InstallmentSeries.class));
     }
 
     // ── commit: a compra cujas parcelas caem todas na mesma fatura ────────────
