@@ -24,5 +24,11 @@ public record ImportCommitRequest(
         @NotNull StatementFormat format,
 
         @Schema(description = "Lançamentos aprovados", requiredMode = Schema.RequiredMode.REQUIRED)
-        @NotEmpty @Valid List<ImportCommitRow> rows
+        @NotEmpty @Valid List<ImportCommitRow> rows,
+        @Schema(description = """
+                true para que o saldo atual da conta não mude: o efeito líquido dos lançamentos \
+                importados é compensado por um ajuste de saldo de abertura datado na véspera do \
+                lançamento mais antigo. É o caso do extrato antigo, cujo resultado já está no \
+                saldo informado ao criar a conta.""")
+        Boolean keepCurrentBalance
 ) {}

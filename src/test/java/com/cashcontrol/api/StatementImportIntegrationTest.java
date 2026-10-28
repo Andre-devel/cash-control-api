@@ -32,6 +32,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -119,6 +120,38 @@ class StatementImportIntegrationTest {
 
         assertThat(transactionRepository.sumPaidAmountByAccountIdAndUserId(accountId, userId))
                 .isEqualByComparingTo(expected);
+    }
+
+    @Test
+    void preview_withoutInvestmentAccount_flagsApplicationsAndSuggestsKeepingBalance() {
+        ImportPreviewResponse preview = preview();
+
+        assertThat(preview.investmentAccountMissing()).isTrue();
+        assertThat(preview.rows()).filteredOn(ImportPreviewRow::investment).hasSize(4);
+        // O extrato é de antes da conta existir: o saldo dela já inclui esse histórico.
+        assertThat(preview.keepCurrentBalanceSuggested()).isTrue();
+    }
+
+    @Test
+    void commit_keepingCurrentBalance_compensatesWithOpeningAdjustment() {
+        ImportPreviewResponse preview = preview();
+        List<ImportCommitRow> approved = preview.rows().stream()
+                .map(row -> new ImportCommitRow(
+                        row.lineNumber(), row.externalRef(), row.date(), row.description(), row.description(),
+                        row.amount(), row.type(), row.paymentMethod(), row.suggestedCategoryId(),
+                        row.outgoing(), row.transferAccountId(), row.invoiceId()))
+                .toList();
+
+        statementImportService.commit(
+                new ImportCommitRequest(accountId, StatementFormat.INTER_CSV, approved, true), userId);
+
+        assertThat(transactionRepository.sumPaidAmountByAccountIdAndUserId(accountId, userId))
+                .isEqualByComparingTo(BigDecimal.ZERO);
+        LocalDate earliest = preview.rows().stream().map(ImportPreviewRow::date).min(LocalDate::compareTo).orElseThrow();
+        assertThat(transactionRepository.findAllByAccount_IdAndUserId(accountId, userId, PageRequest.of(0, 50)))
+                .filteredOn(tx -> tx.getType() == TransactionType.MANUAL_ADJUSTMENT)
+                .singleElement()
+                .satisfies(tx -> assertThat(tx.getCompetenceDate()).isEqualTo(earliest.minusDays(1)));
     }
 
     @Test
@@ -227,7 +260,7 @@ class StatementImportIntegrationTest {
                         row.outgoing(), row.transferAccountId(), row.invoiceId()))
                 .toList();
         return statementImportService.commit(
-                new ImportCommitRequest(accountId, StatementFormat.INTER_CSV, approved), userId);
+                new ImportCommitRequest(accountId, StatementFormat.INTER_CSV, approved, null), userId);
     }
 
     private MultipartFile fixture() {

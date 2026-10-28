@@ -114,8 +114,8 @@ public class InterCsvStatementParser implements StatementParser {
 
         if (!headerFound) {
             throw new BusinessRuleException(
-                    "Arquivo não reconhecido como extrato do Banco Inter: a linha de colunas "
-                    + "\"Data Lançamento;Histórico;Descrição;Valor;Saldo\" não foi encontrada.");
+                    "Este arquivo não parece um extrato do Banco Inter em CSV. No app do Inter, "
+                    + "exporte o extrato no formato CSV e envie o arquivo sem alterá-lo.");
         }
 
         return new ParsedStatement(sourceAccountLabel, periodStart, periodEnd, rows, errors);

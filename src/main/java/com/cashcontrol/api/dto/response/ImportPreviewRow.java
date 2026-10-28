@@ -100,5 +100,11 @@ public record ImportPreviewRow(
         boolean invoiceAmountMismatch,
 
         @Schema(description = "Faturas que esta linha de saída pode pagar, as de vencimento mais próximo primeiro")
-        List<ImportInvoiceOption> invoiceOptions
+        List<ImportInvoiceOption> invoiceOptions,
+        @Schema(description = "true quando o histórico é de aplicação ou resgate de investimento")
+        boolean investment,
+        @Schema(description = """
+                true quando a descrição indica pagamento de fatura, mas nenhuma fatura com \
+                vencimento perto da data foi encontrada: falta importar a fatura do cartão.""")
+        boolean invoicePaymentUnmatched
 ) {}

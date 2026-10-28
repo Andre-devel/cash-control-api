@@ -42,5 +42,13 @@ public record ImportPreviewResponse(
         List<ImportPreviewRow> rows,
 
         @Schema(description = "Linhas que não puderam ser lidas")
-        List<ImportRowError> errors
+        List<ImportRowError> errors,
+        @Schema(description = """
+                true quando há aplicação ou resgate no arquivo e o usuário não tem conta de \
+                investimento: sem ela essas linhas viram despesa/receita.""")
+        boolean investmentAccountMissing,
+        @Schema(description = """
+                true quando há lançamentos novos anteriores à criação da conta: provavelmente \
+                já estão no saldo inicial, e a prévia sugere manter o saldo atual.""")
+        boolean keepCurrentBalanceSuggested
 ) {}

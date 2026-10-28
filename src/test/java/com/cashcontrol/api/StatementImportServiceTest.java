@@ -671,7 +671,10 @@ class StatementImportServiceTest {
                         org.assertj.core.groups.Tuple.tuple(TransactionType.EXPENSE, null, false),
                         org.assertj.core.groups.Tuple.tuple(TransactionType.EXPENSE, null, false));
         assertThat(preview.rows().getFirst().invoiceLabel()).isEqualTo("Inter - PF · 2026-07");
-        assertThat(preview.warningCount()).isEqualTo(1);
+        // A divergência de valor e o pagamento de janeiro, que não tem fatura no sistema.
+        assertThat(preview.warningCount()).isEqualTo(2);
+        assertThat(preview.rows()).extracting(ImportPreviewRow::invoicePaymentUnmatched)
+                .containsExactly(false, false, true, false);
         // Opções para escolher à mão: as que vencem perto, sem a já quitada por pagamento lançado.
         assertThat(preview.rows().get(3).invoiceOptions())
                 .extracting(ImportInvoiceOption::id)
@@ -809,7 +812,7 @@ class StatementImportServiceTest {
     }
 
     private ImportCommitRequest request(ImportCommitRow... rows) {
-        return new ImportCommitRequest(accountId, StatementFormat.INTER_CSV, List.of(rows));
+        return new ImportCommitRequest(accountId, StatementFormat.INTER_CSV, List.of(rows), null);
     }
 
     private ImportCommitRow commitRow(String externalRef, String date, String description, String amount,

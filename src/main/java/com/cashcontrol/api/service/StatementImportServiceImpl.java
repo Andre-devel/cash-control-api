@@ -17,6 +17,7 @@ import com.cashcontrol.api.domain.exception.BusinessRuleException;
 import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
 import com.cashcontrol.api.dto.request.ImportCommitRequest;
 import com.cashcontrol.api.dto.request.ImportCommitRow;
+import com.cashcontrol.api.dto.request.ManualAdjustmentRequest;
 import com.cashcontrol.api.dto.response.ImportInvoiceOption;
 import com.cashcontrol.api.dto.response.ImportPreviewResponse;
 import com.cashcontrol.api.dto.response.ImportPreviewRow;
@@ -43,6 +44,7 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -124,7 +126,7 @@ public class StatementImportServiceImpl implements StatementImportService {
 
         int duplicateCount = (int) rows.stream().filter(ImportPreviewRow::duplicate).count();
         int warningCount = (int) rows.stream()
-                .filter(row -> row.unknownHistory() || row.invoiceAmountMismatch())
+                .filter(row -> row.unknownHistory() || row.invoiceAmountMismatch() || row.invoicePaymentUnmatched())
                 .count();
 
         return new ImportPreviewResponse(
@@ -138,7 +140,15 @@ public class StatementImportServiceImpl implements StatementImportService {
                 duplicateCount,
                 warningCount,
                 rows,
-                statement.errors());
+                statement.errors(),
+                investmentAccount == null && rows.stream().anyMatch(ImportPreviewRow::investment),
+                rows.stream().anyMatch(row -> !row.duplicate() && row.date().isBefore(createdOn(account))));
+    }
+
+    private static LocalDate createdOn(Account account) {
+        return account.getCreatedAt() != null
+                ? LocalDate.ofInstant(account.getCreatedAt(), ZoneId.systemDefault())
+                : LocalDate.now();
     }
 
     @Override
@@ -165,6 +175,8 @@ public class StatementImportServiceImpl implements StatementImportService {
         List<ImportRowError> errors = new ArrayList<>();
         int skippedDuplicates = 0;
         int importedByOwnFlow = 0;
+        BigDecimal netChange = BigDecimal.ZERO;
+        LocalDate earliest = null;
 
         for (ImportCommitRow row : request.rows()) {
             // Antes do desvio de duplicata de propósito: o nome que o usuário deixou na
@@ -179,18 +191,26 @@ public class StatementImportServiceImpl implements StatementImportService {
                 switch (row.type()) {
                     case TRANSFER -> importTransfer(row, account, userId);
                     case INVOICE_PAYMENT -> importInvoicePayment(row, account, userId);
-                    default -> {
-                        toSave.add(toTransaction(row, account, userId, paymentMethods, categories));
-                        continue;
-                    }
+                    default -> toSave.add(toTransaction(row, account, userId, paymentMethods, categories));
                 }
-                importedByOwnFlow++;
+                if (row.type() == TransactionType.TRANSFER || row.type() == TransactionType.INVOICE_PAYMENT) {
+                    importedByOwnFlow++;
+                }
+                netChange = netChange.add(balanceEffect(row));
+                earliest = earliest == null || row.date().isBefore(earliest) ? row.date() : earliest;
             } catch (BusinessRuleException | ResourceNotFoundException e) {
                 errors.add(new ImportRowError(row.lineNumber(), e.getMessage()));
             }
         }
 
         transactionRepository.saveAll(toSave);
+
+        if (Boolean.TRUE.equals(request.keepCurrentBalance()) && netChange.signum() != 0) {
+            // O histórico importado já está no saldo da conta: compensa-o antes do primeiro
+            // lançamento, para o saldo atual (e o de cada dia depois disso) ficar como estava.
+            accountService.manualAdjustment(account.getId(), new ManualAdjustmentRequest(
+                    netChange.negate(), "Saldo de abertura (importação de extrato)", earliest.minusDays(1)), userId);
+        }
 
         return new ImportResultResponse(toSave.size() + importedByOwnFlow, skippedDuplicates, errors.size(), errors);
     }
@@ -215,11 +235,13 @@ public class StatementImportServiceImpl implements StatementImportService {
         Account transferAccount = null;
         Invoice invoice = null;
         boolean invoiceAmountMismatch = false;
+        boolean invoicePaymentUnmatched = false;
         if (mapping.investment() && investmentAccount != null) {
             type = TransactionType.TRANSFER;
             transferAccount = investmentAccount;
         } else if (type == TransactionType.EXPENSE && looksLikeInvoicePayment(row.description())) {
             invoice = invoices.claim(row.date(), amount);
+            invoicePaymentUnmatched = invoice == null;
             if (invoice != null) {
                 // Valor fora da tolerância é sinal de dado errado na fatura ou de outro
                 // pagamento; casar mesmo assim deixaria a fatura PARCIAL e criaria um
@@ -258,7 +280,9 @@ public class StatementImportServiceImpl implements StatementImportService {
                 invoice != null ? invoice.getId() : null,
                 invoice != null ? invoiceLabel(invoice) : null,
                 invoiceAmountMismatch,
-                invoiceOptions);
+                invoiceOptions,
+                mapping.investment(),
+                invoicePaymentUnmatched);
     }
 
     private static ImportInvoiceOption toInvoiceOption(Invoice invoice) {
@@ -359,6 +383,15 @@ public class StatementImportServiceImpl implements StatementImportService {
     /** {@code transactions.description} é VARCHAR(255); extratos raramente chegam perto, mas não é garantido. */
     private String truncateDescription(String description) {
         return description.length() <= 255 ? description : description.substring(0, 255);
+    }
+
+    /** Quanto a linha muda o saldo da conta importada. */
+    private static BigDecimal balanceEffect(ImportCommitRow row) {
+        return switch (row.type()) {
+            case INCOME, REFUND -> row.amount();
+            case TRANSFER -> Boolean.TRUE.equals(row.outgoing()) ? row.amount().negate() : row.amount();
+            default -> row.amount().negate();
+        };
     }
 
     // ── Confirmação ───────────────────────────────────────────────────────────

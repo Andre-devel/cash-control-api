@@ -182,7 +182,7 @@ class InterCsvStatementParserTest {
     void parse_withoutHeader_isRejectedAsWrongFormat() {
         assertThatThrownBy(() -> parse("data,descricao,valor\n2026-03-01,Alguem,10.00\n"))
                 .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("não reconhecido");
+                .hasMessageContaining("não parece um extrato do Banco Inter");
     }
 
     @Test
