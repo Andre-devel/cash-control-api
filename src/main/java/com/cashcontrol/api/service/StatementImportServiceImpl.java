@@ -105,6 +105,14 @@ public class StatementImportServiceImpl implements StatementImportService {
         return buildPreview(account, bank.statement(), bank.externalRefs(), null, StatementFormat.OPEN_FINANCE, userId);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public ImportPreviewResponse previewRows(UUID accountId, ParsedStatement statement, List<String> externalRefs,
+                                             UUID userId) {
+        return buildPreview(requireImportableAccount(accountId, userId), statement, externalRefs, null,
+                StatementFormat.OPEN_FINANCE, userId);
+    }
+
     private ImportPreviewResponse buildPreview(Account account, ParsedStatement statement, List<String> refs,
                                                String fileName, StatementFormat format, UUID userId) {
         if (statement.rows().size() > appProperties.getStatementImport().getMaxRows()) {

@@ -70,6 +70,9 @@ public class AppProperties {
     @Valid
     private final Pluggy pluggy = new Pluggy();
 
+    @Valid
+    private final Push push = new Push();
+
     @Getter
     @Setter
     public static class Jwt {
@@ -300,6 +303,29 @@ public class AppProperties {
 
         public boolean isEnabled() {
             return clientId != null && !clientId.isBlank() && clientSecret != null && !clientSecret.isBlank();
+        }
+    }
+
+    /**
+     * Chaves VAPID do Web Push (base64url: a pública no formato não comprimido de 65 bytes, a
+     * privada com os 32 bytes do escalar), como as gera {@code npx web-push generate-vapid-keys}.
+     * Sem as duas, as notificações ficam desligadas e o Perfil não oferece o interruptor.
+     */
+    @Getter
+    @Setter
+    public static class Push {
+
+        private String vapidPublicKey;
+
+        private String vapidPrivateKey;
+
+        /** Contato do servidor para o serviço de push ({@code mailto:} ou https). */
+        @NotBlank
+        private String subject = "mailto:admin@localhost";
+
+        public boolean isEnabled() {
+            return vapidPublicKey != null && !vapidPublicKey.isBlank()
+                   && vapidPrivateKey != null && !vapidPrivateKey.isBlank();
         }
     }
 

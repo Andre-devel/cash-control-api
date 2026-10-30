@@ -4,9 +4,11 @@ import com.cashcontrol.api.domain.entity.StatementFormat;
 import com.cashcontrol.api.dto.request.ImportCommitRequest;
 import com.cashcontrol.api.dto.response.ImportPreviewResponse;
 import com.cashcontrol.api.dto.response.ImportResultResponse;
+import com.cashcontrol.api.service.statement.ParsedStatement;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -26,6 +28,12 @@ public interface StatementImportService {
      * mesmo, com {@code StatementFormat.OPEN_FINANCE}.
      */
     ImportPreviewResponse previewFromBank(UUID accountId, UUID userId, LocalDate today);
+
+    /**
+     * Classifica linhas já lidas do banco, pelas mesmas regras da prévia. É o que a fila de
+     * lançamentos a revisar mostra, sem buscar nada de novo.
+     */
+    ImportPreviewResponse previewRows(UUID accountId, ParsedStatement statement, List<String> externalRefs, UUID userId);
 
     ImportResultResponse commit(ImportCommitRequest request, UUID userId);
 }

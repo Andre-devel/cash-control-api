@@ -219,6 +219,36 @@ class BankConnectionApiIntegrationTest {
     }
 
     @Test
+    void webhook_transactionsCreated_readsOnlyALinkedAccountOfAKnownItem() throws Exception {
+        register(token);
+        String linked = jdbcTemplate.queryForObject(
+                "SELECT a.external_account_id FROM bank_connection_accounts a JOIN bank_connections c ON c.id = a.connection_id "
+                        + "WHERE c.item_id = ? LIMIT 1", String.class, itemId);
+        when(pluggyClient.listTransactions(linked)).thenReturn(List.of(new PluggyClient.PluggyTransaction(
+                "t1", "Pix enviado - X", new java.math.BigDecimal("-10"), "DEBIT", "POSTED",
+                java.time.Instant.parse("2026-10-30T12:00:00Z"), null, java.time.Instant.parse("2026-10-30T13:00:00Z"))));
+
+        mockMvc.perform(post("/api/v1/webhooks/pluggy").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"event\":\"transactions/created\",\"eventId\":\"e2\",\"itemId\":\"" + itemId
+                                + "\",\"accountId\":\"" + linked + "\",\"transactionsCreatedAtFrom\":\"2026-10-30T12:30:00.000Z\"}"))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(post("/api/v1/webhooks/pluggy").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"event\":\"transactions/created\",\"itemId\":\"" + itemId
+                                + "\",\"accountId\":\"not-linked\"}"))
+                .andExpect(status().isNoContent());
+
+        eventually(() -> {
+            try {
+                verify(pluggyClient).listTransactions(linked);
+                return true;
+            } catch (AssertionError e) {
+                return false;
+            }
+        });
+        verify(pluggyClient, org.mockito.Mockito.never()).listTransactions("not-linked");
+    }
+
+    @Test
     void reconnectToken_carriesTheItem() throws Exception {
         String connectionId = register(token).andReturnJson().get("id").asText();
         when(pluggyClient.createConnectToken(eq(userId.toString()), eq(itemId))).thenReturn("tok-re");

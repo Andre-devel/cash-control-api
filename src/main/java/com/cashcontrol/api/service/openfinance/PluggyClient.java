@@ -239,15 +239,21 @@ public class PluggyClient {
      * Lançamento como a Pluggy devolve. Na conta corrente {@code amount} tem sinal (débito
      * negativo) e {@code description} é "Histórico - Descrição" do extrato do Inter; no cartão
      * o sinal não é confiável (compra positiva, pagamento negativo) e vale o {@code type}.
-     * {@code status}: POSTED ou PENDING. {@code type}: DEBIT ou CREDIT.
+     * {@code status}: POSTED ou PENDING. {@code type}: DEBIT ou CREDIT. {@code createdAt}: quando a
+     * Pluggy recebeu o lançamento do banco.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record PluggyTransaction(String id, String description, BigDecimal amount, String type, String status,
-                                    Instant date, CreditCardMetadata creditCardMetadata) {
+                                    Instant date, CreditCardMetadata creditCardMetadata, Instant createdAt) {
 
         public PluggyTransaction(String id, String description, BigDecimal amount, String type, String status,
                                  Instant date) {
-            this(id, description, amount, type, status, date, null);
+            this(id, description, amount, type, status, date, null, null);
+        }
+
+        public PluggyTransaction(String id, String description, BigDecimal amount, String type, String status,
+                                 Instant date, CreditCardMetadata creditCardMetadata) {
+            this(id, description, amount, type, status, date, creditCardMetadata, null);
         }
     }
 

@@ -19,15 +19,19 @@ import com.cashcontrol.api.repository.BankConnectionRepository;
 import com.cashcontrol.api.repository.CreditCardRepository;
 import com.cashcontrol.api.service.openfinance.PluggyClient.PluggyAccount;
 import com.cashcontrol.api.service.openfinance.PluggyClient.PluggyItem;
+import com.cashcontrol.api.service.openfinance.PluggyClient.PluggyTransaction;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
@@ -54,6 +58,7 @@ public class BankConnectionService {
     private final BankConnectionAccountRepository connectionAccountRepository;
     private final AccountRepository accountRepository;
     private final CreditCardRepository creditCardRepository;
+    private final BankPendingService bankPendingService;
 
     @Transactional(readOnly = true)
     public BankConnectionsResponse list(UUID userId) {
@@ -170,6 +175,48 @@ public class BankConnectionService {
                     () -> connectionRepository.delete(connection.get()));
         } catch (BankProviderException e) {
             log.warn("Pluggy webhook: could not refresh item {}: {}", itemId, e.getCause() != null ? e.getCause().toString() : e.getMessage());
+        }
+    }
+
+    /**
+     * Evento {@code transactions/created}. Loga o atraso (etapa 6.0): quantos lançamentos a Pluggy
+     * recebeu desde {@code createdAtFrom} e quanto tempo passou entre o mais novo deles — pela data
+     * do banco e pela chegada na Pluggy — e o aviso. Na conta corrente vinculada, põe os novos na
+     * fila de revisão (etapa 6A). Só para conta vinculada de um item cadastrado: o corpo não é
+     * confiável e não pode disparar leitura à toa.
+     */
+    @Async
+    public void onTransactionsCreated(UUID itemId, String externalAccountId, Instant createdAtFrom, Instant receivedAt) {
+        if (!appProperties.getPluggy().isEnabled()) {
+            return;
+        }
+        Optional<BankConnection> connection = connectionRepository.findByProviderAndItemId(BankProvider.PLUGGY, itemId.toString());
+        Optional<BankConnectionAccount> link = connection
+                .flatMap(found -> connectionAccountRepository.findAllByConnectionId(found.getId()).stream()
+                        .filter(account -> externalAccountId.equals(account.getExternalAccountId()))
+                        .findFirst());
+        if (link.isEmpty()) {
+            return;
+        }
+        try {
+            List<PluggyTransaction> created = pluggyClient.listTransactions(externalAccountId).stream()
+                    .filter(tx -> tx.createdAt() != null && (createdAtFrom == null || !tx.createdAt().isBefore(createdAtFrom)))
+                    .toList();
+            Instant newestDate = created.stream().map(PluggyTransaction::date).filter(Objects::nonNull)
+                    .max(Instant::compareTo).orElse(null);
+            Instant newestCreatedAt = created.stream().map(PluggyTransaction::createdAt)
+                    .max(Instant::compareTo).orElse(null);
+            log.info("Pluggy webhook delay: kind={} created={} newestDate={} newestCreatedAt={} "
+                            + "minutesSinceBankDate={} minutesSincePluggy={}",
+                    link.get().getKind(), created.size(), newestDate, newestCreatedAt,
+                    newestDate == null ? null : Duration.between(newestDate, receivedAt).toMinutes(),
+                    newestCreatedAt == null ? null : Duration.between(newestCreatedAt, receivedAt).toMinutes());
+            if (link.get().getKind() == BankAccountKind.BANK && link.get().getAccountId() != null) {
+                bankPendingService.enqueue(connection.get().getUserId(), link.get().getAccountId(), createdAtFrom, receivedAt);
+            }
+        } catch (BankProviderException | BusinessRuleException e) {
+            log.warn("Pluggy webhook: could not read transactions of {}: {}", externalAccountId,
+                    e.getCause() != null ? e.getCause().toString() : e.getMessage());
         }
     }
 

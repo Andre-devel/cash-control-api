@@ -79,6 +79,8 @@ public class SecurityConfig {
                 ).permitAll()
                 // Sem assinatura: o corpo só dispara uma releitura na Pluggy (ver PluggyWebhookController)
                 .requestMatchers(HttpMethod.POST, "/api/v1/webhooks/pluggy").permitAll()
+                // Botão Confirmar da notificação: o service worker não tem sessão; vale o token de uso único
+                .requestMatchers(HttpMethod.POST, "/api/v1/bank-pending/*/confirm-by-token").permitAll()
                 .requestMatchers(
                     "/oauth2/**",
                     "/login/oauth2/**"

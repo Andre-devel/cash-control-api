@@ -143,6 +143,11 @@ app:
     base-url: ${PLUGGY_BASE_URL:https://api.pluggy.ai}
     # HTTPS público; a Pluggy recusa localhost. Vazio = sem webhook.
     webhook-url: ${PLUGGY_WEBHOOK_URL:}
+  push:
+    # Web Push (notificação no celular). Sem as chaves VAPID fica desligado.
+    vapid-public-key: ${PUSH_VAPID_PUBLIC_KEY:}
+    vapid-private-key: ${PUSH_VAPID_PRIVATE_KEY:}
+    subject: ${PUSH_SUBJECT:mailto:admin@localhost}
 
 management:
   endpoints:

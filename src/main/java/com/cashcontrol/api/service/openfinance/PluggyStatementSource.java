@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -51,6 +52,14 @@ public class PluggyStatementSource {
     private final TransactionRepository transactionRepository;
 
     public BankStatement fetch(UUID accountId, UUID userId, LocalDate today) {
+        return fetch(accountId, userId, today, null);
+    }
+
+    /**
+     * @param createdSince só o que chegou na Pluggy a partir daí (o webhook avisa por esse corte);
+     *                     {@code null} para todos
+     */
+    public BankStatement fetch(UUID accountId, UUID userId, LocalDate today, Instant createdSince) {
         if (!appProperties.getPluggy().isEnabled()) {
             throw new BusinessRuleException("A conexão com bancos não está configurada neste servidor.");
         }
@@ -63,6 +72,7 @@ public class PluggyStatementSource {
         List<PluggyTransaction> fetched = pluggyClient.listTransactions(link.getExternalAccountId()).stream()
                 .filter(tx -> "POSTED".equals(tx.status()) && tx.id() != null && tx.date() != null && tx.amount() != null)
                 .filter(tx -> cutoff == null || !dateOf(tx).isBefore(cutoff))
+                .filter(tx -> createdSince == null || (tx.createdAt() != null && !tx.createdAt().isBefore(createdSince)))
                 .toList();
         Set<String> alreadyImported = fetched.isEmpty() ? Set.of() : new HashSet<>(transactionRepository
                 .findExistingExternalRefs(userId, accountId, fetched.stream().map(PluggyStatementSource::refOf).toList()));
