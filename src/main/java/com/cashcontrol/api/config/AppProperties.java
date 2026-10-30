@@ -243,6 +243,14 @@ public class AppProperties {
 
         @Positive
         private int upcomingBillsMaxResults = 20;
+
+        /** Horizonte da projeção de saldo quando o pedido não informa {@code days}. */
+        @Positive
+        private int projectionDefaultDays = 90;
+
+        /** Teto de {@code days} na projeção de saldo; acima disso o pedido é limitado. */
+        @Positive
+        private int projectionMaxDays = 365;
     }
 
     @Getter

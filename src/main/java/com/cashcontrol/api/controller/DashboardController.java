@@ -2,6 +2,7 @@ package com.cashcontrol.api.controller;
 
 import com.cashcontrol.api.domain.entity.ChartGranularity;
 import com.cashcontrol.api.domain.entity.TransactionType;
+import com.cashcontrol.api.dto.response.BalanceProjectionResponse;
 import com.cashcontrol.api.dto.response.CategoryPieChartResponse;
 import com.cashcontrol.api.dto.response.ErrorResponse;
 import com.cashcontrol.api.dto.response.LargestExpenseResponse;
@@ -132,6 +133,24 @@ public class DashboardController {
             @Parameter(description = "Number of days ahead to look (default: configured value)") @RequestParam(defaultValue = "0") int daysAhead,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         return dashboardService.getUpcomingBills(principal.getUser().getId(), daysAhead);
+    }
+
+    @Operation(summary = "Balance projection", description = """
+            Projected balance of the active accounts for the next days: current balance plus pending \
+            income and expenses at their expected date, the remaining amount of unpaid card invoices at their \
+            due date and future occurrences of active recurrences not generated yet (flagged as estimated). \
+            Overdue items count today. Spending not recorded yet is not estimated.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Projection returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @GetMapping("/projection")
+    @PreAuthorize("isAuthenticated()")
+    public BalanceProjectionResponse getBalanceProjection(
+            @Parameter(description = "Days ahead to project (default: configured value; capped at the configured maximum)") @RequestParam(defaultValue = "0") int days,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return dashboardService.getBalanceProjection(principal.getUser().getId(), days);
     }
 
     @Operation(summary = "Upcoming invoices widget", description = "Returns credit card invoices due within the specified number of days that are not yet fully paid.")

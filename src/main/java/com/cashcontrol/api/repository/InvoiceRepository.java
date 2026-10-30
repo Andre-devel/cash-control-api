@@ -60,6 +60,14 @@ public interface InvoiceRepository extends JpaRepository<Invoice, UUID> {
     List<Invoice> findAllByUserIdAndDueDateLessThanEqualAndStatusIn(
             UUID userId, LocalDate dueDate, List<InvoiceStatus> statuses);
 
+    /** Faturas com saldo a pagar até {@code upTo}, de cartões não excluídos; o cartão vem junto para o rótulo. */
+    @Query("SELECT i FROM Invoice i JOIN FETCH i.creditCard c " +
+           "WHERE i.userId = :userId AND c.deletedAt IS NULL " +
+           "AND i.status <> com.cashcontrol.api.domain.entity.InvoiceStatus.PAID " +
+           "AND i.dueDate <= :upTo")
+    List<Invoice> findUnpaidWithCardByUserIdDueBy(@Param("userId") UUID userId,
+                                                  @Param("upTo") LocalDate upTo);
+
     /** Candidatas a casar com um pagamento de fatura lido do extrato; o cartão vem junto para o rótulo. */
     @Query("SELECT i FROM Invoice i JOIN FETCH i.creditCard " +
            "WHERE i.userId = :userId AND i.dueDate BETWEEN :from AND :to")

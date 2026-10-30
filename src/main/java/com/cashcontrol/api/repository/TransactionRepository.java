@@ -373,6 +373,25 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("deadline") LocalDate deadline,
             Pageable pageable);
 
+    /**
+     * Receitas e despesas em aberto que vão mexer no saldo até {@code upTo}: mesmo recorte do
+     * saldo (contas ativas, sem cartão — compra no cartão sai pela fatura). A data prevista é o
+     * vencimento informado ou, sem ele, a competência; vencidas vêm junto.
+     */
+    @Query("SELECT t FROM Transaction t " +
+           "WHERE t.userId = :userId " +
+           "AND t.status IN (com.cashcontrol.api.domain.entity.TransactionStatus.PENDING, " +
+           "                 com.cashcontrol.api.domain.entity.TransactionStatus.OVERDUE) " +
+           "AND t.type IN (com.cashcontrol.api.domain.entity.TransactionType.INCOME, " +
+           "               com.cashcontrol.api.domain.entity.TransactionType.EXPENSE, " +
+           "               com.cashcontrol.api.domain.entity.TransactionType.REFUND) " +
+           "AND t.creditCard IS NULL " +
+           "AND t.account.archivedAt IS NULL AND t.account.deletedAt IS NULL " +
+           "AND COALESCE(t.paymentDate, t.competenceDate) <= :upTo")
+    List<Transaction> findOpenCashFlowsDueBy(
+            @Param("userId") UUID userId,
+            @Param("upTo") LocalDate upTo);
+
     @Query("SELECT t FROM Transaction t " +
            "WHERE t.userId = :userId " +
            "AND t.account.deletedAt IS NULL " +

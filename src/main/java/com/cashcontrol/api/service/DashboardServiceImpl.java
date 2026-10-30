@@ -8,6 +8,7 @@ import com.cashcontrol.api.domain.entity.InvoiceStatus;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
+import com.cashcontrol.api.dto.response.BalanceProjectionResponse;
 import com.cashcontrol.api.dto.response.CategoryPieChartResponse;
 import com.cashcontrol.api.dto.response.LargestExpenseResponse;
 import com.cashcontrol.api.dto.response.MonthlyBarChartResponse;
@@ -51,6 +52,7 @@ public class DashboardServiceImpl implements DashboardService {
     private final InvoiceRepository invoiceRepository;
     private final CategoryRepository categoryRepository;
     private final AppProperties appProperties;
+    private final BalanceProjectionCalculator balanceProjectionCalculator;
 
     @Override
     public OverviewMetricsResponse getOverviewMetrics(UUID userId) {
@@ -296,6 +298,13 @@ public class DashboardServiceImpl implements DashboardService {
      * Despesa do período já descontados os estornos — da conta (Pix devolvido, cashback) e do
      * cartão. O estorno conta no mês em que aconteceu, não no da compra que ele desfaz.
      */
+    @Override
+    public BalanceProjectionResponse getBalanceProjection(UUID userId, int days) {
+        AppProperties.Dashboard props = appProperties.getDashboard();
+        int effectiveDays = days > 0 ? Math.min(days, props.getProjectionMaxDays()) : props.getProjectionDefaultDays();
+        return balanceProjectionCalculator.project(userId, LocalDate.now(), effectiveDays);
+    }
+
     private BigDecimal netExpenses(UUID userId, LocalDate from, LocalDate to) {
         return safe(transactionRepository.sumPaidByTypeAndPaymentDateRange(
                         userId, TransactionType.EXPENSE, from, to, null))

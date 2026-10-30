@@ -197,6 +197,37 @@ class DashboardApiIntegrationTest {
                 .andExpect(jsonPath("$[0].description").value("March Income"));
     }
 
+    @Test
+    void getBalanceProjection_appliesPendingItemsOnTheirExpectedDate() throws Exception {
+        LocalDate today = LocalDate.now();
+        transactionService.createTransaction(new CreateTransactionRequest(
+                accountId, TransactionType.INCOME, new BigDecimal("1000.00"), "Saldo inicial",
+                today, today, null, null, null, null, null, TransactionStatus.PAID, null, null), userId);
+        transactionService.createTransaction(new CreateTransactionRequest(
+                accountId, TransactionType.EXPENSE, new BigDecimal("1200.00"), "Aluguel",
+                today.plusDays(3), null, null, null, null, null, null, TransactionStatus.PENDING, null, null), userId);
+        transactionService.createTransaction(new CreateTransactionRequest(
+                accountId, TransactionType.INCOME, new BigDecimal("3000.00"), "Salário",
+                today.plusDays(10), null, null, null, null, null, null, TransactionStatus.PENDING, null, null), userId);
+        transactionService.createTransaction(new CreateTransactionRequest(
+                accountId, TransactionType.EXPENSE, new BigDecimal("500.00"), "Fora do horizonte",
+                today.plusDays(45), null, null, null, null, null, null, TransactionStatus.PENDING, null, null), userId);
+
+        mockMvc.perform(get("/api/v1/dashboard/projection")
+                        .header("Authorization", bearer())
+                        .param("days", "30"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.to").value(today.plusDays(30).toString()))
+                .andExpect(jsonPath("$.startBalance").value(1000.00))
+                .andExpect(jsonPath("$.endBalance").value(2800.00))
+                .andExpect(jsonPath("$.firstNegativeDate").value(today.plusDays(3).toString()))
+                .andExpect(jsonPath("$.lowest.balance").value(-200.00))
+                .andExpect(jsonPath("$.events.length()").value(2))
+                .andExpect(jsonPath("$.events[0].description").value("Aluguel"))
+                .andExpect(jsonPath("$.events[0].kind").value("TRANSACTION"))
+                .andExpect(jsonPath("$.events[1].description").value("Salário"));
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private String bearer() {

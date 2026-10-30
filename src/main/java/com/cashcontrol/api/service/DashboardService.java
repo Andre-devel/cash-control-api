@@ -2,6 +2,7 @@ package com.cashcontrol.api.service;
 
 import com.cashcontrol.api.domain.entity.ChartGranularity;
 import com.cashcontrol.api.domain.entity.TransactionType;
+import com.cashcontrol.api.dto.response.BalanceProjectionResponse;
 import com.cashcontrol.api.dto.response.CategoryPieChartResponse;
 import com.cashcontrol.api.dto.response.LargestExpenseResponse;
 import com.cashcontrol.api.dto.response.MonthlyBarChartResponse;
@@ -37,4 +38,6 @@ public interface DashboardService {
     List<LargestExpenseResponse> getLargestExpenses(UUID userId, LocalDate from, LocalDate to, int limit);
 
     List<RecentTransactionResponse> getRecentTransactions(UUID userId, int limit);
+
+    BalanceProjectionResponse getBalanceProjection(UUID userId, int days);
 }
