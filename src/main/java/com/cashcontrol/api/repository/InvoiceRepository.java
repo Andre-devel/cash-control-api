@@ -68,6 +68,15 @@ public interface InvoiceRepository extends JpaRepository<Invoice, UUID> {
     List<Invoice> findUnpaidWithCardByUserIdDueBy(@Param("userId") UUID userId,
                                                   @Param("upTo") LocalDate upTo);
 
+    /**
+     * Quanto falta pagar de todas as faturas não pagas de cartões não excluídos — inclusive as
+     * futuras, que já carregam parcelas. É o que o patrimônio desconta quando o usuário pede.
+     */
+    @Query("SELECT COALESCE(SUM(i.totalAmount - i.paidAmount), 0) FROM Invoice i JOIN i.creditCard c " +
+           "WHERE i.userId = :userId AND c.deletedAt IS NULL " +
+           "AND i.status <> com.cashcontrol.api.domain.entity.InvoiceStatus.PAID")
+    BigDecimal sumUnpaidRemainingByUserId(@Param("userId") UUID userId);
+
     /** Candidatas a casar com um pagamento de fatura lido do extrato; o cartão vem junto para o rótulo. */
     @Query("SELECT i FROM Invoice i JOIN FETCH i.creditCard " +
            "WHERE i.userId = :userId AND i.dueDate BETWEEN :from AND :to")

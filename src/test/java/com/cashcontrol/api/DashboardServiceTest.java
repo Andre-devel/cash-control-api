@@ -23,6 +23,7 @@ import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.InvoiceRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.DashboardServiceImpl;
+import com.cashcontrol.api.service.investment.InvestmentService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -38,8 +39,11 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -57,6 +61,7 @@ class DashboardServiceTest {
     @Mock private CategoryRepository categoryRepository;
     @Mock private AppProperties appProperties;
     @Mock private AppProperties.Dashboard dashboardProps;
+    @Mock private InvestmentService investmentService;
     @InjectMocks private DashboardServiceImpl dashboardService;
 
     private UUID userId;
@@ -67,6 +72,14 @@ class DashboardServiceTest {
         when(appProperties.getDashboard()).thenReturn(dashboardProps);
         when(dashboardProps.getUpcomingBillsDays()).thenReturn(7);
         when(dashboardProps.getUpcomingBillsMaxResults()).thenReturn(20);
+        // Sem aplicações: o patrimônio é o das contas, a custo.
+        when(investmentService.unrealizedNetYield(any(), any(), any())).thenAnswer(invocation -> {
+            Map<LocalDate, BigDecimal> zeros = new HashMap<>();
+            invocation.<Collection<LocalDate>>getArgument(1).forEach(date -> zeros.put(date, BigDecimal.ZERO));
+            return zeros;
+        });
+        when(investmentService.getDashboardFigures(any(), any())).thenReturn(
+                new InvestmentService.DashboardFigures(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO));
     }
 
     // ── Overview Metrics ──────────────────────────────────────────────────────

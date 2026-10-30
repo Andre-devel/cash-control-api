@@ -174,6 +174,93 @@ public class InvestmentService {
         return new HoldingEvolutionResponse(points);
     }
 
+    /**
+     * Números do card de investimentos do dashboard. O rendimento do mês é quanto o bruto das
+     * aplicações ativas andou desde o fim do mês anterior (ou desde a aplicação, se foi neste
+     * mês), sobre a base de hoje — resgates do mês já aparecem como receita.
+     */
+    @Transactional(readOnly = true)
+    public DashboardFigures getDashboardFigures(UUID userId, LocalDate today) {
+        List<FixedIncomeHolding> active = holdingRepository
+                .findAllByUserIdAndStatusAndDeletedAtIsNullOrderByAppliedAtAsc(userId, FixedIncomeStatus.ACTIVE);
+        MarketRates rates = loadRates(active, today);
+        LocalDate previousMonthEnd = today.withDayOfMonth(1).minusDays(1);
+        BigDecimal gross = BigDecimal.ZERO;
+        BigDecimal net = BigDecimal.ZERO;
+        BigDecimal yieldMonth = BigDecimal.ZERO;
+        for (FixedIncomeHolding holding : active) {
+            Valuation valuation = calculator.value(holding, today, rates);
+            gross = gross.add(valuation.gross());
+            net = net.add(valuation.net());
+            yieldMonth = yieldMonth.add(valuation.gross().subtract(calculator.grossAt(holding,
+                    holding.getRemainingPrincipal(), holding.getTreasuryQuantity(), previousMonthEnd, rates)));
+        }
+        return new DashboardFigures(gross, net, yieldMonth);
+    }
+
+    public record DashboardFigures(BigDecimal gross, BigDecimal net, BigDecimal yieldMonth) {
+    }
+
+    /**
+     * O que o patrimônio a custo ainda não enxerga em cada data: Σ (líquido de IR/IOF − principal)
+     * do que estava aplicado naquele dia. Somado ao saldo das contas, dá o patrimônio com os
+     * investimentos pelo valor de resgate (decisão I1).
+     *
+     * <p>Resgate na própria data já conta como feito — o rendimento dele é uma transação daquele
+     * dia, dentro do saldo a custo. Aplicação de conta arquivada fica fora, como a conta. Na data
+     * de hoje vale o valor da tela de investimentos, com o valor informado pelo banco; nas
+     * passadas, a curva sobre o que estava aplicado.
+     */
+    @Transactional(readOnly = true)
+    public Map<LocalDate, BigDecimal> unrealizedNetYield(UUID userId, Collection<LocalDate> dates, LocalDate today) {
+        Map<LocalDate, BigDecimal> result = new HashMap<>();
+        dates.forEach(date -> result.put(date, BigDecimal.ZERO));
+        List<FixedIncomeHolding> holdings = holdingRepository.findAllByUserIdAndDeletedAtIsNullOrderByAppliedAtAsc(userId)
+                .stream()
+                .filter(holding -> holding.getAccount().getArchivedAt() == null && holding.getAccount().getDeletedAt() == null)
+                .filter(holding -> dates.stream().anyMatch(date -> date.isAfter(holding.getAppliedAt())))
+                .toList();
+        if (holdings.isEmpty()) {
+            return result;
+        }
+        Map<UUID, List<FixedIncomeRedemption>> redemptions = new HashMap<>();
+        redemptionRepository.findAllByHoldingIdInOrderByRedeemedAtAsc(holdings.stream().map(FixedIncomeHolding::getId).toList())
+                .forEach(r -> redemptions.computeIfAbsent(r.getHolding().getId(), id -> new ArrayList<>()).add(r));
+        MarketRates rates = loadRates(holdings, dates.stream().max(Comparator.naturalOrder()).orElseThrow());
+
+        for (FixedIncomeHolding holding : holdings) {
+            List<FixedIncomeRedemption> own = redemptions.getOrDefault(holding.getId(), List.of());
+            BigDecimal initialQuantity = initialTreasuryQuantity(holding, own);
+            for (LocalDate date : dates) {
+                if (!date.isAfter(holding.getAppliedAt())) {
+                    continue;
+                }
+                BigDecimal unrealized;
+                if (!date.isBefore(today) && holding.getStatus() == FixedIncomeStatus.ACTIVE) {
+                    Valuation valuation = calculator.value(holding, today, rates);
+                    unrealized = valuation.net().subtract(valuation.principal());
+                } else {
+                    BigDecimal principal = holding.getPrincipal();
+                    BigDecimal quantity = initialQuantity;
+                    for (FixedIncomeRedemption redemption : own) {
+                        if (!redemption.getRedeemedAt().isAfter(date)) {
+                            principal = principal.subtract(redemption.getPrincipalPortion());
+                            if (quantity != null && redemption.getTreasuryQuantity() != null) {
+                                quantity = quantity.subtract(redemption.getTreasuryQuantity());
+                            }
+                        }
+                    }
+                    if (principal.signum() <= 0) {
+                        continue;
+                    }
+                    unrealized = calculator.valueAt(holding, principal, quantity, date, rates).net().subtract(principal);
+                }
+                result.merge(date, unrealized, BigDecimal::add);
+            }
+        }
+        return result;
+    }
+
     /** Títulos do Tesouro cotados na data mais recente, para o cadastro escolher tipo e vencimento. */
     @Transactional(readOnly = true)
     public List<TreasuryBondPrice> listTreasuryBonds() {

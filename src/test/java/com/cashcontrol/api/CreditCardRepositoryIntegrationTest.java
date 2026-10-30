@@ -108,6 +108,28 @@ class CreditCardRepositoryIntegrationTest {
         assertThat(upcoming.get(0).getId()).isEqualTo(closedInvoice.getId());
     }
 
+    @Test
+    void sumUnpaidRemainingByUserId_countsEveryUnpaidInvoiceOfLiveCards() {
+        CreditCard card = createCard(userId, "Debt Card");
+        Invoice partial = createInvoiceWithStatus(card, "2026-01", InvoiceStatus.PARTIAL, LocalDate.of(2026, 1, 10));
+        partial.setTotalAmount(new BigDecimal("1000.00"));
+        partial.setPaidAmount(new BigDecimal("400.00"));
+        Invoice future = createInvoiceWithStatus(card, "2027-06", InvoiceStatus.OPEN, LocalDate.of(2027, 6, 10));
+        future.setTotalAmount(new BigDecimal("250.00"));
+        Invoice paid = createInvoiceWithStatus(card, "2025-12", InvoiceStatus.PAID, LocalDate.of(2025, 12, 10));
+        paid.setTotalAmount(new BigDecimal("900.00"));
+        paid.setPaidAmount(new BigDecimal("900.00"));
+
+        CreditCard deleted = createCard(userId, "Deleted Card");
+        Invoice ofDeleted = createInvoiceWithStatus(deleted, "2026-01", InvoiceStatus.CLOSED, LocalDate.of(2026, 1, 10));
+        ofDeleted.setTotalAmount(new BigDecimal("700.00"));
+        deleted.setDeletedAt(Instant.now());
+        invoiceRepository.flush();
+
+        assertThat(invoiceRepository.sumUnpaidRemainingByUserId(userId)).isEqualByComparingTo("850.00");
+        assertThat(invoiceRepository.sumUnpaidRemainingByUserId(UUID.randomUUID())).isEqualByComparingTo("0");
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private CreditCard createCard(UUID ownerId, String name) {

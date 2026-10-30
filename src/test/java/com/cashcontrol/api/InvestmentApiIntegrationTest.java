@@ -242,6 +242,57 @@ class InvestmentApiIntegrationTest {
                 .containsExactly(TODAY.minusDays(500));
     }
 
+    @Test
+    void dashboardOverview_valuesHoldingsNetOfTaxes_andComparesWithTheSameCriterion() throws Exception {
+        JsonNode valuation = createCdb(1000, TODAY.minusDays(200), "\"fromAccountId\":\"" + checkingId + "\"").get("valuation");
+        BigDecimal net = decimal(valuation, "net");
+
+        JsonNode overview = json(perform(get("/api/v1/dashboard/overview")).andExpect(status().isOk()));
+
+        // Contas a custo somam os 10.000 do salário; a aplicação acrescenta o que renderia líquido.
+        assertThat(decimal(overview, "netWorth")).isEqualByComparingTo(new BigDecimal("9000").add(net));
+        assertThat(decimal(overview, "totalBalance")).isEqualByComparingTo("9000");
+        assertThat(decimal(overview, "investmentsGross")).isEqualByComparingTo(decimal(valuation, "gross"));
+        assertThat(decimal(overview, "investmentsNet")).isEqualByComparingTo(net);
+        assertThat(decimal(overview, "investmentsYieldMonth"))
+                .isBetween(BigDecimal.ZERO, decimal(valuation, "yield"));
+        assertThat(decimal(overview, "openCardDebt")).isEqualByComparingTo("0");
+        assertThat(decimal(overview, "previousNetWorth"))
+                .isGreaterThan(new BigDecimal("10000"))
+                .isLessThanOrEqualTo(decimal(overview, "netWorth"));
+    }
+
+    @Test
+    void dashboardOverview_afterTotalRedemption_doesNotCountTheYieldTwice() throws Exception {
+        JsonNode holding = createCdb(1000, TODAY.minusDays(200), "\"fromAccountId\":\"" + checkingId + "\"");
+        BigDecimal before = decimal(json(perform(get("/api/v1/dashboard/overview"))), "netWorth");
+
+        perform(post("/api/v1/investments/holdings/" + holding.get("id").asText() + "/redemptions")
+                .content("{\"date\":\"" + TODAY + "\",\"total\":true,\"toAccountId\":\"" + checkingId + "\"}"))
+                .andExpect(status().isOk());
+        JsonNode after = json(perform(get("/api/v1/dashboard/overview")));
+
+        assertThat(decimal(after, "netWorth")).isEqualByComparingTo(before);
+        assertThat(decimal(after, "investmentsGross")).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void netWorthEvolution_addsTheYieldFromTheApplicationOn() throws Exception {
+        createCdb(1000, TODAY.minusDays(200), "\"fromAccountId\":\"" + checkingId + "\"");
+        BigDecimal netWorth = decimal(json(perform(get("/api/v1/dashboard/overview"))), "netWorth");
+
+        JsonNode snapshots = json(perform(get("/api/v1/dashboard/charts/net-worth")
+                .param("from", TODAY.minusDays(300).toString())
+                .param("to", TODAY.toString()))
+                .andExpect(status().isOk())).get("snapshots");
+
+        assertThat(decimal(snapshots.get(0), "netWorth")).isEqualByComparingTo("10000");
+        assertThat(decimal(snapshots.get(snapshots.size() - 1), "netWorth")).isEqualByComparingTo(netWorth);
+        for (int i = 1; i < snapshots.size(); i++) {
+            assertThat(decimal(snapshots.get(i), "netWorth")).isGreaterThanOrEqualTo(decimal(snapshots.get(i - 1), "netWorth"));
+        }
+    }
+
     private JsonNode createCdb(int principal, LocalDate appliedAt, String funding) throws Exception {
         return json(perform(post("/api/v1/investments/holdings").content(cdbBody(investmentId, principal, appliedAt, funding)))
                 .andExpect(status().isCreated()));

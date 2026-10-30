@@ -60,6 +60,16 @@ public class FixedIncomeCalculator {
         return gross(holding, principal, treasuryQuantity, false, at, rates).value();
     }
 
+    /**
+     * Valor com impostos sobre outra base, como {@link #grossAt}: o que um resgate de tudo que
+     * ainda estava aplicado pagaria naquela data. Base do patrimônio líquido em datas passadas.
+     */
+    public Valuation valueAt(FixedIncomeHolding holding, BigDecimal principal, BigDecimal treasuryQuantity,
+                             LocalDate date, MarketRates rates) {
+        LocalDate at = date.isBefore(holding.getAppliedAt()) ? holding.getAppliedAt() : date;
+        return withTaxes(holding, at, principal, gross(holding, principal, treasuryQuantity, false, at, rates));
+    }
+
     /** Fator de 100% do CDI entre {@code from} e {@code to}: a referência de rentabilidade. */
     public double cdiFactor(LocalDate from, LocalDate to, MarketRates rates) {
         return compound(rates.series(MarketIndex.CDI), from, to, d -> 1 + d).value();

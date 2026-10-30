@@ -21,6 +21,7 @@ import com.cashcontrol.api.dto.response.UpcomingInvoiceResponse;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.InvoiceRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
+import com.cashcontrol.api.service.investment.InvestmentService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -53,6 +54,7 @@ public class DashboardServiceImpl implements DashboardService {
     private final CategoryRepository categoryRepository;
     private final AppProperties appProperties;
     private final BalanceProjectionCalculator balanceProjectionCalculator;
+    private final InvestmentService investmentService;
 
     @Override
     public OverviewMetricsResponse getOverviewMetrics(UUID userId) {
@@ -62,7 +64,7 @@ public class DashboardServiceImpl implements DashboardService {
         String currentMonth = today.format(MONTH_FORMATTER);
 
         BigDecimal totalBalance = safe(transactionRepository.sumTotalBalanceExcludingType(userId, AccountType.INVESTMENT));
-        BigDecimal netWorth = safe(transactionRepository.sumTotalNetWorth(userId));
+
         BigDecimal monthlyIncome = safe(transactionRepository.sumPaidByTypeAndPaymentDateRange(
                 userId, TransactionType.INCOME, monthStart, monthEnd, null));
         BigDecimal monthlyExpenses = netExpenses(userId, monthStart, monthEnd);
@@ -72,15 +74,25 @@ public class DashboardServiceImpl implements DashboardService {
         // Base dos comparativos dos cards: o mês anterior inteiro, mesmas regras do atual.
         LocalDate previousStart = monthStart.minusMonths(1);
         LocalDate previousEnd = monthStart.minusDays(1);
-        BigDecimal previousNetWorth = safe(transactionRepository.sumNetWorthUpTo(userId, previousEnd));
+        // Patrimônio com as aplicações pelo valor de resgate, hoje e no fim do mês anterior pelo
+        // mesmo critério — senão a variação mistura custo com valor de mercado.
+        Map<LocalDate, BigDecimal> unrealized = investmentService.unrealizedNetYield(
+                userId, List.of(today, previousEnd), today);
+        BigDecimal netWorth = safe(transactionRepository.sumTotalNetWorth(userId)).add(unrealized.get(today));
+        BigDecimal previousNetWorth = safe(transactionRepository.sumNetWorthUpTo(userId, previousEnd))
+                .add(unrealized.get(previousEnd));
         BigDecimal previousIncome = safe(transactionRepository.sumPaidByTypeAndPaymentDateRange(
                 userId, TransactionType.INCOME, previousStart, previousEnd, null));
         BigDecimal previousExpenses = netExpenses(userId, previousStart, previousEnd);
 
+        InvestmentService.DashboardFigures investments = investmentService.getDashboardFigures(userId, today);
+
         return new OverviewMetricsResponse(
                 totalBalance, netWorth, monthlyIncome, monthlyExpenses,
                 monthlySavings, cashFlow, currentMonth,
-                previousNetWorth, previousIncome, previousExpenses);
+                previousNetWorth, previousIncome, previousExpenses,
+                investments.gross(), investments.net(), investments.yieldMonth(),
+                safe(invoiceRepository.sumUnpaidRemainingByUserId(userId)));
     }
 
     @Override
@@ -171,18 +183,19 @@ public class DashboardServiceImpl implements DashboardService {
 
         ChartGranularity effectiveGranularity = granularity != null ? granularity : ChartGranularity.MONTHLY;
 
-        List<NetWorthEvolutionResponse.Snapshot> snapshots = new ArrayList<>();
-        LocalDate cursor = from;
-        while (!cursor.isAfter(to)) {
-            BigDecimal netWorth = safe(transactionRepository.sumNetWorthUpTo(userId, cursor));
-            snapshots.add(new NetWorthEvolutionResponse.Snapshot(cursor, netWorth));
-            cursor = advance(cursor, effectiveGranularity);
+        List<LocalDate> dates = new ArrayList<>();
+        for (LocalDate cursor = from; !cursor.isAfter(to); cursor = advance(cursor, effectiveGranularity)) {
+            dates.add(cursor);
+        }
+        if (dates.isEmpty() || !dates.getLast().equals(to)) {
+            dates.add(to);
         }
 
-        if (snapshots.isEmpty() || !snapshots.getLast().date().equals(to)) {
-            BigDecimal netWorth = safe(transactionRepository.sumNetWorthUpTo(userId, to));
-            snapshots.add(new NetWorthEvolutionResponse.Snapshot(to, netWorth));
-        }
+        Map<LocalDate, BigDecimal> unrealized = investmentService.unrealizedNetYield(userId, dates, LocalDate.now());
+        List<NetWorthEvolutionResponse.Snapshot> snapshots = dates.stream()
+                .map(date -> new NetWorthEvolutionResponse.Snapshot(date,
+                        safe(transactionRepository.sumNetWorthUpTo(userId, date)).add(unrealized.get(date))))
+                .toList();
 
         return new NetWorthEvolutionResponse(snapshots);
     }
