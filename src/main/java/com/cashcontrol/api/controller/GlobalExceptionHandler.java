@@ -1,6 +1,7 @@
 package com.cashcontrol.api.controller;
 
 import com.cashcontrol.api.domain.exception.AuthException;
+import com.cashcontrol.api.domain.exception.BankProviderException;
 import com.cashcontrol.api.domain.exception.BusinessRuleException;
 import com.cashcontrol.api.domain.exception.ConflictException;
 import com.cashcontrol.api.domain.exception.ForbiddenAccessException;
@@ -91,6 +92,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleBusinessRule(BusinessRuleException ex) {
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
                 .body(ErrorResponse.of("BUSINESS_RULE_VIOLATION", ex.getMessage(), ex.getCorrelationId()));
+    }
+
+    @ExceptionHandler(BankProviderException.class)
+    public ResponseEntity<ErrorResponse> handleBankProvider(BankProviderException ex) {
+        log.warn("Bank provider failure [correlationId={}]: {}", ex.getCorrelationId(), ex.getCause() != null ? ex.getCause().toString() : ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ErrorResponse.of("BANK_PROVIDER_ERROR", ex.getMessage(), ex.getCorrelationId()));
     }
 
     @ExceptionHandler(ForbiddenAccessException.class)

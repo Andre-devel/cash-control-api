@@ -67,6 +67,9 @@ public class AppProperties {
     @Valid
     private final MarketData marketData = new MarketData();
 
+    @Valid
+    private final Pluggy pluggy = new Pluggy();
+
     @Getter
     @Setter
     public static class Jwt {
@@ -272,6 +275,32 @@ public class AppProperties {
         private String treasuryCsvUrl = "https://www.tesourotransparente.gov.br/ckan/dataset/"
                 + "df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/"
                 + "download/precotaxatesourodireto.csv";
+    }
+
+    /**
+     * Credenciais da Pluggy (Open Finance). Sem {@code clientId} e {@code clientSecret} a
+     * integração fica desligada: a tela não oferece conectar banco e o webhook ignora os eventos.
+     */
+    @Getter
+    @Setter
+    public static class Pluggy {
+
+        private String clientId;
+
+        private String clientSecret;
+
+        @NotBlank
+        private String baseUrl = "https://api.pluggy.ai";
+
+        /**
+         * Endereço público do webhook, mandado à Pluggy em cada connect token. Vazio no dev:
+         * a Pluggy recusa localhost, e sem webhook o status só muda quando o usuário recarrega.
+         */
+        private String webhookUrl;
+
+        public boolean isEnabled() {
+            return clientId != null && !clientId.isBlank() && clientSecret != null && !clientSecret.isBlank();
+        }
     }
 
     @Getter

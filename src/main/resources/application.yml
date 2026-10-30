@@ -136,6 +136,13 @@ app:
     # O default fica em AppProperties; a variável existe para trocar a URL sem deploy.
     bcb-base-url: ${MARKET_DATA_BCB_BASE_URL:https://api.bcb.gov.br}
     treasury-csv-url: ${MARKET_DATA_TREASURY_CSV_URL:https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv}
+  pluggy:
+    # Open Finance (conexão com o banco). Sem client-id/secret a integração fica desligada.
+    client-id: ${PLUGGY_CLIENT_ID:}
+    client-secret: ${PLUGGY_CLIENT_SECRET:}
+    base-url: ${PLUGGY_BASE_URL:https://api.pluggy.ai}
+    # HTTPS público; a Pluggy recusa localhost. Vazio = sem webhook.
+    webhook-url: ${PLUGGY_WEBHOOK_URL:}
 
 management:
   endpoints:

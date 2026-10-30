@@ -10,6 +10,7 @@ import com.cashcontrol.api.security.oauth2.OAuth2AuthenticationFailureHandler;
 import com.cashcontrol.api.security.oauth2.OAuth2AuthenticationSuccessHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
+import org.springframework.http.HttpMethod;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.Customizer;
@@ -76,6 +77,8 @@ public class SecurityConfig {
                     "/api/v1/auth/email/verify",
                     "/api/v1/auth/email/verify/resend"
                 ).permitAll()
+                // Sem assinatura: o corpo só dispara uma releitura na Pluggy (ver PluggyWebhookController)
+                .requestMatchers(HttpMethod.POST, "/api/v1/webhooks/pluggy").permitAll()
                 .requestMatchers(
                     "/oauth2/**",
                     "/login/oauth2/**"
