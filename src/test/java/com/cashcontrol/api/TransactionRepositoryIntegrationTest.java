@@ -3,7 +3,9 @@ package com.cashcontrol.api;
 import com.cashcontrol.api.config.PostgresTestContainerConfig;
 import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.AccountType;
+import com.cashcontrol.api.domain.entity.CardBrand;
 import com.cashcontrol.api.domain.entity.Category;
+import com.cashcontrol.api.domain.entity.CreditCard;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
@@ -11,6 +13,7 @@ import com.cashcontrol.api.domain.entity.PaymentMethod;
 import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
+import com.cashcontrol.api.repository.CreditCardRepository;
 import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,6 +44,7 @@ class TransactionRepositoryIntegrationTest {
     @Autowired private AccountRepository accountRepository;
     @Autowired private CategoryRepository categoryRepository;
     @Autowired private PaymentMethodRepository paymentMethodRepository;
+    @Autowired private CreditCardRepository creditCardRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
 
     private UUID userId;
@@ -488,6 +492,41 @@ class TransactionRepositoryIntegrationTest {
 
         assertThat(reloadedOverdue.getStatus()).isEqualTo(TransactionStatus.OVERDUE);
         assertThat(reloadedFuture.getStatus()).isEqualTo(TransactionStatus.PENDING);
+    }
+
+    @Test
+    void markOverdueForUser_usesCompetenceDateWithoutPaymentDateAndSkipsCardPurchases() {
+        LocalDate today = LocalDate.now();
+
+        // Ocorrência de recorrência/parcela: PENDENTE sem payment_date.
+        Transaction pastOccurrence = saveTransaction(userId, defaultAccount, TransactionType.EXPENSE,
+                TransactionStatus.PENDING, new BigDecimal("80.00"), "Past occurrence", null,
+                today.minusDays(2), null);
+        Transaction todayOccurrence = saveTransaction(userId, defaultAccount, TransactionType.EXPENSE,
+                TransactionStatus.PENDING, new BigDecimal("80.00"), "Today occurrence", null, today, null);
+
+        CreditCard card = new CreditCard();
+        card.setUserId(userId);
+        card.setName("Card");
+        card.setBrand(CardBrand.VISA);
+        card.setCreditLimit(new BigDecimal("1000.00"));
+        card.setClosingDay(10);
+        card.setDueDay(20);
+        card = creditCardRepository.save(card);
+        Transaction cardPurchase = buildTransaction(userId, defaultAccount, TransactionType.EXPENSE,
+                TransactionStatus.PENDING, new BigDecimal("50.00"), "Card purchase", null,
+                today.minusDays(40), null);
+        cardPurchase.setCreditCard(card);
+        cardPurchase = transactionRepository.save(cardPurchase);
+
+        transactionRepository.markOverdueForUser(userId, today);
+
+        assertThat(transactionRepository.findById(pastOccurrence.getId()).orElseThrow().getStatus())
+                .isEqualTo(TransactionStatus.OVERDUE);
+        assertThat(transactionRepository.findById(todayOccurrence.getId()).orElseThrow().getStatus())
+                .isEqualTo(TransactionStatus.PENDING);
+        assertThat(transactionRepository.findById(cardPurchase.getId()).orElseThrow().getStatus())
+                .isEqualTo(TransactionStatus.PENDING);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

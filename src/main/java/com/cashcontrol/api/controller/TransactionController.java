@@ -274,7 +274,7 @@ public class TransactionController {
 
     @Operation(summary = "Reactivate transaction", description = """
             Undoes a cancellation: the transaction goes back to PENDING (the overdue job marks it OVERDUE when its \
-            payment date has passed) and counts again in balances and card invoices. Installments cannot be \
+            expected date — payment date, or competence date without one — has passed) and counts again in balances and card invoices. Installments cannot be \
             reactivated one by one.""")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Transaction reactivated"),

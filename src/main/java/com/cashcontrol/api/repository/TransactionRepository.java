@@ -266,17 +266,21 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "GROUP BY t.installmentSeries.id")
     List<Object[]> summarizeInstallmentSeriesProgress(@Param("seriesIds") Collection<UUID> seriesIds);
 
+    // Vence pela data prevista: o vencimento informado ou, sem ele, a competência (ocorrência
+    // de recorrência e parcela nascem sem payment_date). Compra no cartão vence pela fatura.
     @Modifying(clearAutomatically = true)
     @Query("UPDATE Transaction t SET t.status = com.cashcontrol.api.domain.entity.TransactionStatus.OVERDUE " +
            "WHERE t.userId = :userId " +
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PENDING " +
-           "AND t.paymentDate IS NOT NULL AND t.paymentDate < :today")
+           "AND t.creditCard IS NULL " +
+           "AND COALESCE(t.paymentDate, t.competenceDate) < :today")
     int markOverdueForUser(@Param("userId") UUID userId, @Param("today") LocalDate today);
 
     @Modifying(clearAutomatically = true)
     @Query("UPDATE Transaction t SET t.status = com.cashcontrol.api.domain.entity.TransactionStatus.OVERDUE " +
            "WHERE t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PENDING " +
-           "AND t.paymentDate IS NOT NULL AND t.paymentDate < :today")
+           "AND t.creditCard IS NULL " +
+           "AND COALESCE(t.paymentDate, t.competenceDate) < :today")
     int markOverdueAll(@Param("today") LocalDate today);
 
     // ── Dashboard queries ─────────────────────────────────────────────────────

@@ -102,8 +102,8 @@ public class TransactionServiceImpl implements TransactionService {
             if (request.status() == TransactionStatus.PAID) {
                 throw new BusinessRuleException(CARD_PURCHASE_PAID_BY_INVOICE);
             }
-            // Sem data de pagamento: quem a define é o pagamento da fatura, e uma data aqui
-            // faria o job de vencidas marcar a compra como VENCIDA.
+            // Sem data de pagamento: quem a define é o pagamento da fatura (a compra vence
+            // pela fatura, e o job de vencidas não olha compras no cartão).
             status = request.status() != null ? request.status() : TransactionStatus.PENDING;
             tx.setPaymentDate(null);
         } else {
