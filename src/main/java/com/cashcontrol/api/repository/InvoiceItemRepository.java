@@ -19,6 +19,8 @@ public interface InvoiceItemRepository extends JpaRepository<InvoiceItem, UUID> 
 
     List<InvoiceItem> findAllByInvoice_IdAndCancelledAtIsNull(UUID invoiceId);
 
+    List<InvoiceItem> findAllByInvoice_CreditCard_IdAndCancelledAtIsNull(UUID creditCardId);
+
     Page<InvoiceItem> findAllByInvoice_IdAndCancelledAtIsNull(UUID invoiceId, Pageable pageable);
 
     Optional<InvoiceItem> findByIdAndUserId(UUID id, UUID userId);

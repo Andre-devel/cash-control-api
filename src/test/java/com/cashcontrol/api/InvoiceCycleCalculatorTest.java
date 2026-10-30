@@ -104,6 +104,25 @@ class InvoiceCycleCalculatorTest {
     }
 
     @Test
+    void competenceInCycle_landsInTheRequestedInvoice() {
+        YearMonth october = YearMonth.of(2026, 10);
+
+        // Até o fechamento, no próprio mês; depois dele, no mês anterior.
+        assertThat(calculator.competenceInCycle(24, october, 30)).isEqualTo(LocalDate.of(2026, 10, 24));
+        assertThat(calculator.competenceInCycle(31, YearMonth.of(2026, 11), 30)).isEqualTo(LocalDate.of(2026, 10, 31));
+        // Setembro não tem dia 31: vai para o dia 1 da própria fatura, que nunca passa do fechamento.
+        assertThat(calculator.competenceInCycle(31, october, 30)).isEqualTo(LocalDate.of(2026, 10, 1));
+        // Fechamento no 30 em fevereiro cai no último dia do mês.
+        assertThat(calculator.competenceInCycle(30, YearMonth.of(2026, 2), 30)).isEqualTo(LocalDate.of(2026, 2, 28));
+        for (LocalDate competence : new LocalDate[] {
+                calculator.competenceInCycle(31, october, 30),
+                calculator.competenceInCycle(30, YearMonth.of(2026, 2), 30)}) {
+            assertThat(calculator.calculateForCharge(competence, 30, 7).referenceMonth())
+                    .isEqualTo(calculator.toReferenceMonth(YearMonth.from(competence)));
+        }
+    }
+
+    @Test
     void referenceMonthFormat_isYearDashMonth() {
         LocalDate competenceDate = LocalDate.of(2025, 1, 5);
         InvoiceCycleInfo info = calculator.calculateForCharge(competenceDate, 15, 10);

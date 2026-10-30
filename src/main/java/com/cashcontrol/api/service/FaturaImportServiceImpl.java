@@ -831,11 +831,8 @@ public class FaturaImportServiceImpl implements FaturaImportService {
      * item de fatura.
      */
     private LocalDate competenceDateFor(LocalDate purchaseDate, YearMonth fileMonth, CreditCard card) {
-        YearMonth invoiceMonth = invoiceMonthOf(card, fileMonth);
-        YearMonth chargeMonth = purchaseDate.getDayOfMonth() <= card.getClosingDay()
-                ? invoiceMonth
-                : invoiceMonth.minusMonths(1);
-        return chargeMonth.atDay(Math.min(purchaseDate.getDayOfMonth(), chargeMonth.lengthOfMonth()));
+        return cycleCalculator.competenceInCycle(
+                purchaseDate.getDayOfMonth(), invoiceMonthOf(card, fileMonth), card.getClosingDay());
     }
 
     private Category resolveCategory(UUID categoryId, Map<UUID, Category> categories) {

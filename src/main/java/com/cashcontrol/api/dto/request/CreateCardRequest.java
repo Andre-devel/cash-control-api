@@ -33,11 +33,11 @@ public record CreateCardRequest(
         @Schema(description = "Total credit limit for this card. Serialized as decimal string.", required = true, example = "10000.00")
         @NotNull @Digits(integer = 17, fraction = 2) @DecimalMin("0.01") BigDecimal creditLimit,
 
-        @Schema(description = "Day of the month (1–28) when the billing cycle closes. Charges after this day go to the next invoice.", required = true, example = "20")
-        @NotNull @Min(1) @Max(28) Integer closingDay,
+        @Schema(description = "Day of the month (1–31) when the billing cycle closes; shorter months close on their last day. Charges after this day go to the next invoice.", required = true, example = "20")
+        @NotNull @Min(1) @Max(31) Integer closingDay,
 
-        @Schema(description = "Day of the month (1–28) when the invoice payment is due.", required = true, example = "27")
-        @NotNull @Min(1) @Max(28) Integer dueDay,
+        @Schema(description = "Day of the month (1–31) when the invoice payment is due; shorter months fall on their last day.", required = true, example = "27")
+        @NotNull @Min(1) @Max(31) Integer dueDay,
 
         @Schema(description = "Optional shared limit group UUID. When set, this card's limit is pooled with other cards in the group.")
         UUID sharedLimitGroupId

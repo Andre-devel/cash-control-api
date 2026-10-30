@@ -44,6 +44,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.List;
 import java.util.UUID;
 
@@ -64,11 +65,11 @@ public class CreditCardServiceImpl implements CreditCardService {
 
     @Override
     public CreditCardResponse createCard(CreateCardRequest request, UUID userId) {
-        if (request.closingDay() < 1 || request.closingDay() > 28) {
-            throw new BusinessRuleException("closingDay deve estar entre 1 e 28.");
+        if (request.closingDay() < 1 || request.closingDay() > 31) {
+            throw new BusinessRuleException("closingDay deve estar entre 1 e 31.");
         }
-        if (request.dueDay() < 1 || request.dueDay() > 28) {
-            throw new BusinessRuleException("dueDay deve estar entre 1 e 28.");
+        if (request.dueDay() < 1 || request.dueDay() > 31) {
+            throw new BusinessRuleException("dueDay deve estar entre 1 e 31.");
         }
 
         if (creditCardRepository.existsByUserIdAndNameAndDeletedAtIsNull(userId, request.name())) {
@@ -129,10 +130,55 @@ public class CreditCardServiceImpl implements CreditCardService {
         card.setIssuer(request.issuer());
         card.setLast4Digits(request.last4Digits());
         card.setCreditLimit(request.creditLimit());
+        boolean cycleChanged = card.getClosingDay() != request.closingDay() || card.getDueDay() != request.dueDay();
         card.setClosingDay(request.closingDay());
         card.setDueDay(request.dueDay());
         card = creditCardRepository.save(card);
+        if (cycleChanged) {
+            realignInvoicesToCycle(card);
+        }
         return toResponse(card);
+    }
+
+    /**
+     * Refaz as faturas existentes pelo ciclo novo do cartão. Cada fatura mantém o mês de
+     * referência e ganha o fechamento, o vencimento e o status que esse ciclo dá.
+     *
+     * <p>Item importado fica na fatura em que o emissor o cobrou; só a competência, que a
+     * importação deriva do ciclo, é refeita para que {@link #syncInvoiceItemForTransaction}
+     * continue achando a mesma fatura numa edição futura. Lançamento manual em fatura sem
+     * pagamento vai para a fatura que a data dele dá no ciclo novo. Fatura PAGA ou PARCIAL
+     * não perde nem ganha lançamento manual.
+     */
+    private void realignInvoicesToCycle(CreditCard card) {
+        LocalDate today = LocalDate.now();
+        for (Invoice invoice : invoiceRepository.findAllByCreditCard_Id(card.getId())) {
+            LocalDate closingDate = cycleCalculator.closingDateFor(
+                    YearMonth.parse(invoice.getReferenceMonth()), card.getClosingDay());
+            invoice.setClosingDate(closingDate);
+            invoice.setDueDate(cycleCalculator.dueDateFor(closingDate, card.getClosingDay(), card.getDueDay()));
+            invoice.refreshTimelineStatus(today);
+        }
+
+        for (InvoiceItem item : invoiceItemRepository.findAllByInvoice_CreditCard_IdAndCancelledAtIsNull(card.getId())) {
+            Transaction tx = item.getTransaction();
+            if (item.getExternalRef() != null) {
+                LocalDate competence = cycleCalculator.competenceInCycle(
+                        item.getCompetenceDate().getDayOfMonth(),
+                        YearMonth.parse(item.getInvoice().getReferenceMonth()),
+                        card.getClosingDay());
+                item.setCompetenceDate(competence);
+                if (tx != null) {
+                    tx.setCompetenceDate(competence);
+                }
+            } else if (tx != null && !hasPayment(item.getInvoice())) {
+                syncInvoiceItemForTransaction(tx);
+            }
+        }
+    }
+
+    private static boolean hasPayment(Invoice invoice) {
+        return invoice.getStatus() == InvoiceStatus.PAID || invoice.getStatus() == InvoiceStatus.PARTIAL;
     }
 
     @Override

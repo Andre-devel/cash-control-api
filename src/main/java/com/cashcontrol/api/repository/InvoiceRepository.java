@@ -21,6 +21,8 @@ public interface InvoiceRepository extends JpaRepository<Invoice, UUID> {
 
     Optional<Invoice> findByCreditCard_IdAndReferenceMonth(UUID creditCardId, String referenceMonth);
 
+    List<Invoice> findAllByCreditCard_Id(UUID creditCardId);
+
     Optional<Invoice> findByCreditCard_IdAndUserIdAndReferenceMonth(UUID creditCardId, UUID userId, String referenceMonth);
 
     Optional<Invoice> findByCreditCard_IdAndStatus(UUID creditCardId, InvoiceStatus status);

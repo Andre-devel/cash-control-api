@@ -18,6 +18,6 @@ public record EditCardRequest(
         @Size(max = 100) String issuer,
         @Pattern(regexp = "\\d{4}", message = "Informe exatamente 4 dígitos.") String last4Digits,
         @NotNull @Digits(integer = 17, fraction = 2) @DecimalMin("0.01") BigDecimal creditLimit,
-        @NotNull @Min(1) @Max(28) Integer closingDay,
-        @NotNull @Min(1) @Max(28) Integer dueDay
+        @NotNull @Min(1) @Max(31) Integer closingDay,
+        @NotNull @Min(1) @Max(31) Integer dueDay
 ) {}

@@ -42,6 +42,21 @@ public class InvoiceCycleCalculator {
     }
 
     /**
+     * Uma competência que {@link #calculateForCharge} põe na fatura de {@code invoiceMonth},
+     * mantendo o dia da compra: no próprio mês quando o dia não passa do fechamento, no mês
+     * anterior quando passa. Se o dia não existe no mês anterior (compra do dia 31, fechamento
+     * no 30, mês anterior de 30 dias), vai para o dia 1 do mês da fatura, que nunca passa do
+     * fechamento.
+     */
+    public LocalDate competenceInCycle(int purchaseDay, YearMonth invoiceMonth, int closingDay) {
+        if (purchaseDay <= closingDay) {
+            return invoiceMonth.atDay(Math.min(purchaseDay, invoiceMonth.lengthOfMonth()));
+        }
+        YearMonth previous = invoiceMonth.minusMonths(1);
+        return purchaseDay <= previous.lengthOfMonth() ? previous.atDay(purchaseDay) : invoiceMonth.atDay(1);
+    }
+
+    /**
      * Computes the referenceMonth string "YYYY-MM" for a given YearMonth.
      */
     public String toReferenceMonth(YearMonth yearMonth) {
