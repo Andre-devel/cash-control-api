@@ -76,5 +76,11 @@ public record FaturaImportPreviewRow(
         @Schema(description = """
                 true quando a linha é um crédito na fatura que não é o pagamento dela: um \
                 estorno. Vira lançamento de estorno, que abate o total da fatura.""")
-        boolean refund
+        boolean refund,
+
+        @Schema(description = """
+                true quando a fatura deste mês já tem uma cobrança que pode ser esta mesma, vinda \
+                de outra origem (PDF × banco, ou digitada): mesma parcela com valor próximo, ou \
+                mesmo valor no mesmo dia. Vem desmarcada; marque só se for outra compra.""")
+        boolean possibleDuplicate
 ) {}

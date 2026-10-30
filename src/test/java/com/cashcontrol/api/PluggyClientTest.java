@@ -152,6 +152,34 @@ class PluggyClientTest {
     }
 
     @Test
+    void listBills_andCardMetadata_areRead() {
+        expectAuth("key-1");
+        server.expect(requestTo(BASE + "/bills?accountId=card-1"))
+                .andRespond(withSuccess("""
+                        {"results":[{"id":"b1","dueDate":"2026-10-07T00:00:00.000Z","totalAmount":1754.63,
+                          "minimumPaymentAmount":100,"payments":[]}]}
+                        """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE + "/v2/transactions?accountId=card-1"))
+                .andRespond(withSuccess("""
+                        {"results":[{"id":"t1","description":"DM HOSTINGER","amount":56.08,"type":"DEBIT",
+                          "status":"POSTED","date":"2026-09-17T03:00:00.000Z",
+                          "creditCardMetadata":{"cardNumber":"4776","billId":"b1","installmentNumber":7,
+                            "totalInstallments":12,"purchaseDate":"2026-03-16T00:00:00.000Z","paymentType":"INSTALLMENT"}}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var bill = client.listBills("card-1").getFirst();
+        var card = client.listTransactions("card-1").getFirst().creditCardMetadata();
+
+        assertThat(bill.dueDate()).isEqualTo(Instant.parse("2026-10-07T00:00:00Z"));
+        assertThat(bill.totalAmount()).isEqualByComparingTo("1754.63");
+        assertThat(card.billId()).isEqualTo("b1");
+        assertThat(card.cardNumber()).isEqualTo("4776");
+        assertThat(card.installmentNumber()).isEqualTo(7);
+        assertThat(card.purchaseDate()).isEqualTo(Instant.parse("2026-03-16T00:00:00Z"));
+        server.verify();
+    }
+
+    @Test
     void listTransactions_followsTheCursorUntilTheLastPage() {
         expectAuth("key-1");
         server.expect(requestTo(BASE + "/v2/transactions?accountId=acc-1"))

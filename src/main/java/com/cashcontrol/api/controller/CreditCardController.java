@@ -8,6 +8,7 @@ import com.cashcontrol.api.dto.request.FaturaImportDuplicateCheckRequest;
 import com.cashcontrol.api.dto.request.PayInvoiceRequest;
 import com.cashcontrol.api.dto.request.RecordChargeRequest;
 import com.cashcontrol.api.dto.request.UpdateInvoiceItemRequest;
+import com.cashcontrol.api.dto.response.BankBillResponse;
 import com.cashcontrol.api.dto.response.CreditCardResponse;
 import com.cashcontrol.api.dto.response.ErrorResponse;
 import com.cashcontrol.api.dto.response.FaturaImportDuplicateCheckResponse;
@@ -239,6 +240,52 @@ public class CreditCardController {
             @RequestParam(defaultValue = "INTER_FATURA_PDF") InvoiceImportFormat format,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         return faturaImportService.preview(file, format, principal.getUser().getId());
+    }
+
+    @Operation(summary = "List the card's bills at the bank", description = """
+            Closed bills of the bank card linked to this card (through Pluggy), newest first, to pick \
+            one for `POST /api/v1/cards/{id}/invoices/import/bank-preview`.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Bills returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Card not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Card not linked to a bank card, or integration off",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "502", description = "Pluggy failed",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @GetMapping("/{id}/bank-bills")
+    @PreAuthorize("isAuthenticated()")
+    public List<BankBillResponse> listBankBills(
+            @Parameter(description = "Card UUID linked to a bank card", required = true) @PathVariable UUID id,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return faturaImportService.listBankBills(id, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Preview invoice import from the bank", description = """
+            Same preview as the PDF one, with the closed bill `billId` fetched from the bank through \
+            Pluggy. Every section suggests this card. Commit with `format: OPEN_FINANCE`.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Preview returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Card not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Card not linked, bill not found, or integration off",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "502", description = "Pluggy failed",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping("/{id}/invoices/import/bank-preview")
+    @PreAuthorize("isAuthenticated()")
+    public FaturaImportPreviewResponse previewInvoiceImportFromBank(
+            @Parameter(description = "Card UUID linked to a bank card", required = true) @PathVariable UUID id,
+            @Parameter(description = "Bill id from `GET /api/v1/cards/{id}/bank-bills`", required = true)
+            @RequestParam String billId,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return faturaImportService.previewFromBank(id, billId, principal.getUser().getId());
     }
 
     @Operation(summary = "Check invoice import duplicates", description = """

@@ -20,6 +20,7 @@ import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
 import com.cashcontrol.api.dto.request.FaturaImportCommitRequest;
 import com.cashcontrol.api.dto.request.FaturaImportCommitRow;
 import com.cashcontrol.api.dto.request.FaturaImportDuplicateCheckRequest;
+import com.cashcontrol.api.dto.response.BankBillResponse;
 import com.cashcontrol.api.dto.response.FaturaImportDuplicateCheckResponse;
 import com.cashcontrol.api.dto.response.FaturaImportGroupPreview;
 import com.cashcontrol.api.dto.response.FaturaImportPreviewResponse;
@@ -32,6 +33,7 @@ import com.cashcontrol.api.repository.CategoryRuleRepository;
 import com.cashcontrol.api.repository.CreditCardRepository;
 import com.cashcontrol.api.repository.InstallmentSeriesRepository;
 import com.cashcontrol.api.repository.InvoiceItemRepository;
+import com.cashcontrol.api.repository.InvoiceRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.InvoiceCycleCalculator.InvoiceCycleInfo;
 import com.cashcontrol.api.service.fatura.FaturaParser;
@@ -40,6 +42,7 @@ import com.cashcontrol.api.service.fatura.FaturaRowHasher.RowKey;
 import com.cashcontrol.api.service.fatura.ParsedCardSection;
 import com.cashcontrol.api.service.fatura.ParsedFatura;
 import com.cashcontrol.api.service.fatura.ParsedFaturaRow;
+import com.cashcontrol.api.service.openfinance.PluggyFaturaSource;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -71,6 +74,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
 
     private final CreditCardRepository creditCardRepository;
     private final InvoiceItemRepository invoiceItemRepository;
+    private final InvoiceRepository invoiceRepository;
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
     private final InstallmentSeriesRepository installmentSeriesRepository;
@@ -85,13 +89,34 @@ public class FaturaImportServiceImpl implements FaturaImportService {
     private final FaturaRowHasher rowHasher;
     private final List<FaturaParser> parsers;
     private final AppProperties appProperties;
+    private final PluggyFaturaSource pluggyFaturaSource;
 
     @Override
     @Transactional(readOnly = true)
     public FaturaImportPreviewResponse preview(MultipartFile file, InvoiceImportFormat format, UUID userId) {
         validateFile(file);
+        return buildPreview(parse(file, format), file.getOriginalFilename(), format,
+                last4 -> suggestCard(last4, userId), userId);
+    }
 
-        ParsedFatura fatura = parse(file, format);
+    @Override
+    @Transactional(readOnly = true)
+    public List<BankBillResponse> listBankBills(UUID creditCardId, UUID userId) {
+        requireImportableCard(creditCardId, userId);
+        return pluggyFaturaSource.listBills(creditCardId, userId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public FaturaImportPreviewResponse previewFromBank(UUID creditCardId, String billId, UUID userId) {
+        CreditCard card = requireImportableCard(creditCardId, userId);
+        // O vínculo diz qual é o cartão: o final do virtual não bate com nenhum cadastrado.
+        return buildPreview(pluggyFaturaSource.fetch(creditCardId, billId, userId), null,
+                InvoiceImportFormat.OPEN_FINANCE, last4 -> Optional.of(card), userId);
+    }
+
+    private FaturaImportPreviewResponse buildPreview(ParsedFatura fatura, String fileName, InvoiceImportFormat format,
+                                                     Function<String, Optional<CreditCard>> cardOf, UUID userId) {
         String referenceMonth = referenceMonthOf(fatura.dueDate());
         List<CategoryRule> rules = categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId);
         // Uma consulta de histórico para o arquivo inteiro, não uma por linha nem uma por
@@ -113,15 +138,23 @@ public class FaturaImportServiceImpl implements FaturaImportService {
                     .filter(row -> row.signedAmount().signum() < 0 || !isInvoicePayment(row))
                     .toList();
             excludedPayments += section.rows().size() - expenses.size();
+            if (expenses.isEmpty() && format == InvoiceImportFormat.OPEN_FINANCE) {
+                // O pagamento da fatura vem no banco num "cartão" próprio, sem compra nenhuma.
+                continue;
+            }
 
-            CreditCard suggested = suggestCard(section.cardLast4(), userId).orElse(null);
+            CreditCard suggested = cardOf.apply(section.cardLast4()).orElse(null);
             List<RowKey> keys = rowHasher.hashAll(section.cardLast4(), expenses);
-            Set<String> alreadyImported = findAlreadyImported(
-                    keys.stream().map(RowKey::externalRef).toList(), userId);
+            List<String> refs = keys.stream().map(RowKey::externalRef).toList();
+            Set<String> alreadyImported = findAlreadyImported(refs, userId);
+            PossibleDuplicates possibleDuplicates = loadPossibleDuplicates(suggested, referenceMonth, refs);
 
             List<FaturaImportPreviewRow> rows = new ArrayList<>(expenses.size());
             for (int i = 0; i < expenses.size(); i++) {
-                rows.add(toPreviewRow(expenses.get(i), keys.get(i), alreadyImported, rules, history, aliases));
+                ParsedFaturaRow row = expenses.get(i);
+                boolean duplicate = alreadyImported.contains(keys.get(i).externalRef());
+                rows.add(toPreviewRow(row, keys.get(i), duplicate, !duplicate && possibleDuplicates.claim(row),
+                        rules, history, aliases));
             }
 
             groups.add(new FaturaImportGroupPreview(
@@ -138,7 +171,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
                 .count();
 
         return new FaturaImportPreviewResponse(
-                file.getOriginalFilename(),
+                fileName,
                 format,
                 fatura.dueDate(),
                 referenceMonth,
@@ -238,8 +271,8 @@ public class FaturaImportServiceImpl implements FaturaImportService {
 
     // ── Prévia ────────────────────────────────────────────────────────────────
 
-    private FaturaImportPreviewRow toPreviewRow(ParsedFaturaRow row, RowKey key, Set<String> alreadyImported,
-                                                List<CategoryRule> rules, CategorySuggester.History history,
+    private FaturaImportPreviewRow toPreviewRow(ParsedFaturaRow row, RowKey key, boolean duplicate,
+                                                boolean possibleDuplicate, List<CategoryRule> rules, CategorySuggester.History history,
                                                 MerchantAliasService.Aliases aliases) {
         CategorySuggester.Suggestion suggestion = categorySuggester.suggest(row.description(), rules, history);
         String alias = merchantAliasService.suggest(row.description(), aliases);
@@ -260,8 +293,66 @@ public class FaturaImportServiceImpl implements FaturaImportService {
                 suggestion.subcategoryId(),
                 suggestion.subcategoryName(),
                 suggestion.source(),
-                alreadyImported.contains(key.externalRef()),
-                row.signedAmount().signum() > 0);
+                duplicate,
+                row.signedAmount().signum() > 0,
+                possibleDuplicate);
+    }
+
+    /**
+     * Cobranças da fatura do cartão que podem ser o mesmo fato de uma linha da prévia vindo por
+     * outro caminho: o PDF e o banco dão chaves diferentes à mesma compra (a descrição e os
+     * centavos da parcela estimada não batem), e o lançamento digitado à mão não tem chave.
+     *
+     * <p>Só olha a fatura em que a confirmação vai gravar, e cada cobrança serve de par para uma
+     * linha só. O que já tem a chave de uma linha desta prévia é duplicata de verdade, não
+     * possível.
+     */
+    private PossibleDuplicates loadPossibleDuplicates(CreditCard card, String referenceMonth, List<String> refs) {
+        if (card == null) {
+            return new PossibleDuplicates(List.of());
+        }
+        String invoiceMonth = cycleCalculator.toReferenceMonth(
+                invoiceMonthOf(card, parseReferenceMonth(referenceMonth)));
+        Set<String> own = new HashSet<>(refs);
+        return new PossibleDuplicates(invoiceRepository.findByCreditCard_IdAndReferenceMonth(card.getId(), invoiceMonth)
+                .map(invoice -> invoiceItemRepository.findAllByInvoice_IdAndCancelledAtIsNull(invoice.getId()))
+                .orElse(List.of()).stream()
+                .filter(item -> item.getExternalRef() == null || !own.contains(item.getExternalRef()))
+                .collect(Collectors.toCollection(ArrayList::new)));
+    }
+
+    /**
+     * Mesmo sinal (compra ou estorno) e: na parcela, a mesma posição com até R$ 1,00 de
+     * diferença — a parcela gerada por estimativa leva o valor de outra; na compra à vista, o
+     * mesmo valor no mesmo dia.
+     */
+    private record PossibleDuplicates(List<InvoiceItem> candidates) {
+
+        private static final BigDecimal INSTALLMENT_TOLERANCE = BigDecimal.ONE;
+
+        boolean claim(ParsedFaturaRow row) {
+            boolean refund = row.signedAmount().signum() > 0;
+            BigDecimal amount = row.signedAmount().abs();
+            boolean parceled = row.installmentNumber() != null && row.totalInstallments() != null
+                               && row.totalInstallments() > 1;
+            for (var iterator = candidates.iterator(); iterator.hasNext(); ) {
+                InvoiceItem item = iterator.next();
+                if ((item.getAmount().signum() < 0) != refund) {
+                    continue;
+                }
+                boolean matches = parceled
+                        ? row.installmentNumber().equals(item.getInstallmentNumber())
+                          && row.totalInstallments().equals(item.getTotalInstallments())
+                          && item.getAmount().abs().subtract(amount).abs().compareTo(INSTALLMENT_TOLERANCE) <= 0
+                        : item.getAmount().abs().compareTo(amount) == 0
+                          && item.getCompetenceDate().getDayOfMonth() == row.date().getDayOfMonth();
+                if (matches) {
+                    iterator.remove();
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 
     /**

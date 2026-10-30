@@ -133,6 +133,13 @@ public class PluggyClient {
         return all;
     }
 
+    /** Faturas fechadas do cartão (Open Finance traz cerca de 12), sem os lançamentos. */
+    public List<PluggyBill> listBills(String accountId) {
+        BillPage page = call(key -> restClient.get().uri(url("/bills?accountId={id}"), accountId)
+                .header("X-API-KEY", key).retrieve().body(BillPage.class));
+        return page == null || page.results() == null ? List.of() : page.results();
+    }
+
     /** Revoga o item na Pluggy. Já apagado conta como sucesso. */
     public void deleteItem(String itemId) {
         try {
@@ -230,12 +237,37 @@ public class PluggyClient {
 
     /**
      * Lançamento como a Pluggy devolve. Na conta corrente {@code amount} tem sinal (débito
-     * negativo) e {@code description} é "Histórico - Descrição" do extrato do Inter.
+     * negativo) e {@code description} é "Histórico - Descrição" do extrato do Inter; no cartão
+     * o sinal não é confiável (compra positiva, pagamento negativo) e vale o {@code type}.
      * {@code status}: POSTED ou PENDING. {@code type}: DEBIT ou CREDIT.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record PluggyTransaction(String id, String description, BigDecimal amount, String type, String status,
-                                    Instant date) {
+                                    Instant date, CreditCardMetadata creditCardMetadata) {
+
+        public PluggyTransaction(String id, String description, BigDecimal amount, String type, String status,
+                                 Instant date) {
+            this(id, description, amount, type, status, date, null);
+        }
+    }
+
+    /**
+     * Só em lançamento de cartão. {@code cardNumber}: final do cartão físico ou do virtual.
+     * {@code billId} só depois do fechamento. Na parcela, {@code purchaseDate} é a data da compra
+     * (meia-noite UTC); {@code date} do lançamento é a da parcela na fatura.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CreditCardMetadata(String cardNumber, String billId, Integer installmentNumber,
+                                     Integer totalInstallments, Instant purchaseDate) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record BillPage(List<PluggyBill> results) {
+    }
+
+    /** Fatura fechada. {@code dueDate} vem à meia-noite UTC. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record PluggyBill(String id, Instant dueDate, BigDecimal totalAmount) {
     }
 
     /** {@code type}: BANK ou CREDIT. */

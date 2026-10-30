@@ -20,6 +20,8 @@ public interface BankConnectionAccountRepository extends JpaRepository<BankConne
 
     Optional<BankConnectionAccount> findByAccountId(UUID accountId);
 
+    Optional<BankConnectionAccount> findByCreditCardId(UUID creditCardId);
+
     boolean existsByAccountIdAndIdNot(UUID accountId, UUID id);
 
     boolean existsByCreditCardIdAndIdNot(UUID creditCardId, UUID id);

@@ -3,11 +3,13 @@ package com.cashcontrol.api.service;
 import com.cashcontrol.api.domain.entity.InvoiceImportFormat;
 import com.cashcontrol.api.dto.request.FaturaImportCommitRequest;
 import com.cashcontrol.api.dto.request.FaturaImportDuplicateCheckRequest;
+import com.cashcontrol.api.dto.response.BankBillResponse;
 import com.cashcontrol.api.dto.response.FaturaImportDuplicateCheckResponse;
 import com.cashcontrol.api.dto.response.FaturaImportPreviewResponse;
 import com.cashcontrol.api.dto.response.FaturaImportResultResponse;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -25,6 +27,16 @@ import java.util.UUID;
 public interface FaturaImportService {
 
     FaturaImportPreviewResponse preview(MultipartFile file, InvoiceImportFormat format, UUID userId);
+
+    /** Faturas fechadas do cartão do banco vinculado a este cartão, da mais recente para a mais antiga. */
+    List<BankBillResponse> listBankBills(UUID creditCardId, UUID userId);
+
+    /**
+     * A mesma prévia, com a fatura {@code billId} buscada no banco (Pluggy) do cartão vinculado.
+     * Toda seção sugere o próprio cartão vinculado, inclusive a do cartão virtual. A confirmação
+     * é a de sempre, com {@code InvoiceImportFormat.OPEN_FINANCE}.
+     */
+    FaturaImportPreviewResponse previewFromBank(UUID creditCardId, String billId, UUID userId);
 
     FaturaImportResultResponse commit(FaturaImportCommitRequest request, UUID userId);
 

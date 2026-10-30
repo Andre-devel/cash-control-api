@@ -32,6 +32,7 @@ import com.cashcontrol.api.repository.MerchantAliasRepository;
 import com.cashcontrol.api.repository.CreditCardRepository;
 import com.cashcontrol.api.repository.InstallmentSeriesRepository;
 import com.cashcontrol.api.repository.InvoiceItemRepository;
+import com.cashcontrol.api.repository.InvoiceRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.CategoryRuleMatcher;
 import com.cashcontrol.api.service.CategorySuggester;
@@ -89,6 +90,7 @@ class FaturaImportServiceTest {
 
     @Mock private CreditCardRepository creditCardRepository;
     @Mock private InvoiceItemRepository invoiceItemRepository;
+    @Mock private InvoiceRepository invoiceRepository;
     @Mock private AccountRepository accountRepository;
     @Mock private TransactionRepository transactionRepository;
     @Mock private InstallmentSeriesRepository installmentSeriesRepository;
@@ -129,6 +131,7 @@ class FaturaImportServiceTest {
         service = new FaturaImportServiceImpl(
                 creditCardRepository,
                 invoiceItemRepository,
+                invoiceRepository,
                 accountRepository,
                 transactionRepository,
                 installmentSeriesRepository,
@@ -142,7 +145,8 @@ class FaturaImportServiceTest {
                 new InvoiceCycleCalculator(),
                 new FaturaRowHasher(),
                 List.of(parser),
-                new AppProperties());
+                new AppProperties(),
+                null);
 
         when(categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId))
                 .thenReturn(List.of());
