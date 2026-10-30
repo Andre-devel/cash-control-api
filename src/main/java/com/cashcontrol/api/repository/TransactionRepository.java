@@ -283,6 +283,21 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "AND COALESCE(t.paymentDate, t.competenceDate) < :today")
     int markOverdueAll(@Param("today") LocalDate today);
 
+    // Contrapartida de markOverdue*: a vencida cuja data prevista foi adiada para hoje ou depois
+    // volta a PENDENTE. Compra no cartão nunca fica vencida (vence pela fatura).
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE Transaction t SET t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PENDING " +
+           "WHERE t.userId = :userId " +
+           "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.OVERDUE " +
+           "AND (t.creditCard IS NOT NULL OR COALESCE(t.paymentDate, t.competenceDate) >= :today)")
+    int markNoLongerOverdueForUser(@Param("userId") UUID userId, @Param("today") LocalDate today);
+
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE Transaction t SET t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PENDING " +
+           "WHERE t.status = com.cashcontrol.api.domain.entity.TransactionStatus.OVERDUE " +
+           "AND (t.creditCard IS NOT NULL OR COALESCE(t.paymentDate, t.competenceDate) >= :today)")
+    int markNoLongerOverdueAll(@Param("today") LocalDate today);
+
     // ── Dashboard queries ─────────────────────────────────────────────────────
     // Saldo e patrimônio olham só contas ativas (nem arquivadas nem excluídas): são o retrato
     // de agora. Fluxo do período (receitas, despesas, categorias, maiores gastos, contas a

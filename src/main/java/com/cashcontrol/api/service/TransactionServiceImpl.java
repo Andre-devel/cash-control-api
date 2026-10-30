@@ -198,6 +198,8 @@ public class TransactionServiceImpl implements TransactionService {
             }
         }
 
+        refreshDueStatus(tx);
+
         applyCategory(tx, request.categoryId(), request.subcategoryId(), userId, null);
         if (request.tagIds() != null) {
             applyTags(tx, request.tagIds(), userId);
@@ -407,13 +409,17 @@ public class TransactionServiceImpl implements TransactionService {
     @Override
     @Transactional
     public int detectOverdue(UUID userId) {
-        return transactionRepository.markOverdueForUser(userId, LocalDate.now());
+        LocalDate today = LocalDate.now();
+        return transactionRepository.markOverdueForUser(userId, today)
+                + transactionRepository.markNoLongerOverdueForUser(userId, today);
     }
 
     @Override
     @Transactional
     public int detectOverdueAll() {
-        return transactionRepository.markOverdueAll(LocalDate.now());
+        LocalDate today = LocalDate.now();
+        return transactionRepository.markOverdueAll(today)
+                + transactionRepository.markNoLongerOverdueAll(today);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -661,4 +667,19 @@ public class TransactionServiceImpl implements TransactionService {
                 tx.getPaidInvoice() != null ? tx.getPaidInvoice().getId() : null
         );
     }
+
+    /**
+     * Mesma regra do job de vencidas, aplicada na hora em que a edição mexe na data: em aberto
+     * com data prevista no passado é VENCIDA, senão PENDENTE. Sem isso, adiar uma vencida a
+     * deixava vencida para sempre (o job só ia num sentido).
+     */
+    private void refreshDueStatus(Transaction tx) {
+        if (tx.getStatus() != TransactionStatus.PENDING && tx.getStatus() != TransactionStatus.OVERDUE) {
+            return;
+        }
+        LocalDate expected = tx.getPaymentDate() != null ? tx.getPaymentDate() : tx.getCompetenceDate();
+        boolean late = tx.getCreditCard() == null && expected.isBefore(LocalDate.now());
+        tx.setStatus(late ? TransactionStatus.OVERDUE : TransactionStatus.PENDING);
+    }
+
 }

@@ -529,6 +529,31 @@ class TransactionRepositoryIntegrationTest {
                 .isEqualTo(TransactionStatus.PENDING);
     }
 
+    @Test
+    void markNoLongerOverdueForUser_returnsPostponedOnesToPending() {
+        LocalDate today = LocalDate.now();
+
+        Transaction stillLate = saveTransaction(userId, defaultAccount, TransactionType.EXPENSE,
+                TransactionStatus.OVERDUE, new BigDecimal("10.00"), "Still late", null,
+                today.minusDays(5), today.minusDays(1));
+        Transaction postponed = saveTransaction(userId, defaultAccount, TransactionType.EXPENSE,
+                TransactionStatus.OVERDUE, new BigDecimal("10.00"), "Postponed", null,
+                today.minusDays(5), today.plusDays(3));
+        Transaction postponedOccurrence = saveTransaction(userId, defaultAccount, TransactionType.EXPENSE,
+                TransactionStatus.OVERDUE, new BigDecimal("10.00"), "Postponed occurrence", null,
+                today, null);
+
+        int changed = transactionRepository.markNoLongerOverdueForUser(userId, today);
+
+        assertThat(changed).isEqualTo(2);
+        assertThat(transactionRepository.findById(stillLate.getId()).orElseThrow().getStatus())
+                .isEqualTo(TransactionStatus.OVERDUE);
+        assertThat(transactionRepository.findById(postponed.getId()).orElseThrow().getStatus())
+                .isEqualTo(TransactionStatus.PENDING);
+        assertThat(transactionRepository.findById(postponedOccurrence.getId()).orElseThrow().getStatus())
+                .isEqualTo(TransactionStatus.PENDING);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private Account createAccount(UUID ownerId, AccountType type, String name) {

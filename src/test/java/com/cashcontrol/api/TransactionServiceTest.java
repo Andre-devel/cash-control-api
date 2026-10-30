@@ -501,6 +501,49 @@ class TransactionServiceTest {
         verify(transactionRepository, never()).save(any());
     }
 
+    @Test
+    void editTransaction_postponingAnOverdueOne_makesItPendingAgain() {
+        Transaction tx = buildPendingTransaction();
+        tx.setStatus(TransactionStatus.OVERDUE);
+        tx.setCompetenceDate(LocalDate.now().minusDays(5));
+        when(transactionRepository.findByIdAndUserId(tx.getId(), userId)).thenReturn(Optional.of(tx));
+        when(transactionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        // O formulário reenvia o status atual junto com a nova data.
+        EditTransactionRequest request = new EditTransactionRequest(
+                null, null, null, LocalDate.now().plusDays(3), null, TransactionStatus.OVERDUE,
+                null, null, null, null, null, null);
+
+        TransactionDetailResponse response = transactionService.editTransaction(tx.getId(), request, userId);
+
+        assertThat(response.status()).isEqualTo(TransactionStatus.PENDING);
+    }
+
+    @Test
+    void editTransaction_movingAPendingOneToThePast_makesItOverdue() {
+        Transaction tx = buildPendingTransaction();
+        tx.setCompetenceDate(LocalDate.now().plusDays(2));
+        when(transactionRepository.findByIdAndUserId(tx.getId(), userId)).thenReturn(Optional.of(tx));
+        when(transactionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        EditTransactionRequest request = new EditTransactionRequest(
+                null, null, null, null, LocalDate.now().minusDays(1), null,
+                null, null, null, null, null, null);
+
+        TransactionDetailResponse response = transactionService.editTransaction(tx.getId(), request, userId);
+
+        assertThat(response.status()).isEqualTo(TransactionStatus.OVERDUE);
+    }
+
+    @Test
+    void detectOverdue_alsoReturnsPostponedOnesToPending() {
+        when(transactionRepository.markOverdueForUser(eq(userId), any(LocalDate.class))).thenReturn(2);
+        when(transactionRepository.markNoLongerOverdueForUser(eq(userId), any(LocalDate.class))).thenReturn(1);
+
+        assertThat(transactionService.detectOverdue(userId)).isEqualTo(3);
+        verify(transactionRepository).markNoLongerOverdueForUser(eq(userId), eq(LocalDate.now()));
+    }
+
     // ── listTransactions ──────────────────────────────────────────────────────
 
     @Test
