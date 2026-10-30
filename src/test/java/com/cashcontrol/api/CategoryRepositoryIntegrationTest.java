@@ -44,8 +44,8 @@ class CategoryRepositoryIntegrationTest {
     private UUID userId;
     private Account defaultAccount;
 
-    // Total system categories from V13 seed: 17 root + 16 subcategories = 33
-    private static final int SYSTEM_CATEGORY_COUNT = 33;
+    // Total system categories: V13 seed (17 root + 16 subcategories) + Investimentos › Rendimentos (V37) = 34
+    private static final int SYSTEM_CATEGORY_COUNT = 34;
 
     @BeforeEach
     void setUp() {

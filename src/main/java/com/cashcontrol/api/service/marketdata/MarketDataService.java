@@ -81,6 +81,26 @@ public class MarketDataService {
         return new SyncResult(indexRates, treasuryPrices, failedSources);
     }
 
+    /**
+     * Completa os índices para trás até {@code from}, para uma aplicação mais antiga que o
+     * histórico carregado. Os preços do Tesouro não entram: o cálculo só usa a cotação mais
+     * recente, e a carga inicial já cobre a evolução recente.
+     */
+    public int backfill(LocalDate from, LocalDate today) {
+        int written = 0;
+        for (MarketIndex index : MarketIndex.values()) {
+            LocalDate start = index.isDaily() ? from : from.withDayOfMonth(1);
+            LocalDate earliest = marketDataRepository.findEarliestRateDate(index).orElse(today);
+            try {
+                written += fetchWindows(index, start, earliest);
+            } catch (RuntimeException e) {
+                log.warn("Market data backfill failed: source={} from={} error={}", index, start, e.toString());
+            }
+        }
+        log.info("Market data backfill complete: from={} indexRates={}", from, written);
+        return written;
+    }
+
     /** {@code true} quando alguma fonte nunca foi sincronizada (banco novo). */
     public boolean isEmpty() {
         return Arrays.stream(MarketIndex.values()).anyMatch(index -> marketDataRepository.findLatestRate(index).isEmpty())
@@ -129,11 +149,16 @@ public class MarketDataService {
      */
     private int syncIndex(MarketIndex index, LocalDate initialStart, LocalDate today) {
         LocalDate start = marketDataRepository.findLatestRate(index).map(IndexRate::date).orElse(initialStart);
+        return fetchWindows(index, start, today);
+    }
+
+    private int fetchWindows(MarketIndex index, LocalDate from, LocalDate to) {
+        LocalDate start = from;
         int written = 0;
-        while (start.isBefore(today)) {
+        while (start.isBefore(to)) {
             LocalDate end = start.plusYears(SGS_MAX_WINDOW_YEARS).minusDays(1);
-            if (end.isAfter(today)) {
-                end = today;
+            if (end.isAfter(to)) {
+                end = to;
             }
             List<IndexRate> rates = bcbSgsClient.fetch(index, start, end);
             if (!rates.isEmpty()) {

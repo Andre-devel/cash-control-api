@@ -1,5 +1,6 @@
 package com.cashcontrol.api.scheduler;
 
+import com.cashcontrol.api.service.marketdata.MarketDataBackfillRequested;
 import com.cashcontrol.api.service.marketdata.MarketDataService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -8,6 +9,8 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.time.LocalDate;
 
@@ -34,5 +37,12 @@ public class MarketDataSyncScheduler {
         if (marketDataService.isEmpty()) {
             sync();
         }
+    }
+
+    /** Aplicação mais antiga que o histórico: completa depois do commit, fora da requisição. */
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void backfill(MarketDataBackfillRequested event) {
+        marketDataService.backfill(event.from(), LocalDate.now(MarketDataService.MARKET_ZONE));
     }
 }

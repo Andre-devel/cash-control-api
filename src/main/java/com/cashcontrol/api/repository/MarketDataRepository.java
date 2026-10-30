@@ -7,6 +7,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.List;
@@ -79,9 +81,60 @@ public class MarketDataRepository {
                 .stream().findFirst();
     }
 
+    public Optional<LocalDate> findEarliestRateDate(MarketIndex index) {
+        return Optional.ofNullable(jdbcTemplate.queryForObject(
+                "SELECT MIN(rate_date) FROM market_index_rates WHERE market_index = ?", LocalDate.class, index.name()));
+    }
+
+    /** Valores de {@code index} entre {@code from} e {@code to}, inclusive, em ordem de data. */
+    public List<IndexRate> findRates(MarketIndex index, LocalDate from, LocalDate to) {
+        return jdbcTemplate.query(
+                "SELECT rate_date, value FROM market_index_rates "
+                        + "WHERE market_index = ? AND rate_date BETWEEN ? AND ? ORDER BY rate_date",
+                (rs, rowNum) -> new IndexRate(index, rs.getObject("rate_date", LocalDate.class), rs.getBigDecimal("value")),
+                index.name(), from, to);
+    }
+
+    /** Cotações de um título entre {@code from} e {@code to}, inclusive, em ordem de data. */
+    public List<TreasuryBondPrice> findTreasuryPrices(String bondType, LocalDate maturityDate,
+                                                      LocalDate from, LocalDate to) {
+        return jdbcTemplate.query(
+                "SELECT * FROM treasury_bond_prices WHERE bond_type = ? AND maturity_date = ? "
+                        + "AND base_date BETWEEN ? AND ? ORDER BY base_date",
+                (rs, rowNum) -> treasuryPrice(rs), bondType, maturityDate, from, to);
+    }
+
+    /** Cotação mais recente de um título até {@code onOrBefore}. */
+    public Optional<TreasuryBondPrice> findTreasuryPrice(String bondType, LocalDate maturityDate, LocalDate onOrBefore) {
+        return jdbcTemplate.query(
+                        "SELECT * FROM treasury_bond_prices WHERE bond_type = ? AND maturity_date = ? "
+                                + "AND base_date <= ? ORDER BY base_date DESC LIMIT 1",
+                        (rs, rowNum) -> treasuryPrice(rs), bondType, maturityDate, onOrBefore)
+                .stream().findFirst();
+    }
+
+    /** Todos os títulos cotados em {@code baseDate}. */
+    public List<TreasuryBondPrice> findTreasuryPricesOn(LocalDate baseDate) {
+        return jdbcTemplate.query(
+                "SELECT * FROM treasury_bond_prices WHERE base_date = ? ORDER BY bond_type, maturity_date",
+                (rs, rowNum) -> treasuryPrice(rs), baseDate);
+    }
+
     public Optional<LocalDate> findLatestTreasuryBaseDate() {
         return Optional.ofNullable(jdbcTemplate.queryForObject(
                 "SELECT MAX(base_date) FROM treasury_bond_prices", LocalDate.class));
+    }
+
+    private static TreasuryBondPrice treasuryPrice(ResultSet rs) throws SQLException {
+        return new TreasuryBondPrice(
+                rs.getString("bond_type"),
+                rs.getObject("maturity_date", LocalDate.class),
+                rs.getObject("base_date", LocalDate.class),
+                rs.getBigDecimal("buy_rate"),
+                rs.getBigDecimal("sell_rate"),
+                rs.getBigDecimal("pu_buy"),
+                rs.getBigDecimal("pu_sell"),
+                rs.getBigDecimal("pu_base"));
     }
 
     private static int sum(int[][] counts) {

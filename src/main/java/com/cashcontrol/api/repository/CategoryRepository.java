@@ -16,6 +16,12 @@ public interface CategoryRepository extends JpaRepository<Category, UUID> {
     @Query("SELECT c FROM Category c WHERE c.userId IS NULL")
     List<Category> findAllSystemCategories();
 
+    /** Subcategoria do sistema pelo nome dela e da categoria raiz, ex.: Investimentos › Rendimentos. */
+    @Query("SELECT c FROM Category c JOIN FETCH c.parent p " +
+           "WHERE c.userId IS NULL AND c.name = :name " +
+           "AND p.userId IS NULL AND p.parent IS NULL AND p.name = :parentName")
+    Optional<Category> findSystemSubcategory(@Param("parentName") String parentName, @Param("name") String name);
+
     List<Category> findAllByUserId(UUID userId);
 
     Optional<Category> findByIdAndUserId(UUID id, UUID userId);
