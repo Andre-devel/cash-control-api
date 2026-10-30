@@ -64,6 +64,9 @@ public class AppProperties {
     @Valid
     private final Mail mail = new Mail();
 
+    @Valid
+    private final MarketData marketData = new MarketData();
+
     @Getter
     @Setter
     public static class Jwt {
@@ -251,6 +254,24 @@ public class AppProperties {
         /** Teto de {@code days} na projeção de saldo; acima disso o pedido é limitado. */
         @Positive
         private int projectionMaxDays = 365;
+    }
+
+    /**
+     * Fontes públicas dos índices e preços usados na renda fixa. As URLs ficam em config porque
+     * mudam sem aviso (o recurso do CKAN do Tesouro já trocou de id antes) e um deploy só para
+     * isso seria desproporcional.
+     */
+    @Getter
+    @Setter
+    public static class MarketData {
+
+        @NotBlank
+        private String bcbBaseUrl = "https://api.bcb.gov.br";
+
+        @NotBlank
+        private String treasuryCsvUrl = "https://www.tesourotransparente.gov.br/ckan/dataset/"
+                + "df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/"
+                + "download/precotaxatesourodireto.csv";
     }
 
     @Getter

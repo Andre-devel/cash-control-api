@@ -131,6 +131,12 @@ app:
     upcoming-bills-days: ${UPCOMING_BILLS_DAYS:7}
     upcoming-bills-max-results: ${UPCOMING_BILLS_MAX_RESULTS:20}
 
+  market-data:
+    # Fontes públicas da renda fixa (SGS do BCB e CSV de preços do Tesouro Transparente).
+    # O default fica em AppProperties; a variável existe para trocar a URL sem deploy.
+    bcb-base-url: ${MARKET_DATA_BCB_BASE_URL:https://api.bcb.gov.br}
+    treasury-csv-url: ${MARKET_DATA_TREASURY_CSV_URL:https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv}
+
 management:
   endpoints:
     web:
