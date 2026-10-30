@@ -38,6 +38,7 @@ import com.cashcontrol.api.service.CategorySuggester;
 import com.cashcontrol.api.service.CreditCardService;
 import com.cashcontrol.api.service.MerchantAliasService;
 import com.cashcontrol.api.service.StatementImportServiceImpl;
+import com.cashcontrol.api.service.openfinance.PluggyStatementSource;
 import com.cashcontrol.api.service.statement.InterCsvStatementParser;
 import com.cashcontrol.api.service.statement.StatementHistoryMapper;
 import com.cashcontrol.api.service.statement.StatementRowHasher;
@@ -82,6 +83,7 @@ class StatementImportServiceTest {
     @Mock private InvoiceRepository invoiceRepository;
     @Mock private AccountService accountService;
     @Mock private CreditCardService creditCardService;
+    @Mock private PluggyStatementSource pluggyStatementSource;
 
     private StatementImportServiceImpl service;
 
@@ -117,7 +119,8 @@ class StatementImportServiceTest {
                 new StatementHistoryMapper(),
                 new StatementRowHasher(),
                 List.of(new InterCsvStatementParser()),
-                new AppProperties());
+                new AppProperties(),
+                pluggyStatementSource);
     }
 
     // ── preview ───────────────────────────────────────────────────────────────
@@ -430,7 +433,7 @@ class StatementImportServiceTest {
                 categoryRepository, categoryRuleRepository,
                 paymentMethodRepository, new CategorySuggester(transactionRepository, new CategoryRuleMatcher()),
                 new MerchantAliasService(merchantAliasRepository),
-                new StatementHistoryMapper(), new StatementRowHasher(), List.of(), new AppProperties());
+                new StatementHistoryMapper(), new StatementRowHasher(), List.of(), new AppProperties(), pluggyStatementSource);
 
         assertThatThrownBy(() -> withoutParsers.preview(fixture(), StatementFormat.INTER_CSV, accountId, userId))
                 .isInstanceOf(BusinessRuleException.class)
@@ -922,6 +925,7 @@ class StatementImportServiceTest {
                 new StatementHistoryMapper(),
                 new StatementRowHasher(),
                 List.of(new InterCsvStatementParser()),
-                properties);
+                properties,
+                pluggyStatementSource);
     }
 }

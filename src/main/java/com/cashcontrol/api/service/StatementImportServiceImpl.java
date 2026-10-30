@@ -30,6 +30,8 @@ import com.cashcontrol.api.repository.InvoiceRepository;
 import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.statement.ParsedStatement;
+import com.cashcontrol.api.service.openfinance.BankStatement;
+import com.cashcontrol.api.service.openfinance.PluggyStatementSource;
 import com.cashcontrol.api.service.statement.ParsedStatementRow;
 import com.cashcontrol.api.service.statement.StatementHistoryMapper;
 import com.cashcontrol.api.service.statement.StatementParser;
@@ -82,6 +84,7 @@ public class StatementImportServiceImpl implements StatementImportService {
     private final StatementRowHasher rowHasher;
     private final List<StatementParser> parsers;
     private final AppProperties appProperties;
+    private final PluggyStatementSource pluggyStatementSource;
 
     @Override
     @Transactional(readOnly = true)
@@ -90,16 +93,30 @@ public class StatementImportServiceImpl implements StatementImportService {
         validateFile(file);
 
         ParsedStatement statement = parse(file, format);
+        return buildPreview(account, statement, rowHasher.hashAll(statement.rows()), file.getOriginalFilename(),
+                format, userId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ImportPreviewResponse previewFromBank(UUID accountId, UUID userId, LocalDate today) {
+        Account account = requireImportableAccount(accountId, userId);
+        BankStatement bank = pluggyStatementSource.fetch(accountId, userId, today);
+        return buildPreview(account, bank.statement(), bank.externalRefs(), null, StatementFormat.OPEN_FINANCE, userId);
+    }
+
+    private ImportPreviewResponse buildPreview(Account account, ParsedStatement statement, List<String> refs,
+                                               String fileName, StatementFormat format, UUID userId) {
         if (statement.rows().size() > appProperties.getStatementImport().getMaxRows()) {
             throw new BusinessRuleException(
-                    "O arquivo tem " + statement.rows().size() + " lançamentos e o limite é "
+                    "O extrato tem " + statement.rows().size() + " lançamentos e o limite é "
                     + appProperties.getStatementImport().getMaxRows() + ". Exporte o extrato em períodos menores.");
         }
 
-        List<String> hashes = rowHasher.hashAll(statement.rows());
-        Set<String> alreadyImported = hashes.isEmpty()
+        Set<String> alreadyImported = refs.isEmpty()
                 ? Set.of()
-                : new HashSet<>(transactionRepository.findExistingExternalRefs(userId, account.getId(), hashes));
+                : new HashSet<>(transactionRepository.findExistingExternalRefs(userId, account.getId(), refs));
+        PossibleDuplicates possibleDuplicates = loadPossibleDuplicates(statement.rows(), account, userId);
 
         List<CategoryRule> rules = categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId);
         CategorySuggester.History history = categorySuggester.loadHistory(
@@ -110,17 +127,22 @@ public class StatementImportServiceImpl implements StatementImportService {
 
         List<ImportPreviewRow> rows = new ArrayList<>(statement.rows().size());
         for (int i = 0; i < statement.rows().size(); i++) {
-            rows.add(toPreviewRow(statement.rows().get(i), hashes.get(i), alreadyImported, rules, history, aliases,
+            ParsedStatementRow row = statement.rows().get(i);
+            String ref = refs.get(i);
+            boolean duplicate = alreadyImported.contains(ref);
+            boolean possibleDuplicate = !duplicate && possibleDuplicates.claim(row, ref);
+            rows.add(toPreviewRow(row, ref, duplicate, possibleDuplicate, rules, history, aliases,
                     investmentAccount, invoices));
         }
 
         int duplicateCount = (int) rows.stream().filter(ImportPreviewRow::duplicate).count();
         int warningCount = (int) rows.stream()
-                .filter(row -> row.unknownHistory() || row.invoiceAmountMismatch() || row.invoicePaymentUnmatched())
+                .filter(row -> row.unknownHistory() || row.invoiceAmountMismatch() || row.invoicePaymentUnmatched()
+                               || row.possibleDuplicate())
                 .count();
 
         return new ImportPreviewResponse(
-                file.getOriginalFilename(),
+                fileName,
                 format,
                 statement.sourceAccountLabel(),
                 statement.periodStart(),
@@ -133,6 +155,55 @@ public class StatementImportServiceImpl implements StatementImportService {
                 statement.errors(),
                 investmentAccount == null && rows.stream().anyMatch(ImportPreviewRow::investment),
                 rows.stream().anyMatch(row -> !row.duplicate() && row.date().isBefore(createdOn(account))));
+    }
+
+    /**
+     * Lançamentos da conta que podem ser o mesmo fato de uma linha da prévia vindo por outro
+     * caminho: o arquivo e a Pluggy dão chaves diferentes ao mesmo lançamento, e um lançamento
+     * digitado à mão não tem chave nenhuma. Mesma data e mesmo valor, de outra origem, é o
+     * sinal — cada lançamento existente serve de par para uma linha só.
+     */
+    private PossibleDuplicates loadPossibleDuplicates(List<ParsedStatementRow> rows, Account account, UUID userId) {
+        if (rows.isEmpty()) {
+            return new PossibleDuplicates(List.of());
+        }
+        LocalDate first = rows.stream().map(ParsedStatementRow::date).min(LocalDate::compareTo).orElseThrow();
+        LocalDate last = rows.stream().map(ParsedStatementRow::date).max(LocalDate::compareTo).orElseThrow();
+        return new PossibleDuplicates(transactionRepository.findEntriesBetween(userId, account.getId(), first, last));
+    }
+
+    private static final class PossibleDuplicates {
+
+        private final Map<String, List<TransactionRepository.ExistingEntry>> byDayAndAmount;
+
+        PossibleDuplicates(List<TransactionRepository.ExistingEntry> existing) {
+            this.byDayAndAmount = existing.stream().collect(Collectors.groupingBy(
+                    entry -> key(entry.date(), entry.amount()), Collectors.toCollection(ArrayList::new)));
+        }
+
+        boolean claim(ParsedStatementRow row, String ref) {
+            List<TransactionRepository.ExistingEntry> candidates = byDayAndAmount.get(key(row.date(), row.signedAmount()));
+            if (candidates == null) {
+                return false;
+            }
+            boolean fromBank = isBankRef(ref);
+            for (var iterator = candidates.iterator(); iterator.hasNext(); ) {
+                TransactionRepository.ExistingEntry entry = iterator.next();
+                if (entry.externalRef() == null || isBankRef(entry.externalRef()) != fromBank) {
+                    iterator.remove();
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static boolean isBankRef(String ref) {
+            return ref.startsWith(PluggyStatementSource.REF_PREFIX);
+        }
+
+        private static String key(LocalDate date, BigDecimal amount) {
+            return date + "|" + amount.abs().stripTrailingZeros().toPlainString();
+        }
     }
 
     private static LocalDate createdOn(Account account) {
@@ -207,8 +278,8 @@ public class StatementImportServiceImpl implements StatementImportService {
 
     // ── Prévia ────────────────────────────────────────────────────────────────
 
-    private ImportPreviewRow toPreviewRow(ParsedStatementRow row, String externalRef, Set<String> alreadyImported,
-                                          List<CategoryRule> rules, CategorySuggester.History history,
+    private ImportPreviewRow toPreviewRow(ParsedStatementRow row, String externalRef, boolean duplicate,
+                                          boolean possibleDuplicate, List<CategoryRule> rules, CategorySuggester.History history,
                                           MerchantAliasService.Aliases aliases, Account investmentAccount,
                                           InvoicePaymentMatcher invoices) {
         StatementHistoryMapper.Mapping mapping = historyMapper.map(row.rawHistory(), row.signedAmount());
@@ -262,7 +333,7 @@ public class StatementImportServiceImpl implements StatementImportService {
                 suggestion.subcategoryId(),
                 suggestion.subcategoryName(),
                 suggestion.source(),
-                alreadyImported.contains(externalRef),
+                duplicate,
                 mapping.unknownHistory(),
                 outgoing,
                 transferAccount != null ? transferAccount.getId() : null,
@@ -272,7 +343,8 @@ public class StatementImportServiceImpl implements StatementImportService {
                 invoiceAmountMismatch,
                 invoiceOptions,
                 mapping.investment(),
-                invoicePaymentUnmatched);
+                invoicePaymentUnmatched,
+                possibleDuplicate);
     }
 
     private static ImportInvoiceOption toInvoiceOption(Invoice invoice) {

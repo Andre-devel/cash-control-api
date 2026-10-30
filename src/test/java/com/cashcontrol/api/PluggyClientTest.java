@@ -152,6 +152,28 @@ class PluggyClientTest {
     }
 
     @Test
+    void listTransactions_followsTheCursorUntilTheLastPage() {
+        expectAuth("key-1");
+        server.expect(requestTo(BASE + "/v2/transactions?accountId=acc-1"))
+                .andRespond(withSuccess("""
+                        {"results":[{"id":"t1","description":"Pix enviado  - X","amount":-10.5,"type":"DEBIT",
+                          "status":"POSTED","date":"2026-10-30T15:18:24.000Z","category":"Services"}],"next":"cur/2=="}
+                        """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE + "/v2/transactions?accountId=acc-1&after=cur/2%3D%3D"))
+                .andRespond(withSuccess("""
+                        {"results":[{"id":"t2","description":"Pix recebido - Y","amount":20,"type":"CREDIT",
+                          "status":"PENDING","date":"2026-10-29T10:00:00.000Z"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var transactions = client.listTransactions("acc-1");
+
+        assertThat(transactions).extracting(PluggyClient.PluggyTransaction::id).containsExactly("t1", "t2");
+        assertThat(transactions.get(0).amount()).isEqualByComparingTo("-10.5");
+        assertThat(transactions.get(1).status()).isEqualTo("PENDING");
+        server.verify();
+    }
+
+    @Test
     void authBody_neverPrintsTheSecret() {
         // O RestClient em DEBUG loga o corpo pelo toString.
         assertThat(new PluggyClient.AuthRequest("client-id", "client-secret").toString())

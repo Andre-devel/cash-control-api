@@ -10,10 +10,14 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import java.math.BigDecimal;
+import java.net.URI;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +41,8 @@ public class PluggyClient {
 
     private static final Duration API_KEY_TTL = Duration.ofHours(2);
     private static final Duration API_KEY_MARGIN = Duration.ofMinutes(5);
+    /** Páginas de 500: 20 cobrem com folga os 12 meses de uma conta pessoal. */
+    private static final int MAX_TRANSACTION_PAGES = 20;
 
     private final RestClient restClient;
     private final AppProperties appProperties;
@@ -95,6 +101,36 @@ public class PluggyClient {
         AccountPage page = call(key -> restClient.get().uri(url("/accounts?itemId={id}"), itemId)
                 .header("X-API-KEY", key).retrieve().body(AccountPage.class));
         return page == null || page.results() == null ? List.of() : page.results();
+    }
+
+    /**
+     * Todas as transações da conta que a Pluggy tem (o Open Finance entrega cerca de 12 meses).
+     * Sem filtro de data de propósito: lançamento que liquida depois chega com data retroativa,
+     * e quem corta é o import, pela data do último extrato importado.
+     */
+    public List<PluggyTransaction> listTransactions(String accountId) {
+        List<PluggyTransaction> all = new ArrayList<>();
+        String after = null;
+        for (int page = 0; page < MAX_TRANSACTION_PAGES; page++) {
+            URI uri = UriComponentsBuilder.fromUriString(url("/v2/transactions"))
+                    .queryParam("accountId", accountId)
+                    .queryParamIfPresent("after", Optional.ofNullable(after))
+                    .encode().build().toUri();
+            TransactionPage result = call(key -> restClient.get().uri(uri)
+                    .header("X-API-KEY", key).retrieve().body(TransactionPage.class));
+            if (result == null || result.results() == null) {
+                break;
+            }
+            all.addAll(result.results());
+            after = result.next();
+            if (after == null || after.isBlank()) {
+                return all;
+            }
+        }
+        if (after != null && !after.isBlank()) {
+            throw new BankProviderException("O banco devolveu lançamentos demais de uma vez.", null);
+        }
+        return all;
     }
 
     /** Revoga o item na Pluggy. Já apagado conta como sucesso. */
@@ -186,6 +222,20 @@ public class PluggyClient {
         @JsonIgnoreProperties(ignoreUnknown = true)
         public record ItemError(String code, String message) {
         }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record TransactionPage(List<PluggyTransaction> results, String next) {
+    }
+
+    /**
+     * Lançamento como a Pluggy devolve. Na conta corrente {@code amount} tem sinal (débito
+     * negativo) e {@code description} é "Histórico - Descrição" do extrato do Inter.
+     * {@code status}: POSTED ou PENDING. {@code type}: DEBIT ou CREDIT.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record PluggyTransaction(String id, String description, BigDecimal amount, String type, String status,
+                                    Instant date) {
     }
 
     /** {@code type}: BANK ou CREDIT. */

@@ -6,6 +6,7 @@ import com.cashcontrol.api.dto.response.ImportPreviewResponse;
 import com.cashcontrol.api.dto.response.ImportResultResponse;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 /**
@@ -19,6 +20,12 @@ import java.util.UUID;
 public interface StatementImportService {
 
     ImportPreviewResponse preview(MultipartFile file, StatementFormat format, UUID accountId, UUID userId);
+
+    /**
+     * Prévia com os lançamentos buscados no banco (Pluggy) em vez de um arquivo. O commit é o
+     * mesmo, com {@code StatementFormat.OPEN_FINANCE}.
+     */
+    ImportPreviewResponse previewFromBank(UUID accountId, UUID userId, LocalDate today);
 
     ImportResultResponse commit(ImportCommitRequest request, UUID userId);
 }

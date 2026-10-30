@@ -106,5 +106,10 @@ public record ImportPreviewRow(
         @Schema(description = """
                 true quando a descrição indica pagamento de fatura, mas nenhuma fatura com \
                 vencimento perto da data foi encontrada: falta importar a fatura do cartão.""")
-        boolean invoicePaymentUnmatched
+        boolean invoicePaymentUnmatched,
+        @Schema(description = """
+                true quando a conta já tem um lançamento de mesma data e valor vindo de outra \
+                origem (arquivo, banco ou digitado à mão). Pode ser o mesmo fato: a prévia deixa a \
+                linha desmarcada.""")
+        boolean possibleDuplicate
 ) {}

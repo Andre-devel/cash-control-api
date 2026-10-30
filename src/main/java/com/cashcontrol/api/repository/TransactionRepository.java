@@ -45,6 +45,31 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("externalRefs") Collection<String> externalRefs);
 
     /**
+     * Data do último lançamento do extrato que veio de arquivo nesta conta — o que tem chave de
+     * import e não veio da Pluggy ({@code plg:}). É dali em diante que a busca no banco começa.
+     * Compra de cartão fica de fora: ela aponta para a conta que paga a fatura e, parcelada, tem
+     * data de meses à frente.
+     */
+    @Query("SELECT MAX(t.competenceDate) FROM Transaction t " +
+           "WHERE t.userId = :userId AND t.account.id = :accountId AND t.creditCard IS NULL " +
+           "AND t.externalRef IS NOT NULL AND t.externalRef NOT LIKE 'plg:%'")
+    Optional<LocalDate> findLastFileImportDate(@Param("userId") UUID userId, @Param("accountId") UUID accountId);
+
+    /**
+     * Data, valor e chave de import dos lançamentos do extrato da conta no período (sem as compras
+     * de cartão, que não aparecem no extrato), para achar possível duplicata.
+     */
+    @Query("SELECT new com.cashcontrol.api.repository.TransactionRepository$ExistingEntry(" +
+           "t.competenceDate, t.amount, t.externalRef) FROM Transaction t " +
+           "WHERE t.userId = :userId AND t.account.id = :accountId AND t.creditCard IS NULL " +
+           "AND t.competenceDate BETWEEN :from AND :to")
+    List<ExistingEntry> findEntriesBetween(@Param("userId") UUID userId, @Param("accountId") UUID accountId,
+                                           @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    record ExistingEntry(LocalDate date, BigDecimal amount, String externalRef) {
+    }
+
+    /**
      * As transações que já ocupam estas chaves na conta.
      *
      * <p>Escopo igual ao do índice único {@code uidx_transactions_external_ref}

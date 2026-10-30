@@ -26,6 +26,7 @@ import com.cashcontrol.api.service.AttachmentService;
 import com.cashcontrol.api.service.ImportReconciliationService;
 import com.cashcontrol.api.service.ReceiptImportService;
 import com.cashcontrol.api.service.StatementImportService;
+import com.cashcontrol.api.service.marketdata.MarketDataService;
 import com.cashcontrol.api.service.TransactionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -341,6 +342,31 @@ public class TransactionController {
             @Parameter(description = "Statement format") @RequestParam(defaultValue = "INTER_CSV") StatementFormat format,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         return statementImportService.preview(file, format, accountId, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Preview statement import from the bank", description = """
+            Same preview as the file one, with the entries fetched from the bank through Pluggy for the \
+            bank account linked to this account. Only entries from the day of the last file import on, \
+            and none already imported from the bank. Commit with `format: OPEN_FINANCE`.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Preview returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Account not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Account not linked to a bank account, or integration off",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "502", description = "Pluggy failed",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping("/import/bank-preview")
+    @PreAuthorize("isAuthenticated()")
+    public ImportPreviewResponse previewImportFromBank(
+            @Parameter(description = "Account UUID linked to a bank account", required = true)
+            @RequestParam UUID accountId,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return statementImportService.previewFromBank(accountId, principal.getUser().getId(),
+                LocalDate.now(MarketDataService.MARKET_ZONE));
     }
 
     @Operation(summary = "Commit statement import", description = """
