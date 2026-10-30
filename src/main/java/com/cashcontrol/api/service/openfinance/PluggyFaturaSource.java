@@ -36,12 +36,17 @@ import java.util.UUID;
  * descrição e o valor da Pluggy não são os do PDF, então as chaves das duas origens nunca
  * coincidem; a prévia avisa a possível duplicata por outro caminho.
  *
- * <p>Só entra lançamento já fechado em fatura ({@code billId} preenchido): antes do fechamento
- * ele ainda pode mudar e não tem fatura certa.
+ * <p>A fatura fechada traz os lançamentos com o {@code billId} dela. A fatura atual, em aberto
+ * ({@link #OPEN_BILL_ID}), traz os que ainda não têm fatura, pendentes inclusive: eles ainda podem
+ * mudar de valor ou ser cancelados. Quando a fatura fechar, buscar de novo reconhece pela chave o
+ * que não mudou, e a prévia marca como possível duplicata o que mudou só de valor na parcela.
  */
 @Component
 @RequiredArgsConstructor
 public class PluggyFaturaSource {
+
+    /** Id da fatura atual na lista de faturas: na Pluggy ela ainda não tem id. */
+    public static final String OPEN_BILL_ID = "open";
 
     private static final ZoneId BANK_ZONE = ZoneId.of("America/Sao_Paulo");
 
@@ -53,23 +58,53 @@ public class PluggyFaturaSource {
     /** Faturas fechadas do cartão do banco vinculado, da mais recente para a mais antiga. */
     public List<BankBillResponse> listBills(UUID creditCardId, UUID userId) {
         BankConnectionAccount link = requireLink(creditCardId, userId);
+        List<PluggyBill> closed = closedBills(link);
+        List<BankBillResponse> bills = new ArrayList<>();
+        if (!closed.isEmpty()) {
+            bills.add(new BankBillResponse(OPEN_BILL_ID, openDueDate(closed), null, true));
+        }
+        closed.forEach(bill -> bills.add(new BankBillResponse(bill.id(), dateOf(bill.dueDate()), bill.totalAmount(), false)));
+        return bills;
+    }
+
+    /** Fechadas, da mais recente para a mais antiga. */
+    private List<PluggyBill> closedBills(BankConnectionAccount link) {
         return pluggyClient.listBills(link.getExternalAccountId()).stream()
                 .filter(bill -> bill.id() != null && bill.dueDate() != null)
                 .sorted(Comparator.comparing(PluggyBill::dueDate).reversed())
-                .map(bill -> new BankBillResponse(bill.id(), dateOf(bill.dueDate()), bill.totalAmount()))
                 .toList();
+    }
+
+    /** A fatura atual vence um mês depois da última fechada, no mesmo dia. */
+    private static LocalDate openDueDate(List<PluggyBill> closed) {
+        return dateOf(closed.getFirst().dueDate()).plusMonths(1);
     }
 
     public ParsedFatura fetch(UUID creditCardId, String billId, UUID userId) {
         BankConnectionAccount link = requireLink(creditCardId, userId);
-        PluggyBill bill = pluggyClient.listBills(link.getExternalAccountId()).stream()
-                .filter(found -> billId.equals(found.id()) && found.dueDate() != null)
-                .findFirst()
-                .orElseThrow(() -> new BusinessRuleException("Fatura não encontrada no banco."));
+        List<PluggyBill> closed = closedBills(link);
+        boolean open = OPEN_BILL_ID.equals(billId);
+        LocalDate dueDate;
+        BigDecimal totalAmount;
+        if (open) {
+            if (closed.isEmpty()) {
+                throw new BusinessRuleException("O banco ainda não tem fatura fechada deste cartão para estimar o vencimento da atual.");
+            }
+            dueDate = openDueDate(closed);
+            totalAmount = null;
+        } else {
+            PluggyBill bill = closed.stream().filter(found -> billId.equals(found.id())).findFirst()
+                    .orElseThrow(() -> new BusinessRuleException("Fatura não encontrada no banco."));
+            dueDate = dateOf(bill.dueDate());
+            totalAmount = bill.totalAmount();
+        }
 
         List<PluggyTransaction> rows = pluggyClient.listTransactions(link.getExternalAccountId()).stream()
-                .filter(tx -> "POSTED".equals(tx.status()) && tx.date() != null && tx.amount() != null
-                              && tx.creditCardMetadata() != null && billId.equals(tx.creditCardMetadata().billId()))
+                .filter(tx -> tx.date() != null && tx.amount() != null && tx.creditCardMetadata() != null)
+                .filter(tx -> open
+                        ? tx.creditCardMetadata().billId() == null
+                          && ("POSTED".equals(tx.status()) || "PENDING".equals(tx.status()))
+                        : "POSTED".equals(tx.status()) && billId.equals(tx.creditCardMetadata().billId()))
                 // O PDF é cronológico, e a ordem decide o ordinal de linhas iguais; o id desempata
                 // para que buscar de novo dê a mesma ordem.
                 .sorted(Comparator.comparing((PluggyTransaction tx) -> dateOf(tx))
@@ -84,7 +119,7 @@ public class PluggyFaturaSource {
                     key -> new ArrayList<>()).add(toRow(i + 1, tx));
         }
         // O titular (o final do vínculo) vem primeiro, como no PDF; os virtuais e adicionais depois.
-        return new ParsedFatura(dateOf(bill.dueDate()), bill.totalAmount(),
+        return new ParsedFatura(dueDate, totalAmount,
                 sections.entrySet().stream()
                         .sorted(Comparator.comparing(entry -> !entry.getKey().equals(fallbackLast4)))
                         .map(entry -> new ParsedCardSection(entry.getKey(), entry.getValue()))

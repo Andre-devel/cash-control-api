@@ -28,7 +28,7 @@ public interface FaturaImportService {
 
     FaturaImportPreviewResponse preview(MultipartFile file, InvoiceImportFormat format, UUID userId);
 
-    /** Faturas fechadas do cartão do banco vinculado a este cartão, da mais recente para a mais antiga. */
+    /** Faturas do cartão do banco vinculado: a atual, em aberto, e as fechadas, da mais recente para a mais antiga. */
     List<BankBillResponse> listBankBills(UUID creditCardId, UUID userId);
 
     /**

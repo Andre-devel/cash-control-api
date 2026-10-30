@@ -42,7 +42,7 @@ public class PluggyWebhookController {
         if (event.event().startsWith("item/")) {
             bankConnectionService.onItemEvent(event.itemId());
         } else if ("transactions/created".equals(event.event()) && clean(event.accountId()) != null) {
-            // Por ora só mede o atraso; a fila de pendentes é a etapa 6A.
+            // Mede o atraso e põe os lançamentos novos na fila de revisão.
             bankConnectionService.onTransactionsCreated(event.itemId(), clean(event.accountId()),
                     event.transactionsCreatedAtFrom(), receivedAt);
         }

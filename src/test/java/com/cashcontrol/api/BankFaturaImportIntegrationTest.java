@@ -89,10 +89,11 @@ class BankFaturaImportIntegrationTest {
     }
 
     @Test
-    void listBills_newestFirst() {
+    void listBills_currentOpenFirst_thenClosedNewestFirst() {
         assertThat(faturaImportService.listBankBills(cardId, userId))
                 .extracting(BankBillResponse::billId, BankBillResponse::dueDate)
                 .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("open", LocalDate.of(2026, 10, 7)),
                         org.assertj.core.groups.Tuple.tuple(AUGUST, LocalDate.of(2026, 9, 7)),
                         org.assertj.core.groups.Tuple.tuple(JULY, LocalDate.of(2026, 8, 7)));
     }
@@ -167,6 +168,40 @@ class BankFaturaImportIntegrationTest {
         assertThat(row(preview, "Outra").possibleDuplicate()).isFalse();
         assertThat(preview.groups()).flatExtracting(FaturaImportGroupPreview::rows)
                 .noneMatch(FaturaImportPreviewRow::duplicate);
+    }
+
+    @Test
+    void openBill_bringsChargesWithoutBill_pendingIncluded_andClosingLaterDoesNotDuplicate() {
+        givenBank(
+                openCharge("p1", "PENDING", "EBN CAPCUT             CURITIBA      BRA", "65.90", "2026-09-11"),
+                openCharge("p2", "POSTED", "PATREON  MEMBERSHIP    INTERNET      IRL", "37.50", "2026-09-09"),
+                card("closed", "LOJA DE AGOSTO", "10.00", "DEBIT", "2026-08-20", "7866", AUGUST, null, null, null));
+
+        FaturaImportPreviewResponse open = faturaImportService.previewFromBank(cardId, "open", userId);
+
+        assertThat(open.dueDate()).isEqualTo(LocalDate.of(2026, 10, 7));
+        assertThat(open.referenceMonth()).isEqualTo("2026-09");
+        assertThat(open.totalAmount()).isNull();
+        assertThat(open.totalRows()).isEqualTo(2);
+        commit(open);
+
+        // A fatura fecha: os mesmos lançamentos voltam com billId e outro status.
+        when(pluggyClient.listBills(externalAccountId)).thenReturn(List.of(
+                new PluggyBill("bill-09", Instant.parse("2026-10-07T00:00:00Z"), new BigDecimal("103.40"))));
+        givenBank(
+                card("p1", "EBN CAPCUT             CURITIBA      BRA", "65.90", "DEBIT", "2026-09-11", "7866",
+                        "bill-09", null, null, null),
+                card("p2", "PATREON  MEMBERSHIP    INTERNET      IRL", "37.50", "DEBIT", "2026-09-09", "7866",
+                        "bill-09", null, null, null));
+
+        FaturaImportPreviewResponse closed = faturaImportService.previewFromBank(cardId, "bill-09", userId);
+
+        assertThat(closed.duplicateCount()).isEqualTo(2);
+    }
+
+    private static PluggyTransaction openCharge(String id, String status, String description, String amount, String date) {
+        return new PluggyTransaction(id, description, new BigDecimal(amount), "DEBIT", status,
+                Instant.parse(date + "T03:00:00Z"), new CreditCardMetadata("7866", null, null, null, null));
     }
 
     @Test

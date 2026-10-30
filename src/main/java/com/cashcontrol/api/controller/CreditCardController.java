@@ -243,7 +243,8 @@ public class CreditCardController {
     }
 
     @Operation(summary = "List the card's bills at the bank", description = """
-            Closed bills of the bank card linked to this card (through Pluggy), newest first, to pick \
+            Bills of the bank card linked to this card (through Pluggy): first the current open one (`billId: open`, \
+            estimated due date, pending charges included), then the closed ones newest first, to pick \
             one for `POST /api/v1/cards/{id}/invoices/import/bank-preview`.""")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Bills returned"),
@@ -265,7 +266,7 @@ public class CreditCardController {
     }
 
     @Operation(summary = "Preview invoice import from the bank", description = """
-            Same preview as the PDF one, with the closed bill `billId` fetched from the bank through \
+            Same preview as the PDF one, with the bill `billId` (or `open` for the current one) fetched from the bank through \
             Pluggy. Every section suggests this card. Commit with `format: OPEN_FINANCE`.""")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Preview returned"),
