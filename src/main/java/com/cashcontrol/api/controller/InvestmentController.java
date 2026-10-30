@@ -9,6 +9,7 @@ import com.cashcontrol.api.dto.response.FixedIncomeHoldingResponse;
 import com.cashcontrol.api.dto.response.HoldingEvolutionResponse;
 import com.cashcontrol.api.dto.response.InvestmentSummaryResponse;
 import com.cashcontrol.api.dto.response.MarketIndexesResponse;
+import com.cashcontrol.api.dto.response.PendingInvestmentTransferResponse;
 import com.cashcontrol.api.security.AuthenticatedUser;
 import com.cashcontrol.api.service.investment.InvestmentService;
 import com.cashcontrol.api.service.investment.Valuation;
@@ -81,6 +82,13 @@ public class InvestmentController {
     @PreAuthorize("isAuthenticated()")
     public InvestmentSummaryResponse getSummary(@AuthenticationPrincipal AuthenticatedUser principal) {
         return investmentService.getSummary(principal.getUser().getId(), today());
+    }
+
+    @Operation(summary = "Pending investment transfers", description = "Transfers of the last 90 days into or out of an investment account that no holding or redemption references yet, to register the holding or reconcile the redemption.")
+    @GetMapping("/pending-transfers")
+    @PreAuthorize("isAuthenticated()")
+    public List<PendingInvestmentTransferResponse> listPendingTransfers(@AuthenticationPrincipal AuthenticatedUser principal) {
+        return investmentService.listPendingTransfers(principal.getUser().getId(), today());
     }
 
     @Operation(summary = "List holdings", description = "Holdings valued today. Without status, active and redeemed.")

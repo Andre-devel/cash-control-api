@@ -160,6 +160,50 @@ class InvestmentApiIntegrationTest {
     }
 
     @Test
+    void importedApplication_isPendingUntilAHoldingLinksIt() throws Exception {
+        UUID imported = accountService.transfer(account(checkingId), account(investmentId), new BigDecimal("1000"),
+                TODAY.minusDays(10), "CDB Inter").getFirst().getTransferGroupId();
+        // Fora da janela: saldo antigo, que entra como "já está na conta".
+        accountService.transfer(account(checkingId), account(investmentId), new BigDecimal("300"),
+                TODAY.minusDays(200), "CDB antigo");
+
+        perform(get("/api/v1/investments/pending-transfers"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].transferGroupId").value(imported.toString()))
+                .andExpect(jsonPath("$[0].direction").value("APPLICATION"))
+                .andExpect(jsonPath("$[0].amount").value(1000.00))
+                .andExpect(jsonPath("$[0].accountId").value(investmentId.toString()))
+                .andExpect(jsonPath("$[0].counterpartAccountName").value("Conta corrente"));
+
+        createCdb(1000, TODAY.minusDays(10), "\"fundingTransferGroupId\":\"" + imported + "\"");
+
+        perform(get("/api/v1/investments/pending-transfers"))
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    void importedRedemption_isPendingUntilARedemptionLinksIt() throws Exception {
+        JsonNode holding = createCdb(1000, TODAY.minusDays(200), "\"fromAccountId\":\"" + checkingId + "\"");
+        UUID imported = accountService.transfer(account(investmentId), account(checkingId), new BigDecimal("1061.10"),
+                TODAY, "Resgate CDB").getFirst().getTransferGroupId();
+        UUID betweenInvestments = createAccount("Corretora", AccountType.INVESTMENT);
+        accountService.transfer(account(investmentId), account(betweenInvestments), new BigDecimal("1"), TODAY, "Entre contas");
+
+        perform(get("/api/v1/investments/pending-transfers"))
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].direction").value("REDEMPTION"))
+                .andExpect(jsonPath("$[0].amount").value(1061.10));
+
+        perform(post("/api/v1/investments/holdings/" + holding.get("id").asText() + "/redemptions")
+                .content("{\"date\":\"" + TODAY + "\",\"total\":true,\"transferGroupId\":\"" + imported + "\"}"))
+                .andExpect(status().isOk());
+
+        perform(get("/api/v1/investments/pending-transfers"))
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
     void create_withoutFunding_showsTheMissingCashAsNegativeUnallocated() throws Exception {
         createCdb(1000, TODAY.minusDays(30), null);
 

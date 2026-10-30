@@ -125,6 +125,27 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     List<Transaction> findAllByTransferGroupId(UUID transferGroupId);
 
+    List<Transaction> findAllByTransferGroupIdIn(Collection<UUID> transferGroupIds);
+
+    /**
+     * Pernas de transferência em contas de investimento ativas, desde {@code from}, que nenhuma
+     * aplicação (de entrada) nem resgate cita: o que o import do extrato trouxe e ainda falta
+     * registrar na tela de investimentos.
+     */
+    @Query("SELECT t FROM Transaction t JOIN FETCH t.account a " +
+           "WHERE t.userId = :userId " +
+           "AND t.type = com.cashcontrol.api.domain.entity.TransactionType.TRANSFER " +
+           "AND t.transferGroupId IS NOT NULL " +
+           "AND a.type = com.cashcontrol.api.domain.entity.AccountType.INVESTMENT " +
+           "AND a.archivedAt IS NULL AND a.deletedAt IS NULL " +
+           "AND t.paymentDate >= :from " +
+           "AND NOT EXISTS (SELECT 1 FROM FixedIncomeHolding h " +
+           "  WHERE h.fundingTransferGroupId = t.transferGroupId AND h.deletedAt IS NULL) " +
+           "AND NOT EXISTS (SELECT 1 FROM FixedIncomeRedemption r WHERE r.transferGroupId = t.transferGroupId) " +
+           "ORDER BY t.paymentDate DESC, t.createdAt DESC")
+    List<Transaction> findUnlinkedInvestmentTransferLegs(@Param("userId") UUID userId,
+                                                         @Param("from") LocalDate from);
+
     List<Transaction> findAllByInstallmentSeries_Id(UUID installmentSeriesId);
 
     List<Transaction> findAllByInstallmentSeries_IdIn(Collection<UUID> installmentSeriesIds);

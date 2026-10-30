@@ -23,6 +23,7 @@ import com.cashcontrol.api.dto.response.FixedIncomeHoldingResponse;
 import com.cashcontrol.api.dto.response.FixedIncomeRedemptionResponse;
 import com.cashcontrol.api.dto.response.HoldingEvolutionResponse;
 import com.cashcontrol.api.dto.response.InvestmentSummaryResponse;
+import com.cashcontrol.api.dto.response.PendingInvestmentTransferResponse;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.FixedIncomeHoldingRepository;
@@ -73,6 +74,11 @@ public class InvestmentService {
     static final String YIELD_SUBCATEGORY = "Rendimentos";
 
     private static final int UPCOMING_MATURITY_DAYS = 90;
+    /**
+     * Até onde olhar transferências sem aplicação. Saldo antigo entra como "já está na conta";
+     * sem o corte, anos de extrato importado ficariam pendentes para sempre.
+     */
+    static final int PENDING_TRANSFER_DAYS = 90;
 
     private final FixedIncomeHoldingRepository holdingRepository;
     private final FixedIncomeRedemptionRepository redemptionRepository;
@@ -259,6 +265,41 @@ public class InvestmentService {
             }
         }
         return result;
+    }
+
+    /**
+     * Transferências com as contas de investimento dos últimos {@value #PENDING_TRANSFER_DAYS}
+     * dias que ainda não viraram aplicação nem resgate. Entre duas contas de investimento não
+     * conta: o dinheiro não saiu nem entrou na carteira.
+     */
+    @Transactional(readOnly = true)
+    public List<PendingInvestmentTransferResponse> listPendingTransfers(UUID userId, LocalDate today) {
+        List<Transaction> legs = transactionRepository.findUnlinkedInvestmentTransferLegs(
+                userId, today.minusDays(PENDING_TRANSFER_DAYS));
+        if (legs.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, List<Transaction>> groups = new HashMap<>();
+        transactionRepository.findAllByTransferGroupIdIn(legs.stream().map(Transaction::getTransferGroupId).toList())
+                .forEach(leg -> groups.computeIfAbsent(leg.getTransferGroupId(), id -> new ArrayList<>()).add(leg));
+        List<PendingInvestmentTransferResponse> pending = new ArrayList<>();
+        for (Transaction leg : legs) {
+            Account counterpart = groups.getOrDefault(leg.getTransferGroupId(), List.of()).stream()
+                    .filter(other -> !other.getId().equals(leg.getId()))
+                    .map(Transaction::getAccount)
+                    .findFirst()
+                    .orElse(null);
+            if (counterpart != null && counterpart.getType() == AccountType.INVESTMENT) {
+                continue;
+            }
+            pending.add(new PendingInvestmentTransferResponse(leg.getTransferGroupId(),
+                    leg.getAccount().getId(), leg.getAccount().getName(),
+                    counterpart != null ? counterpart.getName() : null,
+                    leg.getPaymentDate(), leg.getAmount().abs(), leg.getDescription(),
+                    leg.getAmount().signum() > 0 ? PendingInvestmentTransferResponse.Direction.APPLICATION
+                            : PendingInvestmentTransferResponse.Direction.REDEMPTION));
+        }
+        return pending;
     }
 
     /** Títulos do Tesouro cotados na data mais recente, para o cadastro escolher tipo e vencimento. */
