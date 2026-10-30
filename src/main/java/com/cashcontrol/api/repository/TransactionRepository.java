@@ -357,12 +357,16 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("to") LocalDate to,
             @Param("accountId") UUID accountId);
 
+    // Pendente só tem payment_date quando o usuário informou o vencimento; ocorrência de
+    // recorrência e parcela nascem sem, e vencem na competência. Compra no cartão fica de fora:
+    // ela vence pela fatura, que tem widget próprio.
     @Query("SELECT t FROM Transaction t " +
            "WHERE t.userId = :userId " +
            "AND t.account.deletedAt IS NULL " +
+           "AND t.creditCard IS NULL " +
            "AND t.status IN :statuses " +
-           "AND t.paymentDate <= :deadline " +
-           "ORDER BY t.paymentDate ASC")
+           "AND COALESCE(t.paymentDate, t.competenceDate) <= :deadline " +
+           "ORDER BY COALESCE(t.paymentDate, t.competenceDate) ASC")
     List<Transaction> findUpcomingBills(
             @Param("userId") UUID userId,
             @Param("statuses") List<TransactionStatus> statuses,

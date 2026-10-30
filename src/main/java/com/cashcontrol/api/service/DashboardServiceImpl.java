@@ -220,7 +220,7 @@ public class DashboardServiceImpl implements DashboardService {
                         t.getDescription(),
                         t.getAccount().getName(),
                         t.getCategory() != null ? t.getCategory().getName() : null,
-                        t.getPaymentDate(),
+                        t.getPaymentDate() != null ? t.getPaymentDate() : t.getCompetenceDate(),
                         t.getStatus()))
                 .toList();
     }

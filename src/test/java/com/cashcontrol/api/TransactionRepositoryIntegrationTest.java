@@ -396,6 +396,26 @@ class TransactionRepositoryIntegrationTest {
                 .containsExactlyInAnyOrder("Bill tomorrow", "Bill in 3 days");
     }
 
+    @Test
+    void findUpcomingBills_usesCompetenceDateWhenPendingHasNoPaymentDate() {
+        LocalDate today = LocalDate.now();
+
+        // Ocorrência de recorrência e parcela nascem PENDENTES sem payment_date.
+        saveTransaction(userId, defaultAccount, TransactionType.EXPENSE, TransactionStatus.PENDING,
+                new BigDecimal("80.00"), "Recurring in 2 days", null, today.plusDays(2), null);
+        saveTransaction(userId, defaultAccount, TransactionType.EXPENSE, TransactionStatus.PENDING,
+                new BigDecimal("90.00"), "Recurring in 12 days", null, today.plusDays(12), null);
+
+        List<Transaction> bills = transactionRepository.findUpcomingBills(
+                userId,
+                List.of(TransactionStatus.PENDING, TransactionStatus.OVERDUE),
+                today.plusDays(7),
+                PageRequest.of(0, 100));
+
+        assertThat(bills).extracting(Transaction::getDescription)
+                .containsExactly("Recurring in 2 days");
+    }
+
     // ── IT-1.1 — findLargestExpenses ─────────────────────────────────────────
 
     @Test
