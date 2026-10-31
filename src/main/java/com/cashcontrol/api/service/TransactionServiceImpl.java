@@ -16,9 +16,11 @@ import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
 import com.cashcontrol.api.dto.request.CreateTransactionRequest;
 import com.cashcontrol.api.dto.request.EditTransactionRequest;
 import com.cashcontrol.api.dto.request.MarkAsPaidRequest;
+import com.cashcontrol.api.dto.request.ReimbursementRequest;
 import com.cashcontrol.api.dto.request.TransactionFilterRequest;
 import com.cashcontrol.api.dto.response.CreditCardRefResponse;
 import com.cashcontrol.api.dto.response.PaymentMethodResponse;
+import com.cashcontrol.api.dto.response.ReimbursementResponse;
 import com.cashcontrol.api.dto.response.TagResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.dto.response.TransactionSummaryResponse;
@@ -31,6 +33,7 @@ import com.cashcontrol.api.repository.TagRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -199,6 +202,11 @@ public class TransactionServiceImpl implements TransactionService {
         }
 
         refreshDueStatus(tx);
+        if (tx.getStatus() == TransactionStatus.CANCELLED) {
+            releaseReimbursement(tx);
+        } else if (request.amount() != null) {
+            checkReimbursementAmounts(tx);
+        }
 
         applyCategory(tx, request.categoryId(), request.subcategoryId(), userId, null);
         if (request.tagIds() != null) {
@@ -235,6 +243,7 @@ public class TransactionServiceImpl implements TransactionService {
                     + "para remover o parcelamento inteiro.");
         }
 
+        releaseReimbursement(tx);
         attachmentService.deleteAllForTransactions(List.of(tx.getId()));
         creditCardService.detachInvoiceItemForTransaction(tx.getId());
         transactionRepository.delete(tx);
@@ -273,6 +282,7 @@ public class TransactionServiceImpl implements TransactionService {
 
         tx.setStatus(TransactionStatus.CANCELLED);
         tx.setCancelledAt(Instant.now());
+        releaseReimbursement(tx);
 
         tx = transactionRepository.save(tx);
         creditCardService.syncInvoiceItemForTransaction(tx);
@@ -305,6 +315,68 @@ public class TransactionServiceImpl implements TransactionService {
     }
 
     @Override
+    @Transactional
+    public TransactionDetailResponse setReimbursement(UUID id, ReimbursementRequest request, UUID userId) {
+        Transaction tx = findOwnedTransaction(id, userId);
+
+        if (tx.getType() != TransactionType.EXPENSE) {
+            throw new BusinessRuleException("Só despesas podem ser marcadas como reembolsáveis.");
+        }
+        if (tx.getStatus() == TransactionStatus.CANCELLED) {
+            throw new BusinessRuleException("Transações canceladas não podem ser marcadas como reembolsáveis.");
+        }
+        // A linha agrupada do parcelamento representa a compra inteira; marcar uma parcela só
+        // deixaria a série metade fora dos gráficos.
+        if (tx.getInstallmentSeries() != null) {
+            throw new BusinessRuleException("Parcelas não podem ser marcadas como reembolsáveis.");
+        }
+        if (!request.reimbursable() && request.reimbursedById() != null) {
+            throw new BusinessRuleException("Só uma despesa reembolsável pode ter o reembolso vinculado.");
+        }
+
+        Transaction income = null;
+        if (request.reimbursedById() != null) {
+            income = findOwnedTransaction(request.reimbursedById(), userId);
+            if (income.getType() != TransactionType.INCOME) {
+                throw new BusinessRuleException("O reembolso precisa ser uma receita.");
+            }
+            if (income.getStatus() == TransactionStatus.CANCELLED) {
+                throw new BusinessRuleException("Uma receita cancelada não pode ser vinculada como reembolso.");
+            }
+            transactionRepository.findByReimbursedBy_Id(income.getId())
+                    .filter(other -> !other.getId().equals(tx.getId()))
+                    .ifPresent(other -> {
+                        throw new BusinessRuleException(
+                                "Esta receita já está vinculada como reembolso de \"" + other.getDescription() + "\".");
+                    });
+        }
+
+        tx.setReimbursable(request.reimbursable());
+        tx.setReimbursedBy(income);
+        checkReimbursementAmounts(tx);
+        return toDetail(transactionRepository.save(tx));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<TransactionSummaryResponse> listPendingReimbursements(UUID userId) {
+        return withReimbursements(transactionRepository.findPendingReimbursements(userId));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<TransactionSummaryResponse> listReimbursementCandidates(UUID id, UUID userId) {
+        Transaction tx = findOwnedTransaction(id, userId);
+        if (tx.getType() != TransactionType.EXPENSE) {
+            throw new BusinessRuleException("Só despesas podem ser reembolsadas.");
+        }
+        return transactionRepository.findReimbursementCandidates(
+                        userId, tx.getAmount(), PageRequest.of(0, REIMBURSEMENT_CANDIDATES)).stream()
+                .map(this::toSummary)
+                .toList();
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public Page<TransactionSummaryResponse> listTransactions(TransactionFilterRequest filter, UUID userId, Pageable pageable) {
         Page<Transaction> page = transactionRepository.findWithFilters(
@@ -326,8 +398,9 @@ public class TransactionServiceImpl implements TransactionService {
                 pageable
         );
 
+        Map<UUID, ReimbursementResponse> reimbursements = loadReimbursements(page.getContent());
         if (!filter.groupInstallments()) {
-            return page.map(this::toSummary);
+            return page.map(tx -> toSummary(tx).withReimbursement(reimbursements.get(tx.getId())));
         }
 
         Set<UUID> seriesIds = page.getContent().stream()
@@ -335,14 +408,10 @@ public class TransactionServiceImpl implements TransactionService {
                 .map(tx -> tx.getInstallmentSeries().getId())
                 .collect(Collectors.toSet());
 
-        if (seriesIds.isEmpty()) {
-            return page.map(this::toSummary);
-        }
-
-        Map<UUID, SeriesAggregate> aggregates = loadSeriesAggregates(seriesIds);
+        Map<UUID, SeriesAggregate> aggregates = seriesIds.isEmpty() ? Map.of() : loadSeriesAggregates(seriesIds);
         return page.map(tx -> {
             if (tx.getInstallmentSeries() == null || tx.getInstallmentNumber() == null) {
-                return toSummary(tx);
+                return toSummary(tx).withReimbursement(reimbursements.get(tx.getId()));
             }
             SeriesAggregate agg = aggregates.get(tx.getInstallmentSeries().getId());
             return agg != null ? toGroupedSummary(tx, agg) : toSummary(tx);
@@ -588,7 +657,8 @@ public class TransactionServiceImpl implements TransactionService {
                 tx.getTotalInstallments(),
                 agg.totalAmount(),
                 agg.paidCount(),
-                true
+                true,
+                null
         );
     }
 
@@ -664,8 +734,89 @@ public class TransactionServiceImpl implements TransactionService {
                 tx.getUpdatedAt(),
                 pmResponse,
                 cardResponse,
-                tx.getPaidInvoice() != null ? tx.getPaidInvoice().getId() : null
+                tx.getPaidInvoice() != null ? tx.getPaidInvoice().getId() : null,
+                reimbursementOf(tx)
         );
+    }
+
+    // ── Reembolso ─────────────────────────────────────────────────────────────
+
+    private static final int REIMBURSEMENT_CANDIDATES = 20;
+
+    /**
+     * Entrada maior que a despesa deixaria a despesa negativa nos gráficos; o vínculo é recusado
+     * (V42). Vale para o vínculo novo e para a edição de valor de qualquer um dos dois lados.
+     */
+    private void checkReimbursementAmounts(Transaction tx) {
+        Transaction expense = tx.getType() == TransactionType.INCOME
+                ? transactionRepository.findByReimbursedBy_Id(tx.getId()).orElse(null)
+                : tx;
+        if (expense == null || expense.getReimbursedBy() == null) {
+            return;
+        }
+        if (expense.getReimbursedBy().getAmount().compareTo(expense.getAmount()) > 0) {
+            throw new BusinessRuleException("O valor do reembolso não pode ser maior que o da despesa.");
+        }
+    }
+
+    /**
+     * Cancelar ou excluir um dos lados desfaz o vínculo. A despesa continua reembolsável e volta
+     * para a lista de pendentes; a despesa cancelada deixa de ser reembolsável.
+     */
+    private void releaseReimbursement(Transaction tx) {
+        if (tx.getType() == TransactionType.INCOME) {
+            transactionRepository.findByReimbursedBy_Id(tx.getId()).ifPresent(expense -> {
+                expense.setReimbursedBy(null);
+                transactionRepository.saveAndFlush(expense);
+            });
+        } else if (tx.isReimbursable()) {
+            tx.setReimbursedBy(null);
+            tx.setReimbursable(false);
+        }
+    }
+
+    private ReimbursementResponse reimbursementOf(Transaction tx) {
+        if (tx.isReimbursable()) {
+            Transaction income = tx.getReimbursedBy();
+            return income == null
+                    ? new ReimbursementResponse(true, null, null, null)
+                    : new ReimbursementResponse(true, income.getId(), income.getDescription(), income.getAmount());
+        }
+        if (tx.getType() == TransactionType.INCOME) {
+            return transactionRepository.findByReimbursedBy_Id(tx.getId())
+                    .map(expense -> new ReimbursementResponse(
+                            false, expense.getId(), expense.getDescription(), expense.getAmount()))
+                    .orElse(null);
+        }
+        return null;
+    }
+
+    /** {@link #reimbursementOf} para uma página inteira, com uma consulta só para as receitas. */
+    private Map<UUID, ReimbursementResponse> loadReimbursements(List<Transaction> transactions) {
+        Map<UUID, ReimbursementResponse> byId = new HashMap<>();
+        List<UUID> incomeIds = transactions.stream()
+                .filter(tx -> tx.getType() == TransactionType.INCOME)
+                .map(Transaction::getId)
+                .toList();
+        if (!incomeIds.isEmpty()) {
+            for (Transaction expense : transactionRepository.findAllByReimbursedBy_IdIn(incomeIds)) {
+                byId.put(expense.getReimbursedBy().getId(), new ReimbursementResponse(
+                        false, expense.getId(), expense.getDescription(), expense.getAmount()));
+            }
+        }
+        for (Transaction tx : transactions) {
+            if (tx.isReimbursable()) {
+                byId.put(tx.getId(), reimbursementOf(tx));
+            }
+        }
+        return byId;
+    }
+
+    private List<TransactionSummaryResponse> withReimbursements(List<Transaction> transactions) {
+        Map<UUID, ReimbursementResponse> reimbursements = loadReimbursements(transactions);
+        return transactions.stream()
+                .map(tx -> toSummary(tx).withReimbursement(reimbursements.get(tx.getId())))
+                .toList();
     }
 
     /**

@@ -29,7 +29,8 @@ public record TransactionSummaryResponse(
         @Schema(description = "Total installments in the series. Null for non-installment transactions.", example = "5") Integer totalInstallments,
         @Schema(description = "Sum of the non-cancelled installments of the series. Only filled on grouped rows.", example = "1000.00") BigDecimal installmentTotalAmount,
         @Schema(description = "How many installments of the series are already PAID. Only filled on grouped rows.", example = "1") Integer paidInstallments,
-        @Schema(description = "True when this row stands for the whole series (groupInstallments=true) instead of a single installment.") boolean installmentGroup
+        @Schema(description = "True when this row stands for the whole series (groupInstallments=true) instead of a single installment.") boolean installmentGroup,
+        @Schema(description = "Reimbursement link. Null when the transaction is not part of one.") ReimbursementResponse reimbursement
 ) {
 
     /** Non-installment row, or an installment listed individually (groupInstallments=false). */
@@ -41,6 +42,14 @@ public record TransactionSummaryResponse(
         return new TransactionSummaryResponse(
                 id, accountId, accountName, type, status, amount, description,
                 competenceDate, paymentDate, categoryId, categoryName, createdAt, paymentMethod,
-                installmentSeriesId, installmentNumber, totalInstallments, null, null, false);
+                installmentSeriesId, installmentNumber, totalInstallments, null, null, false, null);
+    }
+
+    public TransactionSummaryResponse withReimbursement(ReimbursementResponse value) {
+        return new TransactionSummaryResponse(
+                id, accountId, accountName, type, status, amount, description,
+                competenceDate, paymentDate, categoryId, categoryName, createdAt, paymentMethod,
+                installmentSeriesId, installmentNumber, totalInstallments, installmentTotalAmount,
+                paidInstallments, installmentGroup, value);
     }
 }

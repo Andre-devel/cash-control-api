@@ -37,7 +37,7 @@ import java.util.UUID;
 @Setter
 @NoArgsConstructor
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
-@ToString(exclude = {"account", "category", "subcategory", "installmentSeries", "recurrenceRule", "paidInvoice", "tags"})
+@ToString(exclude = {"account", "category", "subcategory", "installmentSeries", "recurrenceRule", "paidInvoice", "reimbursedBy", "tags"})
 public class Transaction {
 
     @Id
@@ -145,6 +145,15 @@ public class Transaction {
     @JoinColumn(name = "paid_invoice_id")
     private Invoice paidInvoice;
 
+    /** Só em EXPENSE: despesa que será devolvida. Sai dos gráficos e do orçamento (V42). */
+    @Column(name = "reimbursable", nullable = false)
+    private boolean reimbursable = false;
+
+    /** A entrada (INCOME) que reembolsou esta despesa; só com {@link #reimbursable}. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "reimbursed_by_id")
+    private Transaction reimbursedBy;
+
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
             name = "transaction_tags",
@@ -161,6 +170,18 @@ public class Transaction {
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
+    /**
+     * Quanto este lançamento pesa em receita x despesa: a despesa reembolsável vale só o que não
+     * voltou (zero enquanto nada voltou). Mesma regra de
+     * {@code TransactionRepository#NET_OF_REIMBURSEMENT}.
+     */
+    public BigDecimal amountNetOfReimbursement() {
+        if (!reimbursable) {
+            return amount;
+        }
+        return reimbursedBy == null ? BigDecimal.ZERO : amount.subtract(reimbursedBy.getAmount());
+    }
 
     /**
      * Roda em todo insert e update, independente de como a descrição foi parar

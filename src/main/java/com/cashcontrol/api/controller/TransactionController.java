@@ -5,6 +5,7 @@ import com.cashcontrol.api.dto.request.CreateTransactionRequest;
 import com.cashcontrol.api.dto.request.EditTransactionRequest;
 import com.cashcontrol.api.dto.request.ImportCommitRequest;
 import com.cashcontrol.api.dto.request.MarkAsPaidRequest;
+import com.cashcontrol.api.dto.request.ReimbursementRequest;
 import com.cashcontrol.api.dto.request.ReceiptCommitRequest;
 import com.cashcontrol.api.dto.request.TransactionFilterRequest;
 import com.cashcontrol.api.dto.response.ApplyReconciliationResult;
@@ -292,6 +293,62 @@ public class TransactionController {
             @Parameter(description = "Transaction UUID", required = true) @PathVariable UUID id,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         return transactionService.reactivateTransaction(id, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Set reimbursement", description = """
+            Marks an EXPENSE as reimbursable (it will be, or was, paid back) and optionally links the INCOME that \
+            paid it back. A reimbursable expense counts in income/expense figures (dashboard, budgets, totals) only \
+            for the part that did not come back — nothing while pending — and the linked income does not count at \
+            all. Account balances are unaffected. The body replaces the current state.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Reimbursement state updated"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Transaction or income not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Not an expense, cancelled, an installment, income already linked or larger than the expense",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PutMapping("/{id}/reimbursement")
+    @PreAuthorize("isAuthenticated()")
+    public TransactionDetailResponse setReimbursement(
+            @Parameter(description = "Expense UUID", required = true) @PathVariable UUID id,
+            @Valid @RequestBody ReimbursementRequest request,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return transactionService.setReimbursement(id, request, principal.getUser().getId());
+    }
+
+    @Operation(summary = "List pending reimbursements", description = "Reimbursable expenses whose income has not been linked yet, newest first.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Pending reimbursements returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @GetMapping("/reimbursements/pending")
+    @PreAuthorize("isAuthenticated()")
+    public List<TransactionSummaryResponse> listPendingReimbursements(
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return transactionService.listPendingReimbursements(principal.getUser().getId());
+    }
+
+    @Operation(summary = "List reimbursement candidates", description = """
+            Incomes that can be linked as the reimbursement of the expense: not cancelled, not linked to another \
+            expense and not larger than it, closest amount first.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Candidates returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Transaction not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Not an expense",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @GetMapping("/{id}/reimbursement/candidates")
+    @PreAuthorize("isAuthenticated()")
+    public List<TransactionSummaryResponse> listReimbursementCandidates(
+            @Parameter(description = "Expense UUID", required = true) @PathVariable UUID id,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return transactionService.listReimbursementCandidates(id, principal.getUser().getId());
     }
 
     @Operation(summary = "Preview import reconciliation", description = """

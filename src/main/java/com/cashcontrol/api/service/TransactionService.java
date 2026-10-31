@@ -7,6 +7,7 @@ import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.dto.request.CreateTransactionRequest;
 import com.cashcontrol.api.dto.request.EditTransactionRequest;
 import com.cashcontrol.api.dto.request.MarkAsPaidRequest;
+import com.cashcontrol.api.dto.request.ReimbursementRequest;
 import com.cashcontrol.api.dto.request.TransactionFilterRequest;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.dto.response.TransactionSummaryResponse;
@@ -14,6 +15,7 @@ import com.cashcontrol.api.dto.response.TransactionTotalsResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
+import java.util.List;
 import java.util.UUID;
 
 public interface TransactionService {
@@ -37,6 +39,15 @@ public interface TransactionService {
 
     /** Desfaz o cancelamento: volta para PENDING. Parcelas não podem ser reativadas sozinhas. */
     TransactionDetailResponse reactivateTransaction(UUID id, UUID userId);
+
+    /** Marca/desmarca a despesa como reembolsável e vincula (ou desvincula) a receita que a reembolsou. */
+    TransactionDetailResponse setReimbursement(UUID id, ReimbursementRequest request, UUID userId);
+
+    /** Despesas reembolsáveis ainda sem a receita vinculada. */
+    List<TransactionSummaryResponse> listPendingReimbursements(UUID userId);
+
+    /** Receitas que podem ser vinculadas como reembolso da despesa {@code id}. */
+    List<TransactionSummaryResponse> listReimbursementCandidates(UUID id, UUID userId);
 
     Page<TransactionSummaryResponse> listTransactions(TransactionFilterRequest filter, UUID userId, Pageable pageable);
 

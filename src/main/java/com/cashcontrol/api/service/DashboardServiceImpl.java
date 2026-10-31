@@ -276,7 +276,7 @@ public class DashboardServiceImpl implements DashboardService {
         return transactions.stream()
                 .map(t -> new LargestExpenseResponse(
                         t.getId(),
-                        t.getAmount(),
+                        t.amountNetOfReimbursement(),
                         t.getDescription(),
                         t.getCategory() != null ? t.getCategory().getName() : null,
                         t.getAccount().getName(),

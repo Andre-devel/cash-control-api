@@ -221,6 +221,49 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
                           AND (CAST(:competenceDateTo AS LocalDate) IS NULL OR i.competenceDate <= :competenceDateTo)))
             """;
 
+    // ── Reembolso (V42) ──────────────────────────────────────────────────────
+    // Receita x despesa (gráficos, orçamento, totais) não conta o que é reembolso: a despesa
+    // reembolsável vale só o que não voltou (zero enquanto nada voltou) e a entrada que a
+    // reembolsou some. Saldo e patrimônio não usam isto — o dinheiro saiu e voltou de verdade.
+    // Exige "LEFT JOIN t.reimbursedBy rb" na consulta.
+
+    String REIMBURSEMENT_JOIN = " LEFT JOIN t.reimbursedBy rb ";
+
+    String NET_OF_REIMBURSEMENT =
+            "CASE WHEN t.reimbursable = FALSE THEN t.amount WHEN rb.id IS NULL THEN 0 ELSE t.amount - rb.amount END";
+
+    String NOT_A_REIMBURSEMENT =
+            " AND NOT EXISTS (SELECT 1 FROM Transaction ro WHERE ro.reimbursedBy = t) ";
+
+    /** Despesas marcadas como reembolsáveis que ainda não têm a entrada vinculada. */
+    @Query("SELECT t FROM Transaction t JOIN FETCH t.account " +
+           "WHERE t.userId = :userId " +
+           "AND t.reimbursable = TRUE AND t.reimbursedBy IS NULL " +
+           "AND t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED " +
+           "AND t.account.deletedAt IS NULL " +
+           "ORDER BY t.competenceDate DESC, t.createdAt DESC")
+    List<Transaction> findPendingReimbursements(@Param("userId") UUID userId);
+
+    /**
+     * Entradas que podem reembolsar uma despesa de valor {@code maxAmount}: não canceladas, não
+     * vinculadas a outra despesa e sem passar do valor dela; as de valor mais próximo primeiro.
+     */
+    @Query("SELECT t FROM Transaction t JOIN FETCH t.account " +
+           "WHERE t.userId = :userId " +
+           "AND t.type = com.cashcontrol.api.domain.entity.TransactionType.INCOME " +
+           "AND t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED " +
+           "AND t.account.deletedAt IS NULL " +
+           "AND t.amount <= :maxAmount" + NOT_A_REIMBURSEMENT +
+           "ORDER BY ABS(t.amount - :maxAmount) ASC, t.competenceDate DESC")
+    List<Transaction> findReimbursementCandidates(@Param("userId") UUID userId,
+                                                   @Param("maxAmount") BigDecimal maxAmount,
+                                                   Pageable pageable);
+
+    /** A despesa que a entrada {@code incomeId} reembolsou, se houver. */
+    Optional<Transaction> findByReimbursedBy_Id(UUID incomeId);
+
+    List<Transaction> findAllByReimbursedBy_IdIn(Collection<UUID> incomeIds);
+
     String FILTER_PREDICATES = """
             WHERE t.userId = :userId
             AND t.account.deletedAt IS NULL
@@ -262,7 +305,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             Pageable pageable);
 
     /** {@code [type, quantidade, soma]} das transações não canceladas que casam com o filtro. */
-    @Query("SELECT t.type, COUNT(t), COALESCE(SUM(t.amount), 0) FROM Transaction t " + FILTER_PREDICATES +
+    @Query("SELECT t.type, COUNT(t), COALESCE(SUM(" + NET_OF_REIMBURSEMENT + "), 0) FROM Transaction t "
+           + REIMBURSEMENT_JOIN + FILTER_PREDICATES + NOT_A_REIMBURSEMENT +
            " AND t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED GROUP BY t.type")
     List<Object[]> sumByTypeWithFilters(
             @Param("userId") UUID userId,
@@ -376,13 +420,13 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "AND t.account.archivedAt IS NULL AND t.account.deletedAt IS NULL")
     BigDecimal sumTotalNetWorth(@Param("userId") UUID userId);
 
-    @Query("SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
+    @Query("SELECT COALESCE(SUM(" + NET_OF_REIMBURSEMENT + "), 0) FROM Transaction t " + REIMBURSEMENT_JOIN +
            "WHERE t.userId = :userId " +
            "AND t.account.deletedAt IS NULL " +
            "AND t.type = :type " +
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
            "AND t.paymentDate >= :from AND t.paymentDate <= :to " +
-           "AND (:accountId IS NULL OR t.account.id = :accountId)")
+           "AND (:accountId IS NULL OR t.account.id = :accountId)" + NOT_A_REIMBURSEMENT)
     BigDecimal sumPaidByTypeAndPaymentDateRange(
             @Param("userId") UUID userId,
             @Param("type") TransactionType type,
@@ -395,8 +439,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
      * pagamento: a compra no cartão conta no mês em que foi feita. Uma linha por categoria,
      * subcategoria, tipo, status e "no cartão ou não"; sem categoria vem com ids nulos.
      */
-    @Query("SELECT c.id, s.id, t.type, t.status, CASE WHEN cc.id IS NULL THEN false ELSE true END, SUM(t.amount) FROM Transaction t " +
-           "LEFT JOIN t.category c LEFT JOIN t.subcategory s LEFT JOIN t.creditCard cc " +
+    @Query("SELECT c.id, s.id, t.type, t.status, CASE WHEN cc.id IS NULL THEN false ELSE true END, SUM(" + NET_OF_REIMBURSEMENT + ") FROM Transaction t " +
+           "LEFT JOIN t.category c LEFT JOIN t.subcategory s LEFT JOIN t.creditCard cc" + REIMBURSEMENT_JOIN +
            "WHERE t.userId = :userId " +
            "AND t.account.deletedAt IS NULL " +
            "AND t.type IN (com.cashcontrol.api.domain.entity.TransactionType.EXPENSE, " +
@@ -408,16 +452,17 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
                                      @Param("from") LocalDate from,
                                      @Param("to") LocalDate to);
 
-    @Query("SELECT t.category.id, SUM(t.amount) FROM Transaction t " +
+    @Query("SELECT t.category.id, SUM(" + NET_OF_REIMBURSEMENT + ") FROM Transaction t " + REIMBURSEMENT_JOIN +
            "WHERE t.userId = :userId " +
            "AND t.account.deletedAt IS NULL " +
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
            "AND t.type = :type " +
            "AND t.paymentDate >= :from AND t.paymentDate <= :to " +
            "AND (:accountId IS NULL OR t.account.id = :accountId) " +
-           "AND t.category IS NOT NULL " +
+           "AND t.category IS NOT NULL" + NOT_A_REIMBURSEMENT +
            "GROUP BY t.category.id " +
-           "ORDER BY SUM(t.amount) DESC")
+           "HAVING SUM(" + NET_OF_REIMBURSEMENT + ") > 0 " +
+           "ORDER BY SUM(" + NET_OF_REIMBURSEMENT + ") DESC")
     List<Object[]> findCategoryBreakdown(
             @Param("userId") UUID userId,
             @Param("type") TransactionType type,
@@ -425,14 +470,14 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("to") LocalDate to,
             @Param("accountId") UUID accountId);
 
-    @Query("SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
+    @Query("SELECT COALESCE(SUM(" + NET_OF_REIMBURSEMENT + "), 0) FROM Transaction t " + REIMBURSEMENT_JOIN +
            "WHERE t.userId = :userId " +
            "AND t.account.deletedAt IS NULL " +
            "AND t.type = :type " +
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
            "AND t.paymentDate >= :from AND t.paymentDate <= :to " +
            "AND (:accountId IS NULL OR t.account.id = :accountId) " +
-           "AND t.category IS NULL")
+           "AND t.category IS NULL" + NOT_A_REIMBURSEMENT)
     BigDecimal sumUncategorized(
             @Param("userId") UUID userId,
             @Param("type") TransactionType type,
@@ -475,13 +520,15 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("userId") UUID userId,
             @Param("upTo") LocalDate upTo);
 
-    @Query("SELECT t FROM Transaction t " +
+    /** Ordenadas pelo valor líquido de reembolso; reembolsável que ainda não voltou fica de fora. */
+    @Query("SELECT t FROM Transaction t LEFT JOIN FETCH t.reimbursedBy rb " +
            "WHERE t.userId = :userId " +
            "AND t.account.deletedAt IS NULL " +
            "AND t.type = com.cashcontrol.api.domain.entity.TransactionType.EXPENSE " +
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
            "AND t.paymentDate >= :from AND t.paymentDate <= :to " +
-           "ORDER BY t.amount DESC")
+           "AND (" + NET_OF_REIMBURSEMENT + ") > 0 " +
+           "ORDER BY (" + NET_OF_REIMBURSEMENT + ") DESC")
     List<Transaction> findLargestExpenses(
             @Param("userId") UUID userId,
             @Param("from") LocalDate from,
@@ -514,14 +561,18 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("userId") UUID userId,
             @Param("upTo") LocalDate upTo);
 
-    @Query(value = "SELECT TO_CHAR(payment_date, 'YYYY-MM') AS month, type, COALESCE(SUM(amount), 0) AS total " +
-                   "FROM transactions " +
-                   "WHERE user_id = :userId AND status = 'PAID' AND type IN ('INCOME', 'EXPENSE', 'REFUND') " +
-                   "AND payment_date BETWEEN :from AND :to " +
-                   "AND (CAST(:accountId AS uuid) IS NULL OR account_id = CAST(:accountId AS uuid)) " +
-                   "AND account_id IN (SELECT id FROM accounts WHERE deleted_at IS NULL) " +
-                   "GROUP BY TO_CHAR(payment_date, 'YYYY-MM'), type " +
-                   "ORDER BY TO_CHAR(payment_date, 'YYYY-MM') ASC",
+    // Mesma regra de NET_OF_REIMBURSEMENT / NOT_A_REIMBURSEMENT, em SQL.
+    @Query(value = "SELECT TO_CHAR(t.payment_date, 'YYYY-MM') AS month, t.type, " +
+                   "COALESCE(SUM(CASE WHEN NOT t.reimbursable THEN t.amount WHEN rb.id IS NULL THEN 0 " +
+                   "                  ELSE t.amount - rb.amount END), 0) AS total " +
+                   "FROM transactions t LEFT JOIN transactions rb ON rb.id = t.reimbursed_by_id " +
+                   "WHERE t.user_id = :userId AND t.status = 'PAID' AND t.type IN ('INCOME', 'EXPENSE', 'REFUND') " +
+                   "AND t.payment_date BETWEEN :from AND :to " +
+                   "AND (CAST(:accountId AS uuid) IS NULL OR t.account_id = CAST(:accountId AS uuid)) " +
+                   "AND t.account_id IN (SELECT id FROM accounts WHERE deleted_at IS NULL) " +
+                   "AND NOT EXISTS (SELECT 1 FROM transactions ro WHERE ro.reimbursed_by_id = t.id) " +
+                   "GROUP BY TO_CHAR(t.payment_date, 'YYYY-MM'), t.type " +
+                   "ORDER BY TO_CHAR(t.payment_date, 'YYYY-MM') ASC",
            nativeQuery = true)
     List<Object[]> findMonthlyIncomeExpense(
             @Param("userId") UUID userId,

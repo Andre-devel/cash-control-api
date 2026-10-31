@@ -436,15 +436,15 @@ class InstallmentControllerTest {
                 new TransactionSummaryResponse(UUID.randomUUID(), accountId, "Test Account",
                         TransactionType.EXPENSE, TransactionStatus.PENDING,
                         new BigDecimal("100.00"), "Test purchase",
-                        LocalDate.of(2026, 7, 1), null, null, null, Instant.now(), null, null, null, null, null, null, false),
+                        LocalDate.of(2026, 7, 1), null, null, null, Instant.now(), null, null, null, null, null, null, false, null),
                 new TransactionSummaryResponse(UUID.randomUUID(), accountId, "Test Account",
                         TransactionType.EXPENSE, TransactionStatus.PENDING,
                         new BigDecimal("100.00"), "Test purchase",
-                        LocalDate.of(2026, 8, 1), null, null, null, Instant.now(), null, null, null, null, null, null, false),
+                        LocalDate.of(2026, 8, 1), null, null, null, Instant.now(), null, null, null, null, null, null, false, null),
                 new TransactionSummaryResponse(UUID.randomUUID(), accountId, "Test Account",
                         TransactionType.EXPENSE, TransactionStatus.PENDING,
                         new BigDecimal("100.00"), "Test purchase",
-                        LocalDate.of(2026, 9, 1), null, null, null, Instant.now(), null, null, null, null, null, null, false)
+                        LocalDate.of(2026, 9, 1), null, null, null, Instant.now(), null, null, null, null, null, null, false, null)
         );
 
         return new InstallmentSeriesDetailResponse(series, installments);
@@ -466,6 +466,6 @@ class InstallmentControllerTest {
                 null, LocalDate.of(2026, 7, 1), null, null, null,
                 null, null, Set.of(), null, null, UUID.randomUUID(), 1, 3,
                 false, null, Instant.now(), Instant.now(),
-                null, null, null);
+                null, null, null, null);
     }
 }
