@@ -15,5 +15,8 @@ public record PushSubscriptionRequest(
         @Schema(description = "Name shown for the device", example = "Android · Chrome")
         @Size(max = 100) String deviceLabel,
         @Schema(description = "true to leave amounts out of the notification (lock screen)")
-        boolean hideAmounts
+        boolean hideAmounts,
+        @Schema(description = "true to also get budget alerts (80% and over 100% of a category cap); "
+                              + "null keeps the device's current choice")
+        Boolean budgetAlerts
 ) {}

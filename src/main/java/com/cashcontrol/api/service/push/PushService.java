@@ -70,6 +70,10 @@ public class PushService {
         subscription.setAuth(request.auth());
         subscription.setDeviceLabel(request.deviceLabel());
         subscription.setHideAmounts(request.hideAmounts());
+        // Nulo vem de um app ainda sem o alerta de orçamento (PWA em cache): mantém o que estava.
+        if (request.budgetAlerts() != null) {
+            subscription.setBudgetAlerts(request.budgetAlerts());
+        }
         return toResponse(subscriptionRepository.save(subscription));
     }
 
@@ -80,7 +84,8 @@ public class PushService {
 
     /**
      * Manda a cada aparelho do usuário a mensagem que {@code payloadFor} monta para ele (a de quem
-     * esconde valores é outra). Aparelho que o serviço de push não conhece mais é apagado.
+     * esconde valores é outra). Quando {@code payloadFor} devolve {@code null} o aparelho fica de
+     * fora. Aparelho que o serviço de push não conhece mais é apagado.
      *
      * @return quantos aparelhos receberam
      */
@@ -91,7 +96,11 @@ public class PushService {
         }
         int delivered = 0;
         for (PushSubscription subscription : subscriptionRepository.findAllByUserId(userId)) {
-            switch (sender.send(subscription, payloadFor.apply(subscription))) {
+            String payload = payloadFor.apply(subscription);
+            if (payload == null) {
+                continue;
+            }
+            switch (sender.send(subscription, payload)) {
                 case DELIVERED -> {
                     subscription.setLastSuccessAt(Instant.now());
                     delivered++;
@@ -120,6 +129,6 @@ public class PushService {
 
     private static PushSubscriptionResponse toResponse(PushSubscription subscription) {
         return new PushSubscriptionResponse(subscription.getEndpoint(), subscription.getDeviceLabel(),
-                subscription.isHideAmounts(), subscription.getCreatedAt());
+                subscription.isHideAmounts(), subscription.isBudgetAlerts(), subscription.getCreatedAt());
     }
 }

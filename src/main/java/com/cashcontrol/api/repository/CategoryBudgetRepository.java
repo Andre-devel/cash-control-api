@@ -2,6 +2,7 @@ package com.cashcontrol.api.repository;
 
 import com.cashcontrol.api.domain.entity.CategoryBudget;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -17,6 +18,16 @@ public interface CategoryBudgetRepository extends JpaRepository<CategoryBudget, 
     /** Tetos padrão do usuário e os ajustes do mês pedido (dia 1). */
     @Query("SELECT b FROM CategoryBudget b WHERE b.userId = :userId AND (b.month IS NULL OR b.month = :month)")
     List<CategoryBudget> findApplicable(@Param("userId") UUID userId, @Param("month") LocalDate month);
+
+    /**
+     * Marca o aviso da faixa como enviado. Devolve 1 só para quem gravou primeiro: 0 quer dizer
+     * que esse aviso já saiu neste mês.
+     */
+    @Modifying
+    @Query(value = "INSERT INTO budget_alerts_sent (user_id, category_id, month, threshold) "
+            + "VALUES (:userId, :categoryId, :month, :threshold) ON CONFLICT DO NOTHING", nativeQuery = true)
+    int markAlertSent(@Param("userId") UUID userId, @Param("categoryId") UUID categoryId,
+                      @Param("month") LocalDate month, @Param("threshold") int threshold);
 
     /** O teto padrão quando {@code month} é nulo, senão o ajuste daquele mês (dia 1). */
     default Optional<CategoryBudget> findOne(UUID userId, UUID categoryId, LocalDate month) {

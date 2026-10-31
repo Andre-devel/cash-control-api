@@ -54,6 +54,10 @@ public class PushSubscription {
     @Column(name = "hide_amounts", nullable = false)
     private boolean hideAmounts;
 
+    /** Recebe o aviso de categoria chegando a 80% e passando de 100% do orçamento. */
+    @Column(name = "budget_alerts", nullable = false)
+    private boolean budgetAlerts;
+
     @CreationTimestamp
     @Setter(lombok.AccessLevel.NONE)
     @Column(name = "created_at", nullable = false, updatable = false)
