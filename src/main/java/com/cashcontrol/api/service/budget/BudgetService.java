@@ -1,0 +1,188 @@
+package com.cashcontrol.api.service.budget;
+
+/**
+ * @author Andre
+ * 31 de Outubro. de 2026
+ */
+
+import com.cashcontrol.api.domain.entity.Category;
+import com.cashcontrol.api.domain.entity.CategoryBudget;
+import com.cashcontrol.api.domain.entity.TransactionStatus;
+import com.cashcontrol.api.domain.entity.TransactionType;
+import com.cashcontrol.api.domain.exception.BusinessRuleException;
+import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
+import com.cashcontrol.api.dto.response.BudgetProgressResponse;
+import com.cashcontrol.api.dto.response.CategoryBudgetResponse;
+import com.cashcontrol.api.repository.CategoryBudgetRepository;
+import com.cashcontrol.api.repository.CategoryRepository;
+import com.cashcontrol.api.repository.TransactionRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
+/**
+ * Orçamento por categoria: o teto vem de {@code category_budgets}, o gasto é calculado a cada
+ * leitura pelas transações do mês da compra.
+ *
+ * <p>Entra como gasto a despesa paga e a do cartão ainda pendente (a compra já foi feita); a
+ * despesa pendente fora do cartão é uma conta a vencer e entra como previsto. O estorno
+ * desconta do gasto. O gasto de uma subcategoria conta também para a categoria pai.
+ */
+@Service
+@RequiredArgsConstructor
+public class BudgetService {
+
+    private final CategoryBudgetRepository budgetRepository;
+    private final CategoryRepository categoryRepository;
+    private final TransactionRepository transactionRepository;
+
+    @Transactional(readOnly = true)
+    public BudgetProgressResponse progress(UUID userId, YearMonth month) {
+        return progress(userId, month, LocalDate.now());
+    }
+
+    BudgetProgressResponse progress(UUID userId, YearMonth month, LocalDate today) {
+        Map<UUID, CategoryBudget> budgets = applicableBudgets(userId, month);
+        Map<UUID, Category> categories = visibleCategories(userId);
+
+        Map<UUID, BigDecimal> spent = new HashMap<>();
+        Map<UUID, BigDecimal> forecast = new HashMap<>();
+        BigDecimal uncategorized = BigDecimal.ZERO;
+        for (Object[] row : transactionRepository.sumBudgetSpending(userId, month.atDay(1), month.atEndOfMonth())) {
+            UUID categoryId = (UUID) row[0];
+            UUID subcategoryId = (UUID) row[1];
+            TransactionType type = (TransactionType) row[2];
+            TransactionStatus status = (TransactionStatus) row[3];
+            boolean onCard = (Boolean) row[4];
+            BigDecimal amount = (BigDecimal) row[5];
+
+            boolean realized = status == TransactionStatus.PAID || onCard;
+            BigDecimal signed = type == TransactionType.REFUND ? amount.negate() : amount;
+            if (!realized && type == TransactionType.REFUND) {
+                continue;
+            }
+            if (categoryId == null) {
+                if (realized) {
+                    uncategorized = uncategorized.add(signed);
+                }
+                continue;
+            }
+            Map<UUID, BigDecimal> bucket = realized ? spent : forecast;
+            for (UUID target : targets(categoryId, subcategoryId, categories)) {
+                bucket.merge(target, signed, BigDecimal::add);
+            }
+        }
+
+        List<BudgetProgressResponse.Item> items = new ArrayList<>();
+        BigDecimal totalBudget = BigDecimal.ZERO;
+        BigDecimal totalSpent = BigDecimal.ZERO;
+        BigDecimal totalForecast = BigDecimal.ZERO;
+        for (CategoryBudget budget : budgets.values()) {
+            Category category = categories.get(budget.getCategoryId());
+            if (category == null || category.isArchived()) {
+                continue;
+            }
+            BigDecimal itemSpent = spent.getOrDefault(category.getId(), BigDecimal.ZERO).max(BigDecimal.ZERO);
+            BigDecimal itemForecast = forecast.getOrDefault(category.getId(), BigDecimal.ZERO).max(BigDecimal.ZERO);
+            UUID parentId = category.getParent() != null ? category.getParent().getId() : null;
+            items.add(new BudgetProgressResponse.Item(
+                    category.getId(), category.getName(), category.getColor(), category.getIcon(), parentId,
+                    budget.getAmount(), itemSpent, itemForecast, budget.getAmount().subtract(itemSpent),
+                    itemSpent.multiply(BigDecimal.valueOf(100)).divide(budget.getAmount(), 2, RoundingMode.HALF_UP),
+                    budget.getMonth() == null ? BudgetProgressResponse.Source.DEFAULT : BudgetProgressResponse.Source.MONTH));
+            // A subcategoria com teto já está dentro do gasto da pai; somar as duas contaria em dobro.
+            if (parentId == null || !budgets.containsKey(parentId)) {
+                totalBudget = totalBudget.add(budget.getAmount());
+                totalSpent = totalSpent.add(itemSpent);
+                totalForecast = totalForecast.add(itemForecast);
+            }
+        }
+        items.sort(Comparator.comparing(BudgetProgressResponse.Item::percent).reversed()
+                .thenComparing(BudgetProgressResponse.Item::name));
+
+        return new BudgetProgressResponse(month, totalBudget, totalSpent, totalForecast,
+                uncategorized.max(BigDecimal.ZERO), elapsedDays(month, today), month.lengthOfMonth(), items);
+    }
+
+    /** Cria ou troca o teto padrão ({@code month} nulo) ou o ajuste de um mês. */
+    @Transactional
+    public CategoryBudgetResponse save(UUID userId, UUID categoryId, BigDecimal amount, YearMonth month) {
+        Category category = categoryRepository.findByIdVisibleToUser(categoryId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + categoryId));
+        if (category.isArchived()) {
+            throw new BusinessRuleException("Categoria arquivada não pode ter orçamento.");
+        }
+        LocalDate monthStart = month != null ? month.atDay(1) : null;
+        CategoryBudget budget = budgetRepository.findOne(userId, categoryId, monthStart).orElseGet(() -> {
+            CategoryBudget created = new CategoryBudget();
+            created.setUserId(userId);
+            created.setCategoryId(categoryId);
+            created.setMonth(monthStart);
+            return created;
+        });
+        budget.setAmount(amount);
+        budgetRepository.save(budget);
+        return new CategoryBudgetResponse(categoryId, amount, month);
+    }
+
+    @Transactional
+    public void delete(UUID userId, UUID categoryId, YearMonth month) {
+        CategoryBudget budget = budgetRepository.findOne(userId, categoryId, month != null ? month.atDay(1) : null)
+                .orElseThrow(() -> new ResourceNotFoundException("Budget not found for category: " + categoryId));
+        budgetRepository.delete(budget);
+    }
+
+    /** Um teto por categoria: o ajuste do mês, se houver, senão o padrão. */
+    private Map<UUID, CategoryBudget> applicableBudgets(UUID userId, YearMonth month) {
+        Map<UUID, CategoryBudget> byCategory = new HashMap<>();
+        for (CategoryBudget budget : budgetRepository.findApplicable(userId, month.atDay(1))) {
+            byCategory.merge(budget.getCategoryId(), budget, (a, b) -> a.getMonth() != null ? a : b);
+        }
+        return byCategory;
+    }
+
+    private Map<UUID, Category> visibleCategories(UUID userId) {
+        Map<UUID, Category> categories = new HashMap<>();
+        categoryRepository.findAllSystemCategories().forEach(c -> categories.put(c.getId(), c));
+        categoryRepository.findAllByUserId(userId).forEach(c -> categories.put(c.getId(), c));
+        return categories;
+    }
+
+    /**
+     * Categorias que recebem o valor da transação: a categoria, a subcategoria e a pai da
+     * categoria quando a própria transação já foi lançada direto numa subcategoria.
+     */
+    private static Set<UUID> targets(UUID categoryId, UUID subcategoryId, Map<UUID, Category> categories) {
+        Set<UUID> targets = new LinkedHashSet<>();
+        targets.add(categoryId);
+        if (subcategoryId != null) {
+            targets.add(subcategoryId);
+        }
+        Category category = categories.get(categoryId);
+        if (category != null && category.getParent() != null) {
+            targets.add(category.getParent().getId());
+        }
+        return targets;
+    }
+
+    private static int elapsedDays(YearMonth month, LocalDate today) {
+        YearMonth current = YearMonth.from(today);
+        if (month.isBefore(current)) {
+            return month.lengthOfMonth();
+        }
+        return month.equals(current) ? today.getDayOfMonth() : 0;
+    }
+}

@@ -390,6 +390,24 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("to") LocalDate to,
             @Param("accountId") UUID accountId);
 
+    /**
+     * Despesas e estornos do orçamento, pelo mês da compra ({@code competence_date}), não pelo
+     * pagamento: a compra no cartão conta no mês em que foi feita. Uma linha por categoria,
+     * subcategoria, tipo, status e "no cartão ou não"; sem categoria vem com ids nulos.
+     */
+    @Query("SELECT c.id, s.id, t.type, t.status, CASE WHEN cc.id IS NULL THEN false ELSE true END, SUM(t.amount) FROM Transaction t " +
+           "LEFT JOIN t.category c LEFT JOIN t.subcategory s LEFT JOIN t.creditCard cc " +
+           "WHERE t.userId = :userId " +
+           "AND t.account.deletedAt IS NULL " +
+           "AND t.type IN (com.cashcontrol.api.domain.entity.TransactionType.EXPENSE, " +
+           "               com.cashcontrol.api.domain.entity.TransactionType.REFUND) " +
+           "AND t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED " +
+           "AND t.competenceDate >= :from AND t.competenceDate <= :to " +
+           "GROUP BY c.id, s.id, t.type, t.status, CASE WHEN cc.id IS NULL THEN false ELSE true END")
+    List<Object[]> sumBudgetSpending(@Param("userId") UUID userId,
+                                     @Param("from") LocalDate from,
+                                     @Param("to") LocalDate to);
+
     @Query("SELECT t.category.id, SUM(t.amount) FROM Transaction t " +
            "WHERE t.userId = :userId " +
            "AND t.account.deletedAt IS NULL " +
