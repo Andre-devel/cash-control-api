@@ -10,6 +10,7 @@ import com.cashcontrol.api.dto.request.PushUnsubscribeRequest;
 import com.cashcontrol.api.dto.response.ErrorResponse;
 import com.cashcontrol.api.dto.response.PushConfigResponse;
 import com.cashcontrol.api.dto.response.PushSubscriptionResponse;
+import com.cashcontrol.api.dto.response.PushTestResponse;
 import com.cashcontrol.api.security.AuthenticatedUser;
 import com.cashcontrol.api.service.push.PushService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -64,6 +65,15 @@ public class PushController {
     public PushSubscriptionResponse subscribe(@AuthenticationPrincipal AuthenticatedUser principal,
                                               @RequestBody @Valid PushSubscriptionRequest request) {
         return pushService.subscribe(principal.getUser().getId(), request);
+    }
+
+    @Operation(summary = "Test notification", description = "Sends a test notification to every device of the user, at most once a minute.")
+    @ApiResponse(responseCode = "422", description = "Push not configured, or a test was sent less than a minute ago",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @PostMapping("/test")
+    @PreAuthorize("isAuthenticated()")
+    public PushTestResponse test(@AuthenticationPrincipal AuthenticatedUser principal) {
+        return pushService.sendTest(principal.getUser().getId());
     }
 
     @Operation(summary = "Turn off this device")

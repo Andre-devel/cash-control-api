@@ -17,4 +17,6 @@ public interface BankConnectionRepository extends JpaRepository<BankConnection, 
     Optional<BankConnection> findByIdAndUserId(UUID id, UUID userId);
 
     Optional<BankConnection> findByProviderAndItemId(BankProvider provider, String itemId);
+
+    List<BankConnection> findAllByProvider(BankProvider provider);
 }

@@ -109,7 +109,7 @@ public class BankConnectionService {
         PluggyItem item = pluggyClient.getItem(connection.getItemId())
                 .orElseThrow(() -> new BusinessRuleException(
                         "O banco não reconhece mais esta conexão. Remova e conecte de novo."));
-        return sync(connection, item);
+        return syncAndQueue(connection, item);
     }
 
     @Transactional
@@ -171,11 +171,36 @@ public class BankConnectionService {
         }
         try {
             pluggyClient.getItem(itemId.toString()).ifPresentOrElse(
-                    item -> sync(connection.get(), item),
+                    item -> syncAndQueue(connection.get(), item),
                     () -> connectionRepository.delete(connection.get()));
         } catch (BankProviderException e) {
             log.warn("Pluggy webhook: could not refresh item {}: {}", itemId, e.getCause() != null ? e.getCause().toString() : e.getMessage());
         }
+    }
+
+    /** Conexões da Pluggy, para a varredura de hora em hora. */
+    @Transactional(readOnly = true)
+    public List<UUID> pluggyConnectionIds() {
+        if (!appProperties.getPluggy().isEnabled()) {
+            return List.of();
+        }
+        return connectionRepository.findAllByProvider(BankProvider.PLUGGY).stream().map(BankConnection::getId).toList();
+    }
+
+    /**
+     * Varredura de uma conexão: o mesmo que o evento {@code item/*}. Existe porque a Pluggy não chama
+     * o webhook quando o item do MeuPluggy sincroniza (visto em produção em 31/10/2026); sem ela o
+     * lançamento novo só aparecia ao abrir "Buscar do banco".
+     */
+    @Transactional
+    public void poll(UUID connectionId) {
+        if (!appProperties.getPluggy().isEnabled()) {
+            return;
+        }
+        connectionRepository.findById(connectionId).ifPresent(connection ->
+                pluggyClient.getItem(connection.getItemId()).ifPresentOrElse(
+                        item -> syncAndQueue(connection, item),
+                        () -> connectionRepository.delete(connection)));
     }
 
     /**
@@ -218,6 +243,32 @@ public class BankConnectionService {
             log.warn("Pluggy webhook: could not read transactions of {}: {}", externalAccountId,
                     e.getCause() != null ? e.getCause().toString() : e.getMessage());
         }
+    }
+
+    /**
+     * {@link #sync} e, se o item sincronizou na Pluggy desde a última leitura, põe na fila de revisão
+     * o que chegou nesse meio-tempo nas contas correntes vinculadas. A fila não aceita a mesma linha
+     * duas vezes, então coincidir com o {@code transactions/created} não duplica.
+     */
+    private BankConnectionResponse syncAndQueue(BankConnection connection, PluggyItem item) {
+        Instant previous = connection.getLastSyncedAt();
+        BankConnectionResponse response = sync(connection, item);
+        if (previous == null || item.lastUpdatedAt() == null || !item.lastUpdatedAt().isAfter(previous)) {
+            return response;
+        }
+        Instant now = Instant.now();
+        for (BankConnectionAccount account : connectionAccountRepository.findAllByConnectionId(connection.getId())) {
+            if (account.getKind() != BankAccountKind.BANK || account.getAccountId() == null) {
+                continue;
+            }
+            try {
+                bankPendingService.enqueue(connection.getUserId(), account.getAccountId(), previous, now);
+            } catch (BankProviderException | BusinessRuleException e) {
+                log.warn("Pluggy sync: could not queue transactions of {}: {}", account.getExternalAccountId(),
+                        e.getCause() != null ? e.getCause().toString() : e.getMessage());
+            }
+        }
+        return response;
     }
 
     private BankConnectionResponse sync(BankConnection connection, PluggyItem item) {

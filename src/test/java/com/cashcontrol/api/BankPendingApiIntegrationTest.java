@@ -11,6 +11,7 @@ import com.cashcontrol.api.domain.entity.PushSubscription;
 import com.cashcontrol.api.dto.request.CreateAccountRequest;
 import com.cashcontrol.api.security.JwtService;
 import com.cashcontrol.api.service.AccountService;
+import com.cashcontrol.api.service.openfinance.BankConnectionService;
 import com.cashcontrol.api.service.openfinance.PluggyClient;
 import com.cashcontrol.api.service.openfinance.PluggyClient.PluggyAccount;
 import com.cashcontrol.api.service.openfinance.PluggyClient.PluggyItem;
@@ -72,6 +73,7 @@ class BankPendingApiIntegrationTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private JwtService jwtService;
     @Autowired private AccountService accountService;
+    @Autowired private BankConnectionService bankConnectionService;
     @MockitoBean private PluggyClient pluggyClient;
     @MockitoBean private WebPushSender webPushSender;
 
@@ -81,6 +83,7 @@ class BankPendingApiIntegrationTest {
     private String itemId;
     private String externalAccountId;
     private UUID accountId;
+    private UUID connectionId;
     private final List<PluggyTransaction> bankTransactions = new ArrayList<>();
 
     @BeforeEach
@@ -99,6 +102,7 @@ class BankPendingApiIntegrationTest {
 
         JsonNode connection = json(perform(post("/api/v1/bank-connections").content("{\"itemId\":\"" + itemId + "\"}"), token)
                 .andExpect(status().isCreated()));
+        connectionId = UUID.fromString(connection.get("id").asText());
         accountId = accountService.createAccount(new CreateAccountRequest("Inter", AccountType.CHECKING, "BRL", null, 0, null), userId).id();
         perform(put("/api/v1/bank-connections/" + connection.get("id").asText() + "/accounts/"
                     + connection.get("accounts").get(0).get("id").asText() + "/link")
@@ -130,6 +134,35 @@ class BankPendingApiIntegrationTest {
         assertThat(queue.get(0).get("row").get("externalRef").asText()).isEqualTo("plg:t1");
         assertThat(queue.get(0).get("row").get("type").asText()).isEqualTo("EXPENSE");
         perform(get("/api/v1/bank-pending/count"), token).andExpect(jsonPath("$.count").value(2));
+    }
+
+    @Test
+    void poll_afterTheItemSyncedWithoutWebhook_queuesWhatArrivedSinceTheLastSync() throws Exception {
+        Instant lastSync = Instant.parse("2026-10-30T10:00:00Z");
+        bankTransaction("before", "Pix recebido - Fulano", "50", "CREDIT", lastSync.minusSeconds(60));
+        bankTransaction("after", "Pix recebido - Ciclano", "40", "CREDIT", lastSync.plusSeconds(3600));
+        clearInvocations(webPushSender);
+
+        bankConnectionService.poll(connectionId);
+        assertThat(pendingCount()).isZero();
+
+        when(pluggyClient.getItem(itemId)).thenReturn(Optional.of(new PluggyItem(itemId, "UPDATED", null,
+                userId.toString(), lastSync.plusSeconds(7200), new PluggyItem.Connector("Inter"), null)));
+        bankConnectionService.poll(connectionId);
+        assertThat(pendingCount()).isEqualTo(1);
+        assertThat(sentPayloads()).singleElement().asString().contains("Ciclano");
+
+        bankConnectionService.poll(connectionId);
+        assertThat(pendingCount()).isEqualTo(1);
+    }
+
+    @Test
+    void pushTest_reachesEveryDevice_atMostOnceAMinute() throws Exception {
+        clearInvocations(webPushSender);
+        perform(post("/api/v1/push/test"), token).andExpect(status().isOk())
+                .andExpect(jsonPath("$.devices").value(1)).andExpect(jsonPath("$.delivered").value(1));
+        assertThat(sentPayloads()).singleElement().asString().contains("\"type\":\"test\"");
+        perform(post("/api/v1/push/test"), token).andExpect(status().isUnprocessableEntity());
     }
 
     @Test

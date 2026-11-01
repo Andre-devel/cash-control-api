@@ -11,16 +11,20 @@ import com.cashcontrol.api.domain.exception.BusinessRuleException;
 import com.cashcontrol.api.dto.request.PushSubscriptionRequest;
 import com.cashcontrol.api.dto.response.PushConfigResponse;
 import com.cashcontrol.api.dto.response.PushSubscriptionResponse;
+import com.cashcontrol.api.dto.response.PushTestResponse;
 import com.cashcontrol.api.repository.PushSubscriptionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.net.URI;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
 /** Aparelhos que recebem notificação, um por inscrição do navegador. */
@@ -35,6 +39,12 @@ public class PushService {
     private static final Set<String> PUSH_HOSTS = Set.of(
             "fcm.googleapis.com", "updates.push.services.mozilla.com", "push.apple.com", "notify.windows.com");
 
+    /** Um teste por minuto por usuário: cada um é um POST no serviço de push. */
+    private static final Duration TEST_INTERVAL = Duration.ofMinutes(1);
+    private static final String TEST_PAYLOAD =
+            "{\"type\":\"test\",\"title\":\"Cash Control\",\"body\":\"As notificações estão funcionando neste aparelho.\"}";
+
+    private final Map<UUID, Instant> lastTestAt = new ConcurrentHashMap<>();
     private final PushSubscriptionRepository subscriptionRepository;
     private final WebPushSender sender;
     private final AppProperties appProperties;
@@ -80,6 +90,25 @@ public class PushService {
     @Transactional
     public void unsubscribe(UUID userId, String endpoint) {
         subscriptionRepository.findByEndpointAndUserId(endpoint, userId).ifPresent(subscriptionRepository::delete);
+    }
+
+    /**
+     * Notificação de teste para todos os aparelhos do usuário, pelo mesmo caminho das reais. Separa
+     * o problema do servidor (falhou) do problema do aparelho (entregue, mas não apareceu).
+     */
+    @Transactional
+    public PushTestResponse sendTest(UUID userId) {
+        if (!appProperties.getPush().isEnabled()) {
+            throw new BusinessRuleException("As notificações não estão configuradas neste servidor.");
+        }
+        Instant now = Instant.now();
+        Instant previous = lastTestAt.put(userId, now);
+        if (previous != null && previous.plus(TEST_INTERVAL).isAfter(now)) {
+            lastTestAt.put(userId, previous);
+            throw new BusinessRuleException("Aguarde um minuto para mandar outro teste.");
+        }
+        int devices = subscriptionRepository.findAllByUserId(userId).size();
+        return new PushTestResponse(devices, send(userId, subscription -> TEST_PAYLOAD));
     }
 
     /**

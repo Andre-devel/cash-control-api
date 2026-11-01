@@ -28,6 +28,7 @@ import com.cashcontrol.api.service.statement.ParsedStatementRow;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -88,8 +89,11 @@ public class BankPendingService {
      * Põe na fila o que chegou na Pluggy desde {@code createdAtFrom} na conta corrente vinculada
      * e avisa os aparelhos do usuário. O que já está na fila (ou foi descartado) ou já virou
      * lançamento não entra de novo, então reenvio do mesmo evento não duplica.
+     *
+     * <p>Transação própria: quem chama durante a releitura do item (varredura, evento {@code item/*})
+     * segue com o sincronismo gravado mesmo que a leitura dos lançamentos falhe.
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void enqueue(UUID userId, UUID accountId, Instant createdAtFrom, Instant receivedAt) {
         Instant since = createdAtFrom != null ? createdAtFrom : receivedAt.minus(DEFAULT_LOOKBACK);
         BankStatement bank = pluggyStatementSource.fetch(accountId, userId, LocalDate.now(BANK_ZONE), since);
