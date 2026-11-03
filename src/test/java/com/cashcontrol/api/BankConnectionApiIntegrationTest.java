@@ -209,6 +209,42 @@ class BankConnectionApiIntegrationTest {
     }
 
     @Test
+    void webhook_newItemOfOurUser_registersTheConnection() throws Exception {
+        mockMvc.perform(post("/api/v1/webhooks/pluggy").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"event\":\"item/created\",\"itemId\":\"" + itemId + "\"}"))
+                .andExpect(status().isNoContent());
+
+        eventually(() -> count() == 1);
+        assertThat(jdbcTemplate.queryForObject("SELECT user_id FROM bank_connections WHERE item_id = ?", UUID.class, itemId))
+                .isEqualTo(userId);
+        eventually(() -> jdbcTemplate.queryForObject("SELECT COUNT(*) FROM bank_connection_accounts a JOIN bank_connections c "
+                + "ON c.id = a.connection_id WHERE c.item_id = ?", Integer.class, itemId) == 2);
+        // O widget ainda pode chamar o cadastro depois: atualiza em vez de duplicar.
+        register(token).andExpect(status().isCreated());
+        assertThat(count()).isEqualTo(1);
+    }
+
+    @Test
+    void webhook_newItemOfUnknownPluggyUser_isIgnored() throws Exception {
+        when(pluggyClient.getItem(itemId)).thenReturn(Optional.of(item(itemId, UUID.randomUUID().toString(), "UPDATED")));
+
+        mockMvc.perform(post("/api/v1/webhooks/pluggy").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"event\":\"item/created\",\"itemId\":\"" + itemId + "\"}"))
+                .andExpect(status().isNoContent());
+
+        eventually(() -> {
+            try {
+                verify(pluggyClient).getItem(itemId);
+                return true;
+            } catch (AssertionError e) {
+                return false;
+            }
+        });
+        Thread.sleep(300);
+        assertThat(count()).isZero();
+    }
+
+    @Test
     void webhook_unknownItem_isIgnored() throws Exception {
         mockMvc.perform(post("/api/v1/webhooks/pluggy").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"event\":\"item/created\",\"itemId\":\"" + UUID.randomUUID() + "\"}"))

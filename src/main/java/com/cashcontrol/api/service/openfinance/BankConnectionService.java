@@ -17,6 +17,7 @@ import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.BankConnectionAccountRepository;
 import com.cashcontrol.api.repository.BankConnectionRepository;
 import com.cashcontrol.api.repository.CreditCardRepository;
+import com.cashcontrol.api.repository.UserRepository;
 import com.cashcontrol.api.service.openfinance.PluggyClient.PluggyAccount;
 import com.cashcontrol.api.service.openfinance.PluggyClient.PluggyItem;
 import com.cashcontrol.api.service.openfinance.PluggyClient.PluggyTransaction;
@@ -59,6 +60,7 @@ public class BankConnectionService {
     private final AccountRepository accountRepository;
     private final CreditCardRepository creditCardRepository;
     private final BankPendingService bankPendingService;
+    private final UserRepository userRepository;
 
     @Transactional(readOnly = true)
     public BankConnectionsResponse list(UUID userId) {
@@ -88,17 +90,19 @@ public class BankConnectionService {
                 .filter(found -> userId.toString().equals(found.clientUserId()))
                 .orElseThrow(() -> new ResourceNotFoundException("Conexão não encontrada."));
         BankConnection connection = connectionRepository.findByProviderAndItemId(BankProvider.PLUGGY, id)
-                .orElseGet(() -> {
-                    BankConnection created = new BankConnection();
-                    created.setUserId(userId);
-                    created.setProvider(BankProvider.PLUGGY);
-                    created.setItemId(id);
-                    return created;
-                });
+                .orElseGet(() -> newConnection(userId, id));
         if (!connection.getUserId().equals(userId)) {
             throw new ResourceNotFoundException("Conexão não encontrada.");
         }
         return sync(connection, item);
+    }
+
+    private static BankConnection newConnection(UUID userId, String itemId) {
+        BankConnection created = new BankConnection();
+        created.setUserId(userId);
+        created.setProvider(BankProvider.PLUGGY);
+        created.setItemId(itemId);
+        return created;
     }
 
     /** Relê status e contas na Pluggy — o que o webhook faria, para quando ele não chega (dev). */
@@ -156,8 +160,11 @@ public class BankConnectionService {
 
     /**
      * Evento {@code item/*} do webhook. O corpo não é confiável: só o id serve, para reler o item
-     * na Pluggy. Item que a Pluggy não conhece mais é apagado; item sem conexão aqui é ignorado
-     * (quem cria a conexão é o cadastro feito pelo app, que confere o dono).
+     * na Pluggy. Item que a Pluggy não conhece mais é apagado.
+     *
+     * <p>Item sem conexão aqui é cadastrado se a Pluggy disser que é de um usuário nosso: o
+     * {@code clientUserId} vem do connect token, que só o servidor emite. Isso cobre o PWA, em que o
+     * OAuth do MeuPluggy abre fora do app e o widget nunca chama o {@code onSuccess}.
      */
     @Async
     @Transactional
@@ -167,6 +174,7 @@ public class BankConnectionService {
         }
         Optional<BankConnection> connection = connectionRepository.findByProviderAndItemId(BankProvider.PLUGGY, itemId.toString());
         if (connection.isEmpty()) {
+            adopt(itemId.toString());
             return;
         }
         try {
@@ -175,6 +183,26 @@ public class BankConnectionService {
                     () -> connectionRepository.delete(connection.get()));
         } catch (BankProviderException e) {
             log.warn("Pluggy webhook: could not refresh item {}: {}", itemId, e.getCause() != null ? e.getCause().toString() : e.getMessage());
+        }
+    }
+
+    private void adopt(String itemId) {
+        try {
+            pluggyClient.getItem(itemId).ifPresent(item -> ownerOf(item).ifPresent(userId -> {
+                sync(newConnection(userId, itemId), item);
+                log.info("Pluggy webhook: registered item {} for user {}", itemId, userId);
+            }));
+        } catch (BankProviderException e) {
+            log.warn("Pluggy webhook: could not read new item {}: {}", itemId, e.getCause() != null ? e.getCause().toString() : e.getMessage());
+        }
+    }
+
+    private Optional<UUID> ownerOf(PluggyItem item) {
+        try {
+            UUID userId = UUID.fromString(item.clientUserId());
+            return userRepository.findByIdAndDeletedAtIsNull(userId).map(user -> userId);
+        } catch (IllegalArgumentException | NullPointerException e) {
+            return Optional.empty();
         }
     }
 
