@@ -64,11 +64,14 @@ public class PluggyClient {
     /**
      * Token para o widget. Com {@code itemId}, o widget atualiza aquele item (renovar o
      * consentimento) em vez de criar outro.
+     *
+     * <p>Sem {@code avoidDuplicates}: o conector MeuPluggy cria um item por banco, mas a Pluggy
+     * considera duplicado todo item novo do mesmo conector para o mesmo {@code clientUserId}, e o
+     * widget só mostra um erro genérico. Com a opção, não dava para conectar o segundo banco.
      */
     public String createConnectToken(String clientUserId, String itemId) {
         Map<String, Object> options = new LinkedHashMap<>();
         options.put("clientUserId", clientUserId);
-        options.put("avoidDuplicates", true);
         String webhookUrl = appProperties.getPluggy().getWebhookUrl();
         if (webhookUrl != null && !webhookUrl.isBlank()) {
             options.put("webhookUrl", webhookUrl);

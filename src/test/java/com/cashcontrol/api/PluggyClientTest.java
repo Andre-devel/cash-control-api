@@ -57,7 +57,7 @@ class PluggyClientTest {
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(header("X-API-KEY", "key-1"))
                 .andExpect(content().json("""
-                        {"options":{"clientUserId":"user-1","avoidDuplicates":true,
+                        {"options":{"clientUserId":"user-1",
                          "webhookUrl":"https://cashcontrol.example.com/api/v1/webhooks/pluggy"}}
                         """, org.springframework.test.json.JsonCompareMode.STRICT))
                 .andRespond(withSuccess("{\"accessToken\":\"tok-1\"}", MediaType.APPLICATION_JSON));
