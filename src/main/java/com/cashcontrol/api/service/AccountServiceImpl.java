@@ -183,6 +183,32 @@ public class AccountServiceImpl implements AccountService {
     }
 
     @Override
+    public void reconcileBalance(Account account, BigDecimal target, LocalDate date, String description) {
+        UUID userId = account.getUserId();
+        Transaction adjustment = account.getSyncAdjustmentId() == null ? null
+                : transactionRepository.findById(account.getSyncAdjustmentId())
+                .filter(tx -> tx.getType() == TransactionType.MANUAL_ADJUSTMENT && tx.getStatus() == TransactionStatus.PAID)
+                .orElse(null);
+        BigDecimal withoutAdjustment = computeBalance(account.getId(), userId)
+                .subtract(adjustment != null ? adjustment.getAmount() : BigDecimal.ZERO);
+        BigDecimal delta = target.subtract(withoutAdjustment);
+        if (delta.signum() == 0) {
+            if (adjustment != null) {
+                transactionRepository.delete(adjustment);
+            }
+            account.setSyncAdjustmentId(null);
+        } else if (adjustment == null) {
+            adjustment = transactionRepository.save(buildManualAdjustment(account, userId, delta, description, date));
+            account.setSyncAdjustmentId(adjustment.getId());
+        } else if (adjustment.getAmount().compareTo(delta) != 0) {
+            adjustment.setAmount(delta);
+            adjustment.setCompetenceDate(date);
+            adjustment.setPaymentDate(date);
+        }
+        accountRepository.save(account);
+    }
+
+    @Override
     @Transactional
     public void createTransfer(TransferRequest request, UUID userId) {
         if (request.sourceAccountId().equals(request.destinationAccountId())) {

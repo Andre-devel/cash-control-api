@@ -18,6 +18,7 @@ import com.cashcontrol.api.repository.BankConnectionAccountRepository;
 import com.cashcontrol.api.repository.BankConnectionRepository;
 import com.cashcontrol.api.repository.CreditCardRepository;
 import com.cashcontrol.api.repository.UserRepository;
+import com.cashcontrol.api.service.investment.BankInvestmentSync;
 import com.cashcontrol.api.service.openfinance.PluggyClient.PluggyAccount;
 import com.cashcontrol.api.service.openfinance.PluggyClient.PluggyItem;
 import com.cashcontrol.api.service.openfinance.PluggyClient.PluggyTransaction;
@@ -61,6 +62,7 @@ public class BankConnectionService {
     private final CreditCardRepository creditCardRepository;
     private final BankPendingService bankPendingService;
     private final UserRepository userRepository;
+    private final BankInvestmentSync bankInvestmentSync;
 
     @Transactional(readOnly = true)
     public BankConnectionsResponse list(UUID userId) {
@@ -281,6 +283,7 @@ public class BankConnectionService {
     private BankConnectionResponse syncAndQueue(BankConnection connection, PluggyItem item) {
         Instant previous = connection.getLastSyncedAt();
         BankConnectionResponse response = sync(connection, item);
+        syncInvestments(connection);
         if (previous == null || item.lastUpdatedAt() == null || !item.lastUpdatedAt().isAfter(previous)) {
             return response;
         }
@@ -297,6 +300,16 @@ public class BankConnectionService {
             }
         }
         return response;
+    }
+
+    /** Em transação própria: falha nos investimentos não desfaz a leitura das contas. */
+    private void syncInvestments(BankConnection connection) {
+        try {
+            bankInvestmentSync.sync(connection.getUserId(), connection.getItemId());
+        } catch (RuntimeException e) {
+            log.warn("Pluggy sync: could not read investments of item {}: {}", connection.getItemId(),
+                    e.getCause() != null ? e.getCause().toString() : e.toString());
+        }
     }
 
     private BankConnectionResponse sync(BankConnection connection, PluggyItem item) {

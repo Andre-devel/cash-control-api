@@ -202,6 +202,29 @@ class PluggyClientTest {
     }
 
     @Test
+    void listInvestments_readsEveryPage() {
+        expectAuth("key-1");
+        server.expect(requestTo(BASE + "/investments?itemId=" + ITEM + "&page=1&pageSize=500"))
+                .andRespond(withSuccess("""
+                        {"total":2,"totalPages":2,"page":1,"results":[{"id":"i1","type":"FIXED_INCOME","subtype":"CDB",
+                          "name":"CDB - BANCO INTER S.A","issuer":"BANCO INTER S.A","amountOriginal":66.81,"amount":72.081,
+                          "balance":71.03,"date":"2026-11-02T18:59:51.000Z","purchaseDate":"2026-04-06T03:00:00.000Z",
+                          "dueDate":"2028-03-27T03:00:00.000Z","rate":100,"rateType":"CDI","fixedAnnualRate":0,"status":"ACTIVE"}]}
+                        """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE + "/investments?itemId=" + ITEM + "&page=2&pageSize=500"))
+                .andRespond(withSuccess("""
+                        {"total":2,"totalPages":2,"page":2,"results":[{"id":"i2","type":"FIXED_INCOME","status":"TOTAL_WITHDRAWAL"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var investments = client.listInvestments(ITEM);
+
+        assertThat(investments).extracting(PluggyClient.PluggyInvestment::id).containsExactly("i1", "i2");
+        assertThat(investments.getFirst().amountOriginal()).isEqualByComparingTo("66.81");
+        assertThat(investments.getFirst().purchaseDate()).isEqualTo(Instant.parse("2026-04-06T03:00:00Z"));
+        server.verify();
+    }
+
+    @Test
     void authBody_neverPrintsTheSecret() {
         // O RestClient em DEBUG loga o corpo pelo toString.
         assertThat(new PluggyClient.AuthRequest("client-id", "client-secret").toString())

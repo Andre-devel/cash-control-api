@@ -108,6 +108,10 @@ public class FixedIncomeHolding {
     @Column(name = "notes", columnDefinition = "TEXT")
     private String notes;
 
+    /** Id do investimento na Pluggy; nulo na aplicação cadastrada à mão. */
+    @Column(name = "external_id", length = 64)
+    private String externalId;
+
     @Column(name = "deleted_at")
     private Instant deletedAt;
 

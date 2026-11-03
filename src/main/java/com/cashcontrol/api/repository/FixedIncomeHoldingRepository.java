@@ -22,4 +22,12 @@ public interface FixedIncomeHoldingRepository extends JpaRepository<FixedIncomeH
     @EntityGraph(attributePaths = "account")
     List<FixedIncomeHolding> findAllByUserIdAndStatusAndDeletedAtIsNullOrderByAppliedAtAsc(UUID userId,
                                                                                             FixedIncomeStatus status);
+
+    /** Aplicações vivas da conta, para a varredura do banco casar pelo {@code externalId}. */
+    List<FixedIncomeHolding> findAllByAccountIdAndDeletedAtIsNull(UUID accountId);
+
+    @EntityGraph(attributePaths = "account")
+    Optional<FixedIncomeHolding> findByUserIdAndExternalIdAndDeletedAtIsNull(UUID userId, String externalId);
+
+    List<FixedIncomeHolding> findAllByUserIdAndExternalIdIsNotNullAndDeletedAtIsNull(UUID userId);
 }

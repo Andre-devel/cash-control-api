@@ -58,6 +58,10 @@ public class Account {
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
+    /** Ajuste que mantém o saldo igual ao principal aplicado no banco (V43). */
+    @Column(name = "sync_adjustment_id")
+    private UUID syncAdjustmentId;
+
     @CreationTimestamp
     @Setter(lombok.AccessLevel.NONE)
     @Column(name = "created_at", nullable = false, updatable = false)

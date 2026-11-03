@@ -43,6 +43,7 @@ public class PluggyClient {
     private static final Duration API_KEY_MARGIN = Duration.ofMinutes(5);
     /** Páginas de 500: 20 cobrem com folga os 12 meses de uma conta pessoal. */
     private static final int MAX_TRANSACTION_PAGES = 20;
+    private static final int MAX_INVESTMENT_PAGES = 10;
 
     private final RestClient restClient;
     private final AppProperties appProperties;
@@ -141,6 +142,28 @@ public class PluggyClient {
         BillPage page = call(key -> restClient.get().uri(url("/bills?accountId={id}"), accountId)
                 .header("X-API-KEY", key).retrieve().body(BillPage.class));
         return page == null || page.results() == null ? List.of() : page.results();
+    }
+
+    /**
+     * Investimentos do item, inclusive os já resgatados ({@code status} TOTAL_WITHDRAWAL, com os
+     * valores zerados). Paginado por número de página, ao contrário das transações.
+     */
+    public List<PluggyInvestment> listInvestments(String itemId) {
+        List<PluggyInvestment> all = new ArrayList<>();
+        for (int page = 1; page <= MAX_INVESTMENT_PAGES; page++) {
+            int current = page;
+            InvestmentPage result = call(key -> restClient.get()
+                    .uri(url("/investments?itemId={id}&page={page}&pageSize=500"), itemId, current)
+                    .header("X-API-KEY", key).retrieve().body(InvestmentPage.class));
+            if (result == null || result.results() == null) {
+                break;
+            }
+            all.addAll(result.results());
+            if (result.totalPages() == null || current >= result.totalPages()) {
+                break;
+            }
+        }
+        return all;
     }
 
     /** Revoga o item na Pluggy. Já apagado conta como sucesso. */
@@ -277,6 +300,24 @@ public class PluggyClient {
     /** Fatura fechada. {@code dueDate} vem à meia-noite UTC. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record PluggyBill(String id, Instant dueDate, BigDecimal totalAmount) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record InvestmentPage(List<PluggyInvestment> results, Integer totalPages) {
+    }
+
+    /**
+     * Investimento como a Pluggy devolve. {@code amountOriginal}: o aplicado; {@code amount}: o
+     * bruto na data {@code date}; {@code balance}: o líquido de IR/IOF. {@code rate} com
+     * {@code rateType} CDI é o percentual do CDI (102 = 102%); {@code fixedAnnualRate} é a parte
+     * prefixada (o spread, no IPCA+). Datas de calendário chegam às 03:00 UTC (meia-noite em
+     * Brasília). {@code status}: ACTIVE, PENDING, TOTAL_WITHDRAWAL.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record PluggyInvestment(String id, String type, String subtype, String name, String issuer,
+                                   BigDecimal amountOriginal, BigDecimal amount, BigDecimal balance, Instant date,
+                                   Instant purchaseDate, Instant gracePeriodDate, Instant dueDate, BigDecimal rate, String rateType,
+                                   BigDecimal fixedAnnualRate, String status) {
     }
 
     /** {@code type}: BANK ou CREDIT. */

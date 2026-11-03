@@ -43,4 +43,11 @@ public interface AccountService {
                                LocalDate date, String description);
 
     void deleteTransfer(UUID transferGroupId, UUID userId);
+
+    /**
+     * Leva o saldo da conta a {@code target} com um único ajuste, sempre o mesmo lançamento
+     * ({@link Account#getSyncAdjustmentId()}), reescrito a cada chamada e apagado quando a
+     * diferença some. Entra na transação de quem chama.
+     */
+    void reconcileBalance(Account account, BigDecimal target, LocalDate date, String description);
 }
