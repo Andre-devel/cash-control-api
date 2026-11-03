@@ -135,6 +135,43 @@ class ReimbursementApiIntegrationTest {
     }
 
     @Test
+    void aRefundEntryCanBeTheReimbursement_andCountsOnlyOnce() throws Exception {
+        UUID shoes = create(TransactionType.EXPENSE, "100.00", "Tênis", food);
+        // O banco traz o Pix de volta como REFUND, com a mesma categoria da despesa.
+        UUID pixBack = create(TransactionType.REFUND, "100.00", "Pix tênis", food);
+
+        perform(get("/api/v1/transactions/" + shoes + "/reimbursement/candidates"), token)
+                .andExpect(jsonPath("$[0].id").value(pixBack.toString()));
+        link(shoes, pixBack).andExpect(status().isOk());
+
+        perform(get("/api/v1/transactions/summary"), token)
+                .andExpect(jsonPath("$.incomeAmount").value(0))
+                .andExpect(jsonPath("$.expenseAmount").value(0));
+        perform(put("/api/v1/budgets/" + food).content("{\"amount\":500}"), token).andExpect(status().isOk());
+        perform(get("/api/v1/budgets").param("month", day.format(DateTimeFormatter.ofPattern("yyyy-MM"))), token)
+                .andExpect(jsonPath("$.items[0].spent").value(0));
+        perform(get("/api/v1/transactions/" + pixBack), token)
+                .andExpect(jsonPath("$.reimbursement.linkedTransactionId").value(shoes.toString()));
+    }
+
+    @Test
+    void editSwitchesTypeBetweenIncomeAndRefundOnly() throws Exception {
+        UUID income = create(TransactionType.INCOME, "100.00", "Pix", null);
+        UUID expense = create(TransactionType.EXPENSE, "100.00", "Táxi", food);
+
+        perform(put("/api/v1/transactions/" + income).content("{\"type\":\"REFUND\"}"), token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.type").value("REFUND"));
+        perform(put("/api/v1/transactions/" + income).content("{\"type\":\"INCOME\"}"), token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.type").value("INCOME"));
+        perform(put("/api/v1/transactions/" + income).content("{\"type\":\"EXPENSE\"}"), token)
+                .andExpect(status().isUnprocessableEntity());
+        perform(put("/api/v1/transactions/" + expense).content("{\"type\":\"INCOME\"}"), token)
+                .andExpect(status().isUnprocessableEntity());
+    }
+
+    @Test
     void candidates_areUnlinkedIncomesUpToTheExpense_closestFirst() throws Exception {
         UUID expense = create(TransactionType.EXPENSE, "100.00", "Táxi", food);
         UUID linkedElsewhere = create(TransactionType.INCOME, "100.00", "Já usado", null);

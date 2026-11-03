@@ -79,7 +79,7 @@ class TransactionServiceIntegrationTest {
         TransactionFilterRequest filter = new TransactionFilterRequest(
                 null, null, null, null,
                 null, null, null, null, null, null,
-                "supermercado", false, null, false);
+                "supermercado", false, null, false, true);
 
         Page<TransactionSummaryResponse> result = transactionService.listTransactions(
                 filter, userId, PageRequest.of(0, 10));
@@ -117,7 +117,7 @@ class TransactionServiceIntegrationTest {
         assertThat(withoutCancelled.getTotalElements()).isEqualTo(3);
 
         TransactionFilterRequest includeAll = new TransactionFilterRequest(
-                null, null, null, null, null, null, null, null, null, null, null, true, null, false);
+                null, null, null, null, null, null, null, null, null, null, null, true, null, false, true);
         Page<TransactionSummaryResponse> withCancelled = transactionService.listTransactions(
                 includeAll, userId, PageRequest.of(0, 20));
         assertThat(withCancelled.getTotalElements()).isEqualTo(5);
@@ -302,7 +302,7 @@ class TransactionServiceIntegrationTest {
         // representada pela parcela mais antiga que sobrevive ao filtro.
         TransactionFilterRequest marchOnwards = new TransactionFilterRequest(
                 null, null, null, null, LocalDate.of(2026, 3, 1), null,
-                null, null, null, null, null, false, null, true);
+                null, null, null, null, null, false, null, true, true);
 
         Page<TransactionSummaryResponse> grouped = transactionService.listTransactions(
                 marchOnwards, userId, PageRequest.of(0, 20));
@@ -316,7 +316,7 @@ class TransactionServiceIntegrationTest {
 
     private static TransactionFilterRequest grouping() {
         return new TransactionFilterRequest(null, null, null, null,
-                null, null, null, null, null, null, null, false, null, true);
+                null, null, null, null, null, null, null, false, null, true, true);
     }
 
     private void createPaidTransaction(String description, String amount) {

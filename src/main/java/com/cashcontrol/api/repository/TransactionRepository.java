@@ -245,12 +245,13 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
     List<Transaction> findPendingReimbursements(@Param("userId") UUID userId);
 
     /**
-     * Entradas que podem reembolsar uma despesa de valor {@code maxAmount}: não canceladas, não
+     * Entradas (receitas e reembolsos) que podem reembolsar uma despesa de valor {@code maxAmount}: não canceladas, não
      * vinculadas a outra despesa e sem passar do valor dela; as de valor mais próximo primeiro.
      */
     @Query("SELECT t FROM Transaction t JOIN FETCH t.account " +
            "WHERE t.userId = :userId " +
-           "AND t.type = com.cashcontrol.api.domain.entity.TransactionType.INCOME " +
+           "AND t.type IN (com.cashcontrol.api.domain.entity.TransactionType.INCOME, " +
+           "               com.cashcontrol.api.domain.entity.TransactionType.REFUND) " +
            "AND t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED " +
            "AND t.account.deletedAt IS NULL " +
            "AND t.amount <= :maxAmount" + NOT_A_REIMBURSEMENT +
@@ -282,6 +283,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
                  OR LOWER(COALESCE(t.notes, '')) LIKE LOWER(CONCAT('%', CAST(:searchText AS String), '%')))
             AND (:includeCancelled = TRUE OR t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED)
             AND (:paymentMethod IS NULL OR t.paymentMethod.slug = :paymentMethod)
+            AND (:includeCreditCard = TRUE OR t.creditCard IS NULL)
             """;
 
     @Query(value = "SELECT t FROM Transaction t " + FILTER_PREDICATES + INSTALLMENT_GROUPING,
@@ -302,6 +304,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("includeCancelled") boolean includeCancelled,
             @Param("paymentMethod") PaymentMethodSlug paymentMethod,
             @Param("groupInstallments") boolean groupInstallments,
+            @Param("includeCreditCard") boolean includeCreditCard,
             Pageable pageable);
 
     /** {@code [type, quantidade, soma]} das transações não canceladas que casam com o filtro. */
@@ -322,7 +325,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("amountMax") BigDecimal amountMax,
             @Param("searchText") String searchText,
             @Param("includeCancelled") boolean includeCancelled,
-            @Param("paymentMethod") PaymentMethodSlug paymentMethod);
+            @Param("paymentMethod") PaymentMethodSlug paymentMethod,
+            @Param("includeCreditCard") boolean includeCreditCard);
 
     /**
      * Agregados por série usados para montar a linha colapsada do parcelamento:
@@ -446,7 +450,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "AND t.type IN (com.cashcontrol.api.domain.entity.TransactionType.EXPENSE, " +
            "               com.cashcontrol.api.domain.entity.TransactionType.REFUND) " +
            "AND t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED " +
-           "AND t.competenceDate >= :from AND t.competenceDate <= :to " +
+           "AND t.competenceDate >= :from AND t.competenceDate <= :to" + NOT_A_REIMBURSEMENT +
            "GROUP BY c.id, s.id, t.type, t.status, CASE WHEN cc.id IS NULL THEN false ELSE true END")
     List<Object[]> sumBudgetSpending(@Param("userId") UUID userId,
                                      @Param("from") LocalDate from,

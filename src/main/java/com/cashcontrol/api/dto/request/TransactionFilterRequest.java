@@ -23,10 +23,12 @@ public record TransactionFilterRequest(
         boolean includeCancelled,
         PaymentMethodSlug paymentMethod,
         /** Colapsa cada parcelamento em uma linha só, representando a compra inteira. */
-        boolean groupInstallments
+        boolean groupInstallments,
+        /** Falso tira as compras no cartão de crédito: elas não mexem no saldo da conta. */
+        boolean includeCreditCard
 ) {
     public static TransactionFilterRequest empty() {
         return new TransactionFilterRequest(null, null, null, null,
-                null, null, null, null, null, null, null, false, null, false);
+                null, null, null, null, null, null, null, false, null, false, true);
     }
 }

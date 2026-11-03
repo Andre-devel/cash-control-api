@@ -188,6 +188,15 @@ public class TransactionServiceImpl implements TransactionService {
             tx.setCreditCard(creditCard);
         }
 
+        if (request.type() != null && request.type() != tx.getType()) {
+            // Receita e reembolso pesam igual no saldo; o estorno no cartão (REFUND com cartão)
+            // entra na fatura, então fica de fora.
+            if (!isInflow(tx.getType()) || !isInflow(request.type()) || tx.getCreditCard() != null) {
+                throw new BusinessRuleException("Só é possível trocar o tipo entre receita e reembolso, fora do cartão.");
+            }
+            tx.setType(request.type());
+        }
+
         if (tx.getCreditCard() != null) {
             // Só a compra que já estava no cartão e já estava PAGA (pela fatura) pode continuar
             // assim; virar PAGA aqui, ou ir para o cartão já PAGA, é pagar fora da fatura.
@@ -337,8 +346,8 @@ public class TransactionServiceImpl implements TransactionService {
         Transaction income = null;
         if (request.reimbursedById() != null) {
             income = findOwnedTransaction(request.reimbursedById(), userId);
-            if (income.getType() != TransactionType.INCOME) {
-                throw new BusinessRuleException("O reembolso precisa ser uma receita.");
+            if (!isInflow(income.getType())) {
+                throw new BusinessRuleException("O reembolso precisa ser uma receita ou um reembolso.");
             }
             if (income.getStatus() == TransactionStatus.CANCELLED) {
                 throw new BusinessRuleException("Uma receita cancelada não pode ser vinculada como reembolso.");
@@ -395,6 +404,7 @@ public class TransactionServiceImpl implements TransactionService {
                 filter.includeCancelled(),
                 filter.paymentMethod(),
                 filter.groupInstallments(),
+                filter.includeCreditCard(),
                 pageable
         );
 
@@ -435,7 +445,8 @@ public class TransactionServiceImpl implements TransactionService {
                 filter.amountMax(),
                 filter.searchText(),
                 filter.includeCancelled(),
-                filter.paymentMethod()
+                filter.paymentMethod(),
+                filter.includeCreditCard()
         );
 
         BigDecimal income = BigDecimal.ZERO;
@@ -743,12 +754,17 @@ public class TransactionServiceImpl implements TransactionService {
 
     private static final int REIMBURSEMENT_CANDIDATES = 20;
 
+    /** Entradas que podem reembolsar uma despesa: receita ou reembolso (o REFUND do banco). */
+    private static boolean isInflow(TransactionType type) {
+        return type == TransactionType.INCOME || type == TransactionType.REFUND;
+    }
+
     /**
      * Entrada maior que a despesa deixaria a despesa negativa nos gráficos; o vínculo é recusado
      * (V42). Vale para o vínculo novo e para a edição de valor de qualquer um dos dois lados.
      */
     private void checkReimbursementAmounts(Transaction tx) {
-        Transaction expense = tx.getType() == TransactionType.INCOME
+        Transaction expense = isInflow(tx.getType())
                 ? transactionRepository.findByReimbursedBy_Id(tx.getId()).orElse(null)
                 : tx;
         if (expense == null || expense.getReimbursedBy() == null) {
@@ -764,7 +780,7 @@ public class TransactionServiceImpl implements TransactionService {
      * para a lista de pendentes; a despesa cancelada deixa de ser reembolsável.
      */
     private void releaseReimbursement(Transaction tx) {
-        if (tx.getType() == TransactionType.INCOME) {
+        if (isInflow(tx.getType())) {
             transactionRepository.findByReimbursedBy_Id(tx.getId()).ifPresent(expense -> {
                 expense.setReimbursedBy(null);
                 transactionRepository.saveAndFlush(expense);
@@ -782,7 +798,7 @@ public class TransactionServiceImpl implements TransactionService {
                     ? new ReimbursementResponse(true, null, null, null)
                     : new ReimbursementResponse(true, income.getId(), income.getDescription(), income.getAmount());
         }
-        if (tx.getType() == TransactionType.INCOME) {
+        if (isInflow(tx.getType())) {
             return transactionRepository.findByReimbursedBy_Id(tx.getId())
                     .map(expense -> new ReimbursementResponse(
                             false, expense.getId(), expense.getDescription(), expense.getAmount()))
@@ -795,7 +811,7 @@ public class TransactionServiceImpl implements TransactionService {
     private Map<UUID, ReimbursementResponse> loadReimbursements(List<Transaction> transactions) {
         Map<UUID, ReimbursementResponse> byId = new HashMap<>();
         List<UUID> incomeIds = transactions.stream()
-                .filter(tx -> tx.getType() == TransactionType.INCOME)
+                .filter(tx -> isInflow(tx.getType()))
                 .map(Transaction::getId)
                 .toList();
         if (!incomeIds.isEmpty()) {

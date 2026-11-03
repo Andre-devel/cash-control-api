@@ -133,6 +133,8 @@ public class TransactionController {
             @Parameter(description = "Filter by payment method slug") @RequestParam(required = false) PaymentMethodSlug paymentMethod,
             @Parameter(description = "Collapse each installment series into a single row representing the whole purchase")
             @RequestParam(defaultValue = "false") boolean groupInstallments,
+            @Parameter(description = "Include credit card purchases (they never touch the account balance)")
+            @RequestParam(defaultValue = "true") boolean includeCreditCard,
             @PageableDefault(sort = "competenceDate", direction = Sort.Direction.DESC) Pageable pageable,
             @AuthenticationPrincipal AuthenticatedUser principal) {
 
@@ -140,7 +142,7 @@ public class TransactionController {
                 accountId, type, status, categoryId,
                 competenceDateFrom, competenceDateTo,
                 paymentDateFrom, paymentDateTo,
-                amountMin, amountMax, searchText, includeCancelled, paymentMethod, groupInstallments);
+                amountMin, amountMax, searchText, includeCancelled, paymentMethod, groupInstallments, includeCreditCard);
 
         return transactionService.listTransactions(filter, principal.getUser().getId(), pageable);
     }
@@ -169,13 +171,15 @@ public class TransactionController {
             @Parameter(description = "Maximum amount") @RequestParam(required = false) BigDecimal amountMax,
             @Parameter(description = "Full-text search on description and notes") @RequestParam(required = false) String searchText,
             @Parameter(description = "Filter by payment method slug") @RequestParam(required = false) PaymentMethodSlug paymentMethod,
+            @Parameter(description = "Include credit card purchases (they never touch the account balance)")
+            @RequestParam(defaultValue = "true") boolean includeCreditCard,
             @AuthenticationPrincipal AuthenticatedUser principal) {
 
         TransactionFilterRequest filter = new TransactionFilterRequest(
                 accountId, type, status, categoryId,
                 competenceDateFrom, competenceDateTo,
                 paymentDateFrom, paymentDateTo,
-                amountMin, amountMax, searchText, false, paymentMethod, false);
+                amountMin, amountMax, searchText, false, paymentMethod, false, includeCreditCard);
 
         return transactionService.summarizeTransactions(filter, principal.getUser().getId());
     }

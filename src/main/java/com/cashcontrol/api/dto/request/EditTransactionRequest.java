@@ -2,6 +2,7 @@ package com.cashcontrol.api.dto.request;
 
 import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
+import com.cashcontrol.api.domain.entity.TransactionType;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Size;
@@ -23,5 +24,7 @@ public record EditTransactionRequest(
         List<UUID> tagIds,
         @Size(max = 255) String location,
         PaymentMethodSlug paymentMethod,
-        UUID creditCardId
+        UUID creditCardId,
+        /** Só troca entre INCOME e REFUND, fora do cartão; os demais tipos têm regras próprias. */
+        TransactionType type
 ) {}

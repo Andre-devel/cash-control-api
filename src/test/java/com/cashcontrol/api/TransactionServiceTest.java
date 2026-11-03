@@ -475,7 +475,7 @@ class TransactionServiceTest {
 
         EditTransactionRequest request = new EditTransactionRequest(
                 null, "Updated description", null, null, null, TransactionStatus.PAID,
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, null);
 
         TransactionDetailResponse response = transactionService.editTransaction(tx.getId(), request, userId);
 
@@ -492,7 +492,7 @@ class TransactionServiceTest {
 
         EditTransactionRequest request = new EditTransactionRequest(
                 null, null, null, null, null, TransactionStatus.PENDING,
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, null);
 
         assertThatThrownBy(() -> transactionService.editTransaction(tx.getId(), request, userId))
                 .isInstanceOf(BusinessRuleException.class)
@@ -512,7 +512,7 @@ class TransactionServiceTest {
         // O formulário reenvia o status atual junto com a nova data.
         EditTransactionRequest request = new EditTransactionRequest(
                 null, null, null, LocalDate.now().plusDays(3), null, TransactionStatus.OVERDUE,
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, null);
 
         TransactionDetailResponse response = transactionService.editTransaction(tx.getId(), request, userId);
 
@@ -528,7 +528,7 @@ class TransactionServiceTest {
 
         EditTransactionRequest request = new EditTransactionRequest(
                 null, null, null, null, LocalDate.now().minusDays(1), null,
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, null);
 
         TransactionDetailResponse response = transactionService.editTransaction(tx.getId(), request, userId);
 
@@ -553,7 +553,7 @@ class TransactionServiceTest {
 
         when(transactionRepository.findWithFilters(
                 eq(userId), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), eq(false),
-                any(), eq(false), any())).thenReturn(page);
+                any(), eq(false), eq(true), any())).thenReturn(page);
 
         Page<TransactionSummaryResponse> result = transactionService.listTransactions(
                 TransactionFilterRequest.empty(), userId, PageRequest.of(0, 10));
