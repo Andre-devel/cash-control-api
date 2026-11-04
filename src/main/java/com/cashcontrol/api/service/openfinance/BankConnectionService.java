@@ -29,12 +29,17 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -60,6 +65,10 @@ public class BankConnectionService {
     private static final int CONNECTOR_NAME_MAX = 100;
     /** Status do item em que o banco parou de entregar dados até o usuário agir. */
     private static final Set<String> ITEM_ERROR_STATUSES = Set.of("LOGIN_ERROR", "OUTDATED");
+    /** Ordem de criação, que decide qual de duas conexões iguais é a duplicada. */
+    private static final Comparator<BankConnection> CREATION_ORDER = Comparator
+            .comparing(BankConnection::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+            .thenComparing(BankConnection::getId);
 
     private final PluggyClient pluggyClient;
     private final AppProperties appProperties;
@@ -71,16 +80,57 @@ public class BankConnectionService {
     private final UserRepository userRepository;
     private final BankInvestmentSync bankInvestmentSync;
     private final BankSyncRunService bankSyncRunService;
+    private final BankOrphanItemService bankOrphanItemService;
+    private final PlatformTransactionManager transactionManager;
 
     @Transactional(readOnly = true)
     public BankConnectionsResponse list(UUID userId) {
         List<BankConnection> connections = connectionRepository.findAllByUserIdOrderByCreatedAtAsc(userId);
-        Map<UUID, List<BankConnectionAccount>> accounts = connectionAccountRepository
-                .findAllByConnectionIdIn(connections.stream().map(BankConnection::getId).toList()).stream()
-                .collect(Collectors.groupingBy(BankConnectionAccount::getConnectionId));
+        Map<UUID, List<BankConnectionAccount>> accounts = accountsOf(connections);
         return new BankConnectionsResponse(appProperties.getPluggy().isEnabled(), connections.stream()
-                .map(connection -> toResponse(connection, accounts.getOrDefault(connection.getId(), List.of())))
+                .map(connection -> toResponse(connection, accounts.getOrDefault(connection.getId(), List.of()),
+                        duplicateOf(connection, connections, accounts)))
                 .toList());
+    }
+
+    private Map<UUID, List<BankConnectionAccount>> accountsOf(List<BankConnection> connections) {
+        return new HashMap<>(connectionAccountRepository
+                .findAllByConnectionIdIn(connections.stream().map(BankConnection::getId).toList()).stream()
+                .collect(Collectors.groupingBy(BankConnectionAccount::getConnectionId)));
+    }
+
+    /**
+     * Conexão mais antiga do mesmo usuário que lê as mesmas contas: mesmo número de conta BANK, ou o
+     * mesmo conjunto de contas da Pluggy. Acontece quando o banco é conectado duas vezes (o MeuPluggy
+     * cria um item novo a cada conexão). {@code null} quando não há.
+     */
+    private static UUID duplicateOf(BankConnection connection, List<BankConnection> connections,
+                                    Map<UUID, List<BankConnectionAccount>> accounts) {
+        List<BankConnectionAccount> own = accounts.getOrDefault(connection.getId(), List.of());
+        Set<String> numbers = bankNumbers(own);
+        Set<String> externalIds = externalIds(own);
+        return connections.stream()
+                .filter(other -> !other.getId().equals(connection.getId()) && CREATION_ORDER.compare(other, connection) < 0)
+                .filter(other -> {
+                    List<BankConnectionAccount> theirs = accounts.getOrDefault(other.getId(), List.of());
+                    return (!externalIds.isEmpty() && externalIds.equals(externalIds(theirs)))
+                            || !Collections.disjoint(numbers, bankNumbers(theirs));
+                })
+                .min(CREATION_ORDER)
+                .map(BankConnection::getId)
+                .orElse(null);
+    }
+
+    private static Set<String> bankNumbers(List<BankConnectionAccount> accounts) {
+        return accounts.stream()
+                .filter(account -> account.getKind() == BankAccountKind.BANK && account.getNumber() != null)
+                .map(account -> account.getNumber().trim())
+                .filter(number -> !number.isEmpty())
+                .collect(Collectors.toSet());
+    }
+
+    private static Set<String> externalIds(List<BankConnectionAccount> accounts) {
+        return accounts.stream().map(BankConnectionAccount::getExternalAccountId).collect(Collectors.toSet());
     }
 
     /** Token para conectar um banco novo ou, com {@code connectionId}, renovar o consentimento dele. */
@@ -104,7 +154,9 @@ public class BankConnectionService {
         if (!connection.getUserId().equals(userId)) {
             throw new ResourceNotFoundException("Conexão não encontrada.");
         }
-        return tracked(connection, BankSyncTrigger.REGISTER, null, run -> sync(connection, item, run));
+        BankConnectionResponse response = tracked(connection, BankSyncTrigger.REGISTER, null, run -> sync(connection, item, run));
+        bankOrphanItemService.clear(id);
+        return response;
     }
 
     private static BankConnection newConnection(UUID userId, String itemId) {
@@ -196,16 +248,39 @@ public class BankConnectionService {
         }
     }
 
+    /**
+     * Cadastra o item novo em transação própria: se a leitura falhar no meio, nada dela fica e o
+     * item vai para {@code bank_orphan_items} (V50), de onde o usuário pode apagá-lo na Pluggy.
+     * Item de dono que não é nosso não é registrado.
+     */
     private void adopt(String itemId, String event) {
+        Optional<PluggyItem> found;
         try {
-            pluggyClient.getItem(itemId).ifPresent(item -> ownerOf(item).ifPresent(userId -> {
-                BankConnection created = newConnection(userId, itemId);
-                tracked(created, BankSyncTrigger.REGISTER, event, run -> sync(created, item, run));
-                log.info("Pluggy webhook: registered item {} for user {}", itemId, userId);
-            }));
+            found = pluggyClient.getItem(itemId);
         } catch (BankProviderException e) {
             log.warn("Pluggy webhook: could not read new item {}: {}", itemId, describe(e));
+            return;
         }
+        Optional<UUID> owner = found.flatMap(this::ownerOf);
+        if (owner.isEmpty()) {
+            return;
+        }
+        PluggyItem item = found.get();
+        UUID userId = owner.get();
+        TransactionTemplate newTransaction = new TransactionTemplate(transactionManager);
+        newTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        try {
+            newTransaction.executeWithoutResult(status -> {
+                BankConnection created = newConnection(userId, itemId);
+                tracked(created, BankSyncTrigger.REGISTER, event, run -> sync(created, item, run));
+            });
+        } catch (RuntimeException e) {
+            log.warn("Pluggy webhook: could not register item {} for user {}: {}", itemId, userId, describe(e));
+            bankOrphanItemService.record(item, userId);
+            return;
+        }
+        bankOrphanItemService.clear(itemId);
+        log.info("Pluggy webhook: registered item {} for user {}", itemId, userId);
     }
 
     /** Relê o item na Pluggy; item que ela não conhece mais leva a conexão junto. */
@@ -477,13 +552,22 @@ public class BankConnectionService {
         }
     }
 
-    private static BankConnectionResponse toResponse(BankConnection connection, List<BankConnectionAccount> accounts) {
+    /** Resposta de uma conexão só; confere as outras do usuário para o {@code duplicateOf}. */
+    private BankConnectionResponse toResponse(BankConnection connection, List<BankConnectionAccount> accounts) {
+        List<BankConnection> connections = connectionRepository.findAllByUserIdOrderByCreatedAtAsc(connection.getUserId());
+        Map<UUID, List<BankConnectionAccount>> byConnection = accountsOf(connections);
+        byConnection.put(connection.getId(), accounts);
+        return toResponse(connection, accounts, duplicateOf(connection, connections, byConnection));
+    }
+
+    private static BankConnectionResponse toResponse(BankConnection connection, List<BankConnectionAccount> accounts,
+                                                     UUID duplicateOf) {
         return new BankConnectionResponse(connection.getId(), connection.getItemId(), connection.getConnectorName(), connection.getStatus(),
                 connection.getStatusDetail(), connection.getLastSyncedAt(), connection.getConsentExpiresAt(), accounts.stream()
                 .sorted(Comparator.comparing(BankConnectionAccount::getKind).thenComparing(BankConnectionAccount::getName))
                 .map(account -> new BankConnectionAccountResponse(account.getId(), account.getKind(), account.getName(),
                         account.getNumber(), account.getAccountId(), account.getCreditCardId()))
-                .toList());
+                .toList(), duplicateOf);
     }
 
     private static String truncate(String value, int max) {

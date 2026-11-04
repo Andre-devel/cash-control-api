@@ -15,5 +15,7 @@ public record BankConnectionResponse(
         @Schema(description = "Error of the last update, if any") String statusDetail,
         @Schema(description = "When Pluggy last finished updating from the bank") Instant lastSyncedAt,
         @Schema(description = "When the Open Finance consent expires; renew it before this date") Instant consentExpiresAt,
-        List<BankConnectionAccountResponse> accounts
+        List<BankConnectionAccountResponse> accounts,
+        @Schema(description = "Older connection of the same user to the same bank account (same BANK account number or "
+                + "same set of Pluggy accounts); this one is the duplicate and can be removed") UUID duplicateOf
 ) {}
