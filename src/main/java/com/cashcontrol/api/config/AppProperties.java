@@ -134,6 +134,10 @@ public class AppProperties {
 
         @Positive
         private int refreshTokenDays = 30;
+
+        /** Dias que o histórico de sincronizações com o banco (V44) fica guardado. */
+        @Positive
+        private int bankSyncRunDays = 30;
     }
 
     /** Onde os anexos ficam gravados. Liga em {@code app.storage.*}. */

@@ -40,7 +40,7 @@ public class PluggyWebhookController {
             return;
         }
         if (event.event().startsWith("item/")) {
-            bankConnectionService.onItemEvent(event.itemId());
+            bankConnectionService.onItemEvent(event.itemId(), clean(event.event()));
         } else if ("transactions/created".equals(event.event()) && clean(event.accountId()) != null) {
             // Mede o atraso e põe os lançamentos novos na fila de revisão.
             bankConnectionService.onTransactionsCreated(event.itemId(), clean(event.accountId()),

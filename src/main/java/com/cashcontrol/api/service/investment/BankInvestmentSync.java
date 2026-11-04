@@ -83,21 +83,22 @@ public class BankInvestmentSync {
 
     /**
      * Cada passo em transação própria, fora da de quem chamou: um investimento que o módulo recusa
-     * não desfaz os outros, nem a leitura das contas do item.
+     * não desfaz os outros, nem a leitura das contas do item. Devolve o que mudou, para o histórico
+     * de sincronizações.
      */
-    public void sync(UUID userId, String itemId) {
+    public Result sync(UUID userId, String itemId) {
         List<PluggyInvestment> remote = pluggyClient.listInvestments(itemId).stream()
                 .filter(investment -> "FIXED_INCOME".equals(investment.type()) && investment.id() != null)
                 .toList();
         if (remote.isEmpty()) {
-            return;
+            return Result.NONE;
         }
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
         tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         UUID accountId = tx.execute(status -> investmentAccount(userId).map(Account::getId).orElse(null));
         if (accountId == null) {
             log.info("Bank investments: user {} has no single investment account; {} investments ignored", userId, remote.size());
-            return;
+            return Result.NONE;
         }
         LocalDate today = LocalDate.now(BRAZIL);
 
@@ -107,10 +108,19 @@ public class BankInvestmentSync {
                 removeManualHoldings(accountId);
             }
         });
+        int created = 0;
+        int redeemed = 0;
+        int failed = 0;
         for (PluggyInvestment investment : remote) {
             try {
-                tx.executeWithoutResult(status -> apply(investment, userId, accountId, today));
+                Applied applied = tx.execute(status -> apply(investment, userId, accountId, today));
+                if (applied == Applied.CREATED) {
+                    created++;
+                } else if (applied == Applied.REDEEMED) {
+                    redeemed++;
+                }
             } catch (RuntimeException e) {
+                failed++;
                 log.warn("Bank investments: investment {} of user {} not applied: {}", investment.id(), userId, e.toString());
             }
         }
@@ -123,7 +133,15 @@ public class BankInvestmentSync {
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
             accountService.reconcileBalance(account, principal, today, ADJUSTMENT_DESCRIPTION);
         });
+        return new Result(created, redeemed, failed);
     }
+
+    /** Aplicações criadas e resgatadas nesta leitura, e as que o módulo recusou. */
+    public record Result(int created, int redeemed, int failed) {
+        public static final Result NONE = new Result(0, 0, 0);
+    }
+
+    private enum Applied { CREATED, REDEEMED, NONE }
 
     /** A conta de investimento do usuário, se houver uma só: com duas, não há como saber qual. */
     private Optional<Account> investmentAccount(UUID userId) {
@@ -156,24 +174,26 @@ public class BankInvestmentSync {
      * O id do banco vale para o usuário todo (índice único da V43): a aplicação pode estar numa conta
      * que não é mais a de investimento atual, e ainda assim é atualizada ou resgatada.
      */
-    private void apply(PluggyInvestment investment, UUID userId, UUID accountId, LocalDate today) {
+    private Applied apply(PluggyInvestment investment, UUID userId, UUID accountId, LocalDate today) {
         Optional<FixedIncomeHolding> existing = holdingRepository.findByUserIdAndExternalIdAndDeletedAtIsNull(userId, investment.id());
         boolean withdrawn = "TOTAL_WITHDRAWAL".equals(investment.status());
         if (existing.isEmpty()) {
             if (creatable(investment, today)) {
                 create(investment, accountId, userId, today);
+                return Applied.CREATED;
             }
-            return;
+            return Applied.NONE;
         }
         FixedIncomeHolding holding = existing.get();
         if (holding.getStatus() != FixedIncomeStatus.ACTIVE) {
-            return;
+            return Applied.NONE;
         }
         if (withdrawn) {
             redeem(holding, investment, userId, today);
-        } else {
-            refresh(holding, investment, today);
+            return Applied.REDEEMED;
         }
+        refresh(holding, investment, today);
+        return Applied.NONE;
     }
 
     private List<PendingInvestmentTransferResponse> pending(UUID userId, UUID accountId, LocalDate today, Direction direction) {

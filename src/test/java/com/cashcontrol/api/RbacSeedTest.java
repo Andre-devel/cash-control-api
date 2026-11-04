@@ -35,15 +35,15 @@ class RbacSeedTest {
     }
 
     @Test
-    void elevenSystemPermissionsExist() {
+    void twelveSystemPermissionsExist() {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM permissions WHERE is_system_perm = TRUE",
                 Integer.class);
-        assertThat(count).as("There should be exactly 11 system permissions").isEqualTo(11);
+        assertThat(count).as("There should be exactly 12 system permissions (11 from V7, bank-sync:view from V44)").isEqualTo(12);
     }
 
     @Test
-    void adminRoleHasAllElevenSystemPermissions() {
+    void adminRoleHasAllTwelveSystemPermissions() {
         Integer count = jdbcTemplate.queryForObject(
                 """
                 SELECT COUNT(*)
@@ -53,7 +53,7 @@ class RbacSeedTest {
                 WHERE r.name = 'ADMIN' AND p.is_system_perm = TRUE
                 """,
                 Integer.class);
-        assertThat(count).as("ADMIN role should have exactly 11 system permissions").isEqualTo(11);
+        assertThat(count).as("ADMIN role should have exactly 12 system permissions (11 from V7, bank-sync:view from V44)").isEqualTo(12);
     }
 
     @Test

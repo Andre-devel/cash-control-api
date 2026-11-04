@@ -92,13 +92,15 @@ public class BankPendingService {
      *
      * <p>Transação própria: quem chama durante a releitura do item (varredura, evento {@code item/*})
      * segue com o sincronismo gravado mesmo que a leitura dos lançamentos falhe.
+     *
+     * @return quantos lançamentos entraram na fila agora
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void enqueue(UUID userId, UUID accountId, Instant createdAtFrom, Instant receivedAt) {
+    public int enqueue(UUID userId, UUID accountId, Instant createdAtFrom, Instant receivedAt) {
         Instant since = createdAtFrom != null ? createdAtFrom : receivedAt.minus(DEFAULT_LOOKBACK);
         BankStatement bank = pluggyStatementSource.fetch(accountId, userId, LocalDate.now(BANK_ZONE), since);
         if (bank.externalRefs().isEmpty()) {
-            return;
+            return 0;
         }
         Set<String> queued = new HashSet<>(pendingRepository.findExistingExternalRefs(accountId, bank.externalRefs()));
         List<BankPendingTransaction> created = new ArrayList<>();
@@ -109,11 +111,12 @@ public class BankPendingService {
             }
         }
         if (created.isEmpty()) {
-            return;
+            return 0;
         }
         pendingRepository.saveAll(created);
         log.info("Bank pending: queued {} transaction(s) for account {}", created.size(), accountId);
         notifyQueued(userId, created);
+        return created.size();
     }
 
     private void notifyQueued(UUID userId, List<BankPendingTransaction> created) {

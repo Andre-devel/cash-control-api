@@ -5,6 +5,9 @@ import com.cashcontrol.api.domain.entity.BankAccountKind;
 import com.cashcontrol.api.domain.entity.BankConnection;
 import com.cashcontrol.api.domain.entity.BankConnectionAccount;
 import com.cashcontrol.api.domain.entity.BankProvider;
+import com.cashcontrol.api.domain.entity.BankSyncOutcome;
+import com.cashcontrol.api.domain.entity.BankSyncRun;
+import com.cashcontrol.api.domain.entity.BankSyncTrigger;
 import com.cashcontrol.api.domain.exception.BankProviderException;
 import com.cashcontrol.api.domain.exception.BusinessRuleException;
 import com.cashcontrol.api.domain.exception.ConflictException;
@@ -30,11 +33,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -53,6 +58,8 @@ public class BankConnectionService {
 
     private static final int STATUS_DETAIL_MAX = 255;
     private static final int CONNECTOR_NAME_MAX = 100;
+    /** Status do item em que o banco parou de entregar dados até o usuário agir. */
+    private static final Set<String> ITEM_ERROR_STATUSES = Set.of("LOGIN_ERROR", "OUTDATED");
 
     private final PluggyClient pluggyClient;
     private final AppProperties appProperties;
@@ -63,6 +70,7 @@ public class BankConnectionService {
     private final BankPendingService bankPendingService;
     private final UserRepository userRepository;
     private final BankInvestmentSync bankInvestmentSync;
+    private final BankSyncRunService bankSyncRunService;
 
     @Transactional(readOnly = true)
     public BankConnectionsResponse list(UUID userId) {
@@ -96,7 +104,7 @@ public class BankConnectionService {
         if (!connection.getUserId().equals(userId)) {
             throw new ResourceNotFoundException("Conexão não encontrada.");
         }
-        return sync(connection, item);
+        return tracked(connection, BankSyncTrigger.REGISTER, null, run -> sync(connection, item, run));
     }
 
     private static BankConnection newConnection(UUID userId, String itemId) {
@@ -112,10 +120,12 @@ public class BankConnectionService {
     public BankConnectionResponse refresh(UUID userId, UUID connectionId) {
         requireEnabled();
         BankConnection connection = find(connectionId, userId);
-        PluggyItem item = pluggyClient.getItem(connection.getItemId())
-                .orElseThrow(() -> new BusinessRuleException(
-                        "O banco não reconhece mais esta conexão. Remova e conecte de novo."));
-        return syncAndQueue(connection, item);
+        return tracked(connection, BankSyncTrigger.MANUAL, null, run -> {
+            PluggyItem item = pluggyClient.getItem(connection.getItemId())
+                    .orElseThrow(() -> new BusinessRuleException(
+                            "O banco não reconhece mais esta conexão. Remova e conecte de novo."));
+            return syncAndQueue(connection, item, run);
+        });
     }
 
     @Transactional
@@ -170,33 +180,46 @@ public class BankConnectionService {
      */
     @Async
     @Transactional
-    public void onItemEvent(UUID itemId) {
+    public void onItemEvent(UUID itemId, String event) {
         if (!appProperties.getPluggy().isEnabled()) {
             return;
         }
         Optional<BankConnection> connection = connectionRepository.findByProviderAndItemId(BankProvider.PLUGGY, itemId.toString());
         if (connection.isEmpty()) {
-            adopt(itemId.toString());
+            adopt(itemId.toString(), event);
             return;
         }
         try {
-            pluggyClient.getItem(itemId.toString()).ifPresentOrElse(
-                    item -> syncAndQueue(connection.get(), item),
-                    () -> connectionRepository.delete(connection.get()));
+            reread(connection.get(), BankSyncTrigger.WEBHOOK, event);
         } catch (BankProviderException e) {
-            log.warn("Pluggy webhook: could not refresh item {}: {}", itemId, e.getCause() != null ? e.getCause().toString() : e.getMessage());
+            log.warn("Pluggy webhook: could not refresh item {}: {}", itemId, describe(e));
         }
     }
 
-    private void adopt(String itemId) {
+    private void adopt(String itemId, String event) {
         try {
             pluggyClient.getItem(itemId).ifPresent(item -> ownerOf(item).ifPresent(userId -> {
-                sync(newConnection(userId, itemId), item);
+                BankConnection created = newConnection(userId, itemId);
+                tracked(created, BankSyncTrigger.REGISTER, event, run -> sync(created, item, run));
                 log.info("Pluggy webhook: registered item {} for user {}", itemId, userId);
             }));
         } catch (BankProviderException e) {
-            log.warn("Pluggy webhook: could not read new item {}: {}", itemId, e.getCause() != null ? e.getCause().toString() : e.getMessage());
+            log.warn("Pluggy webhook: could not read new item {}: {}", itemId, describe(e));
         }
+    }
+
+    /** Relê o item na Pluggy; item que ela não conhece mais leva a conexão junto. */
+    private void reread(BankConnection connection, BankSyncTrigger trigger, String event) {
+        tracked(connection, trigger, event, run -> {
+            Optional<PluggyItem> item = pluggyClient.getItem(connection.getItemId());
+            if (item.isPresent()) {
+                return syncAndQueue(connection, item.get(), run);
+            }
+            connectionRepository.delete(connection);
+            run.setOutcome(BankSyncOutcome.ITEM_GONE);
+            run.setErrorMessage("A Pluggy não reconhece mais o item; a conexão foi apagada.");
+            return null;
+        });
     }
 
     private Optional<UUID> ownerOf(PluggyItem item) {
@@ -227,10 +250,8 @@ public class BankConnectionService {
         if (!appProperties.getPluggy().isEnabled()) {
             return;
         }
-        connectionRepository.findById(connectionId).ifPresent(connection ->
-                pluggyClient.getItem(connection.getItemId()).ifPresentOrElse(
-                        item -> syncAndQueue(connection, item),
-                        () -> connectionRepository.delete(connection)));
+        connectionRepository.findById(connectionId)
+                .ifPresent(connection -> reread(connection, BankSyncTrigger.SCHEDULED, null));
     }
 
     /**
@@ -253,6 +274,7 @@ public class BankConnectionService {
         if (link.isEmpty()) {
             return;
         }
+        BankSyncRun run = newRun(connection.get(), BankSyncTrigger.WEBHOOK, "transactions/created");
         try {
             List<PluggyTransaction> created = pluggyClient.listTransactions(externalAccountId).stream()
                     .filter(tx -> tx.createdAt() != null && (createdAtFrom == null || !tx.createdAt().isBefore(createdAtFrom)))
@@ -266,13 +288,60 @@ public class BankConnectionService {
                     link.get().getKind(), created.size(), newestDate, newestCreatedAt,
                     newestDate == null ? null : Duration.between(newestDate, receivedAt).toMinutes(),
                     newestCreatedAt == null ? null : Duration.between(newestCreatedAt, receivedAt).toMinutes());
+            run.setWebhookDelayMinutes(newestCreatedAt == null ? null : Duration.between(newestCreatedAt, receivedAt).toMinutes());
             if (link.get().getKind() == BankAccountKind.BANK && link.get().getAccountId() != null) {
-                bankPendingService.enqueue(connection.get().getUserId(), link.get().getAccountId(), createdAtFrom, receivedAt);
+                run.setTransactionsQueued(bankPendingService.enqueue(
+                        connection.get().getUserId(), link.get().getAccountId(), createdAtFrom, receivedAt));
             }
+            run.setOutcome(BankSyncOutcome.SUCCESS);
         } catch (BankProviderException | BusinessRuleException e) {
-            log.warn("Pluggy webhook: could not read transactions of {}: {}", externalAccountId,
-                    e.getCause() != null ? e.getCause().toString() : e.getMessage());
+            log.warn("Pluggy webhook: could not read transactions of {}: {}", externalAccountId, describe(e));
+            run.setOutcome(BankSyncOutcome.ERROR);
+            run.setErrorMessage(describe(e));
+        } finally {
+            run.setFinishedAt(Instant.now());
+            bankSyncRunService.record(run);
         }
+    }
+
+    /**
+     * Roda {@code body} e grava a execução no histórico (V44), com o erro quando ele falha — o erro
+     * segue para quem chamou. Sem desfecho marcado pelo {@code body}, a execução conta como sucesso.
+     */
+    private <T> T tracked(BankConnection connection, BankSyncTrigger trigger, String event, Function<BankSyncRun, T> body) {
+        BankSyncRun run = newRun(connection, trigger, event);
+        try {
+            T result = body.apply(run);
+            if (run.getOutcome() == null) {
+                run.setOutcome(BankSyncOutcome.SUCCESS);
+            }
+            return result;
+        } catch (RuntimeException e) {
+            run.setOutcome(BankSyncOutcome.ERROR);
+            run.setErrorMessage(describe(e));
+            throw e;
+        } finally {
+            run.setFinishedAt(Instant.now());
+            bankSyncRunService.record(run);
+        }
+    }
+
+    private static BankSyncRun newRun(BankConnection connection, BankSyncTrigger trigger, String event) {
+        BankSyncRun run = new BankSyncRun();
+        run.setUserId(connection.getUserId());
+        run.setConnectionId(connection.getId());
+        run.setItemId(connection.getItemId());
+        run.setConnectorName(connection.getConnectorName());
+        run.setTrigger(trigger);
+        run.setWebhookEvent(event);
+        run.setStartedAt(Instant.now());
+        return run;
+    }
+
+    /** Mensagem da exceção e, quando houver, a causa — que é onde a Pluggy diz o que deu errado. */
+    private static String describe(RuntimeException e) {
+        String message = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+        return e.getCause() != null ? message + " (" + e.getCause() + ")" : message;
     }
 
     /**
@@ -280,39 +349,66 @@ public class BankConnectionService {
      * o que chegou nesse meio-tempo nas contas correntes vinculadas. A fila não aceita a mesma linha
      * duas vezes, então coincidir com o {@code transactions/created} não duplica.
      */
-    private BankConnectionResponse syncAndQueue(BankConnection connection, PluggyItem item) {
+    private BankConnectionResponse syncAndQueue(BankConnection connection, PluggyItem item, BankSyncRun run) {
         Instant previous = connection.getLastSyncedAt();
-        BankConnectionResponse response = sync(connection, item);
-        syncInvestments(connection);
-        if (previous == null || item.lastUpdatedAt() == null || !item.lastUpdatedAt().isAfter(previous)) {
+        BankConnectionResponse response = sync(connection, item, run);
+        List<String> problems = new ArrayList<>();
+        syncInvestments(connection, run, problems);
+        boolean bankUpdated = previous == null || (item.lastUpdatedAt() != null && item.lastUpdatedAt().isAfter(previous));
+        if (previous != null && bankUpdated) {
+            run.setTransactionsQueued(queueSince(connection, previous, problems));
+        }
+        if (run.getOutcome() == BankSyncOutcome.ERROR) {
             return response;
         }
+        if (!problems.isEmpty()) {
+            run.setOutcome(BankSyncOutcome.PARTIAL);
+            run.setErrorMessage(String.join(" · ", problems));
+        } else {
+            run.setOutcome(bankUpdated ? BankSyncOutcome.SUCCESS : BankSyncOutcome.NO_CHANGE);
+        }
+        return response;
+    }
+
+    /** Fila de revisão de cada conta corrente vinculada; devolve quantos lançamentos entraram. */
+    private int queueSince(BankConnection connection, Instant previous, List<String> problems) {
+        int queued = 0;
         Instant now = Instant.now();
         for (BankConnectionAccount account : connectionAccountRepository.findAllByConnectionId(connection.getId())) {
             if (account.getKind() != BankAccountKind.BANK || account.getAccountId() == null) {
                 continue;
             }
             try {
-                bankPendingService.enqueue(connection.getUserId(), account.getAccountId(), previous, now);
+                queued += bankPendingService.enqueue(connection.getUserId(), account.getAccountId(), previous, now);
             } catch (BankProviderException | BusinessRuleException e) {
-                log.warn("Pluggy sync: could not queue transactions of {}: {}", account.getExternalAccountId(),
-                        e.getCause() != null ? e.getCause().toString() : e.getMessage());
+                log.warn("Pluggy sync: could not queue transactions of {}: {}", account.getExternalAccountId(), describe(e));
+                problems.add("Fila de revisão de " + account.getName() + ": " + describe(e));
             }
         }
-        return response;
+        return queued;
     }
 
     /** Em transação própria: falha nos investimentos não desfaz a leitura das contas. */
-    private void syncInvestments(BankConnection connection) {
+    private void syncInvestments(BankConnection connection, BankSyncRun run, List<String> problems) {
         try {
-            bankInvestmentSync.sync(connection.getUserId(), connection.getItemId());
+            BankInvestmentSync.Result result = bankInvestmentSync.sync(connection.getUserId(), connection.getItemId());
+            run.setInvestmentsCreated(result.created());
+            run.setInvestmentsRedeemed(result.redeemed());
+            run.setInvestmentsFailed(result.failed());
+            if (result.failed() > 0) {
+                problems.add(result.failed() + " investimento(s) não aplicado(s)");
+            }
         } catch (RuntimeException e) {
-            log.warn("Pluggy sync: could not read investments of item {}: {}", connection.getItemId(),
-                    e.getCause() != null ? e.getCause().toString() : e.toString());
+            log.warn("Pluggy sync: could not read investments of item {}: {}", connection.getItemId(), describe(e));
+            problems.add("Investimentos: " + describe(e));
         }
     }
 
-    private BankConnectionResponse sync(BankConnection connection, PluggyItem item) {
+    /**
+     * Grava status e contas do item. O item com erro do banco (login, consentimento vencido) marca a
+     * execução como erro, com a mensagem da Pluggy.
+     */
+    private BankConnectionResponse sync(BankConnection connection, PluggyItem item, BankSyncRun run) {
         connection.setStatus(item.status() != null ? item.status() : "UNKNOWN");
         connection.setStatusDetail(item.error() != null ? truncate(item.error().message(), STATUS_DETAIL_MAX) : null);
         connection.setLastSyncedAt(item.lastUpdatedAt());
@@ -320,11 +416,20 @@ public class BankConnectionService {
             connection.setConnectorName(truncate(item.connector().name(), CONNECTOR_NAME_MAX));
         }
         connection = connectionRepository.save(connection);
+        run.setConnectionId(connection.getId());
+        run.setConnectorName(connection.getConnectorName());
+        run.setItemStatus(connection.getStatus());
+        run.setItemLastUpdatedAt(item.lastUpdatedAt());
+        if (item.error() != null || ITEM_ERROR_STATUSES.contains(connection.getStatus())) {
+            run.setOutcome(BankSyncOutcome.ERROR);
+            run.setErrorMessage(connection.getStatusDetail() != null ? connection.getStatusDetail() : connection.getStatus());
+        }
 
         UUID connectionId = connection.getId();
         Map<String, BankConnectionAccount> existing = connectionAccountRepository.findAllByConnectionId(connectionId).stream()
                 .collect(Collectors.toMap(BankConnectionAccount::getExternalAccountId, Function.identity()));
         List<PluggyAccount> remote = pluggyClient.listAccounts(connection.getItemId());
+        run.setAccountsRead(remote.size());
         for (PluggyAccount account : remote) {
             BankConnectionAccount local = existing.remove(account.id());
             if (local == null) {
