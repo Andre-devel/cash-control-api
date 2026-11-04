@@ -56,6 +56,10 @@ public class BankConnection {
     @Column(name = "last_synced_at")
     private Instant lastSyncedAt;
 
+    /** Quando vence o consentimento do Open Finance; nulo se a Pluggy não informou. */
+    @Column(name = "consent_expires_at")
+    private Instant consentExpiresAt;
+
     @CreationTimestamp
     @Setter(lombok.AccessLevel.NONE)
     @Column(name = "created_at", nullable = false, updatable = false)

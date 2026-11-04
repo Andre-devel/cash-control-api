@@ -412,6 +412,7 @@ public class BankConnectionService {
         connection.setStatus(item.status() != null ? item.status() : "UNKNOWN");
         connection.setStatusDetail(item.error() != null ? truncate(item.error().message(), STATUS_DETAIL_MAX) : null);
         connection.setLastSyncedAt(item.lastUpdatedAt());
+        connection.setConsentExpiresAt(item.consentExpiresAt());
         if (item.connector() != null) {
             connection.setConnectorName(truncate(item.connector().name(), CONNECTOR_NAME_MAX));
         }
@@ -461,7 +462,7 @@ public class BankConnectionService {
 
     private static BankConnectionResponse toResponse(BankConnection connection, List<BankConnectionAccount> accounts) {
         return new BankConnectionResponse(connection.getId(), connection.getItemId(), connection.getConnectorName(), connection.getStatus(),
-                connection.getStatusDetail(), connection.getLastSyncedAt(), accounts.stream()
+                connection.getStatusDetail(), connection.getLastSyncedAt(), connection.getConsentExpiresAt(), accounts.stream()
                 .sorted(Comparator.comparing(BankConnectionAccount::getKind).thenComparing(BankConnectionAccount::getName))
                 .map(account -> new BankConnectionAccountResponse(account.getId(), account.getKind(), account.getName(),
                         account.getNumber(), account.getAccountId(), account.getCreditCardId()))

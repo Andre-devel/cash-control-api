@@ -1,15 +1,12 @@
-phase-00-project-bootstrap-build-infrastructure.md|Phase 0 — Project Bootstrap & Build Infrastructure
-phase-01-database-schema-flyway-migrations.md|Phase 1 — Database Schema (Flyway Migrations)
-phase-02-domain-layer-jpa-entities.md|Phase 2 — Domain Layer (JPA Entities)
-phase-03-security-user-scoping.md|Phase 3 — Security & User Scoping
-phase-04-account-wallet-management.md|Phase 4 — Account & Wallet Management
-phase-05-transaction-management.md|Phase 5 — Transaction Management
-phase-06-installment-transactions.md|Phase 6 — Installment Transactions
-phase-07-recurring-transactions.md|Phase 7 — Recurring Transactions
-phase-08-category-management.md|Phase 8 — Category Management
-phase-09-credit-card-management.md|Phase 9 — Credit Card Management
-phase-10-dashboard-reporting.md|Phase 10 — Dashboard & Reporting
-phase-11-overdue-detection-scheduled-jobs.md|Phase 11 — Overdue Detection & Scheduled Jobs
-phase-12-api-documentation-openapi-swagger.md|Phase 12 — API Documentation (OpenAPI / Swagger)
-phase-13-observability-logging.md|Phase 13 — Observability & Logging
-phase-14-testing-docker-ci-cd.md|Phase 14 — Testing, Docker & CI/CD
+# stamp: PHASES-api.md@sha256:30cfb783c922
+phase-01.md|1|Vencimento do consentimento e aviso de sincronização parada
+phase-02.md|2|Saldo e limite lidos do banco, com conciliação por ajuste
+phase-03.md|3|Contraparte do Pix vinda da Pluggy
+phase-04.md|4|Compras do cartão na fila de revisão
+phase-05.md|5|Sugestão de recorrências a partir do histórico
+phase-06.md|6|Conexão duplicada e item órfão na Pluggy
+phase-07.md|7|Histórico do orçamento por mês
+phase-08.md|8|Descrições de papéis e permissões em pt-BR
+phase-09.md|9|Escopo pessoa física e jurídica em contas e cartões
+phase-10.md|10|Metas de economia
+phase-11.md|11|Busca global

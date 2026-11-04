@@ -14,5 +14,6 @@ public record BankConnectionResponse(
         @Schema(description = "Pluggy item status", example = "UPDATED") String status,
         @Schema(description = "Error of the last update, if any") String statusDetail,
         @Schema(description = "When Pluggy last finished updating from the bank") Instant lastSyncedAt,
+        @Schema(description = "When the Open Finance consent expires; renew it before this date") Instant consentExpiresAt,
         List<BankConnectionAccountResponse> accounts
 ) {}

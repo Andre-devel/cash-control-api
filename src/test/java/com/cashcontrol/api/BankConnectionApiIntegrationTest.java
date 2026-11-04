@@ -105,6 +105,22 @@ class BankConnectionApiIntegrationTest {
     }
 
     @Test
+    void register_savesConsentExpiry_andListReturnsIt() throws Exception {
+        Instant expiresAt = Instant.parse("2027-10-30T10:00:00Z");
+        PluggyItem base = item(itemId, userId.toString(), "UPDATED");
+        when(pluggyClient.getItem(itemId)).thenReturn(Optional.of(new PluggyItem(base.id(), base.status(), null,
+                base.clientUserId(), base.lastUpdatedAt(), base.connector(), null, expiresAt)));
+
+        JsonNode connection = register(token).andExpect(status().isCreated()).andReturnJson();
+        assertThat(Instant.parse(connection.get("consentExpiresAt").asText())).isEqualTo(expiresAt);
+        assertThat(jdbcTemplate.queryForObject("SELECT consent_expires_at FROM bank_connections WHERE item_id = ?",
+                java.sql.Timestamp.class, itemId).toInstant()).isEqualTo(expiresAt);
+
+        JsonNode list = perform(get("/api/v1/bank-connections"), token).andExpect(status().isOk()).andReturnJson();
+        assertThat(Instant.parse(list.get("connections").get(0).get("consentExpiresAt").asText())).isEqualTo(expiresAt);
+    }
+
+    @Test
     void register_itemOfAnotherPluggyUser_isNotFound() throws Exception {
         when(pluggyClient.getItem(itemId)).thenReturn(Optional.of(item(itemId, UUID.randomUUID().toString(), "UPDATED")));
 

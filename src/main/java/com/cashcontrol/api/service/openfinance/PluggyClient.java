@@ -243,10 +243,18 @@ public class PluggyClient {
     record AccountPage(List<PluggyAccount> results) {
     }
 
-    /** Campos do item que o app usa. {@code status}: UPDATED, UPDATING, LOGIN_ERROR, OUTDATED... */
+    /**
+     * Campos do item que o app usa. {@code status}: UPDATED, UPDATING, LOGIN_ERROR, OUTDATED...
+     * {@code consentExpiresAt}: vencimento do consentimento (12 meses após a conexão).
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record PluggyItem(String id, String status, String executionStatus, String clientUserId,
-                             Instant lastUpdatedAt, Connector connector, ItemError error) {
+                             Instant lastUpdatedAt, Connector connector, ItemError error, Instant consentExpiresAt) {
+
+        public PluggyItem(String id, String status, String executionStatus, String clientUserId,
+                          Instant lastUpdatedAt, Connector connector, ItemError error) {
+            this(id, status, executionStatus, clientUserId, lastUpdatedAt, connector, error, null);
+        }
 
         @JsonIgnoreProperties(ignoreUnknown = true)
         public record Connector(String name) {
