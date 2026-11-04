@@ -1,5 +1,6 @@
 package com.cashcontrol.api;
 
+import com.cashcontrol.api.domain.entity.AccountScope;
 import com.cashcontrol.api.config.PostgresTestContainerConfig;
 import com.cashcontrol.api.domain.UserSlugConstants;
 import com.cashcontrol.api.domain.entity.AccountType;
@@ -124,7 +125,7 @@ class AccountControllerTest {
 
     @Test
     void listAccounts_returns200WithList() throws Exception {
-        when(accountService.listAccounts(eq(userId), eq(false)))
+        when(accountService.listAccounts(eq(userId), eq(false), any()))
                 .thenReturn(List.of(buildAccountResponse(UUID.randomUUID())));
 
         mockMvc.perform(get("/api/v1/accounts")
@@ -135,7 +136,7 @@ class AccountControllerTest {
 
     @Test
     void listAccounts_withIncludeArchived_returnsAll() throws Exception {
-        when(accountService.listAccounts(eq(userId), eq(true)))
+        when(accountService.listAccounts(eq(userId), eq(true), any()))
                 .thenReturn(List.of(buildAccountResponse(UUID.randomUUID())));
 
         mockMvc.perform(get("/api/v1/accounts?includeArchived=true")
@@ -382,7 +383,7 @@ class AccountControllerTest {
     }
 
     private AccountResponse buildAccountResponse(UUID id) {
-        return new AccountResponse(id, "Test Account", AccountType.CHECKING, "BRL",
+        return new AccountResponse(id, "Test Account", AccountType.CHECKING, AccountScope.PERSONAL, "BRL",
                 null, 0, BigDecimal.ZERO, null, Instant.now(), Instant.now());
     }
 }

@@ -41,6 +41,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -405,12 +406,15 @@ public class TransactionServiceImpl implements TransactionService {
                 filter.paymentMethod(),
                 filter.groupInstallments(),
                 filter.includeCreditCard(),
+                filter.scope(),
                 pageable
         );
 
         Map<UUID, ReimbursementResponse> reimbursements = loadReimbursements(page.getContent());
+        Set<UUID> crossScopeGroups = crossScopeTransferGroups(page.getContent());
         if (!filter.groupInstallments()) {
-            return page.map(tx -> toSummary(tx).withReimbursement(reimbursements.get(tx.getId())));
+            return page.map(tx -> toSummary(tx).withReimbursement(reimbursements.get(tx.getId()))
+                    .withCrossScope(crossScopeGroups.contains(tx.getTransferGroupId())));
         }
 
         Set<UUID> seriesIds = page.getContent().stream()
@@ -421,7 +425,8 @@ public class TransactionServiceImpl implements TransactionService {
         Map<UUID, SeriesAggregate> aggregates = seriesIds.isEmpty() ? Map.of() : loadSeriesAggregates(seriesIds);
         return page.map(tx -> {
             if (tx.getInstallmentSeries() == null || tx.getInstallmentNumber() == null) {
-                return toSummary(tx).withReimbursement(reimbursements.get(tx.getId()));
+                return toSummary(tx).withReimbursement(reimbursements.get(tx.getId()))
+                        .withCrossScope(crossScopeGroups.contains(tx.getTransferGroupId()));
             }
             SeriesAggregate agg = aggregates.get(tx.getInstallmentSeries().getId());
             return agg != null ? toGroupedSummary(tx, agg) : toSummary(tx);
@@ -446,7 +451,8 @@ public class TransactionServiceImpl implements TransactionService {
                 filter.searchText(),
                 filter.includeCancelled(),
                 filter.paymentMethod(),
-                filter.includeCreditCard()
+                filter.includeCreditCard(),
+                filter.scope()
         );
 
         BigDecimal income = BigDecimal.ZERO;
@@ -673,8 +679,41 @@ public class TransactionServiceImpl implements TransactionService {
                 true,
                 null,
                 tx.getCounterpartyName(),
-                tx.getCounterpartyDocument()
+                tx.getCounterpartyDocument(),
+                false
         );
+    }
+
+    // ── Transferência entre escopos ─────────────────────────────────────────
+    // Transferência de uma conta PF para uma PJ (ou o contrário) é pró-labore ou aporte. Como toda
+    // transferência, não entra em receita nem despesa; a marca é só para o front rotular.
+
+    /** Grupos de transferência da lista cujas pernas estão em escopos diferentes, numa consulta só. */
+    private Set<UUID> crossScopeTransferGroups(Collection<Transaction> transactions) {
+        Set<UUID> groupIds = transactions.stream()
+                .filter(tx -> tx.getType() == TransactionType.TRANSFER && tx.getTransferGroupId() != null)
+                .map(Transaction::getTransferGroupId)
+                .collect(Collectors.toSet());
+        if (groupIds.isEmpty()) {
+            return new HashSet<>(); // não Set.of(): a lista consulta contains(null) nas linhas sem grupo
+        }
+        return transactionRepository.findAllByTransferGroupIdIn(groupIds).stream()
+                .collect(Collectors.groupingBy(Transaction::getTransferGroupId,
+                        Collectors.mapping(Transaction::scope, Collectors.toSet())))
+                .entrySet().stream()
+                .filter(entry -> entry.getValue().size() > 1)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
+    }
+
+    private boolean isCrossScopeTransfer(Transaction tx) {
+        if (tx.getType() != TransactionType.TRANSFER || tx.getTransferGroupId() == null) {
+            return false;
+        }
+        return transactionRepository.findAllByTransferGroupId(tx.getTransferGroupId()).stream()
+                .map(Transaction::scope)
+                .distinct()
+                .count() > 1;
     }
 
     private PaymentMethodResponse summaryPaymentMethod(Transaction tx) {
@@ -752,7 +791,8 @@ public class TransactionServiceImpl implements TransactionService {
                 tx.getPaidInvoice() != null ? tx.getPaidInvoice().getId() : null,
                 reimbursementOf(tx),
                 tx.getCounterpartyName(),
-                tx.getCounterpartyDocument()
+                tx.getCounterpartyDocument(),
+                isCrossScopeTransfer(tx)
         );
     }
 

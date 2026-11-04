@@ -41,5 +41,8 @@ public record TransactionDetailResponse(
         @Schema(description = "Invoice paid by this INVOICE_PAYMENT. Null for every other type.") UUID paidInvoiceId,
         @Schema(description = "Reimbursement link. Null when the transaction is not part of one.") ReimbursementResponse reimbursement,
         @Schema(description = "Who received (outflow) or paid (inflow), as reported by the bank. Null when not imported from the bank.", example = "Fulano de Tal") String counterpartyName,
-        @Schema(description = "Counterparty CPF/CNPJ, masked as the bank sent it.", example = "***.123.456-**") String counterpartyDocument
+        @Schema(description = "Counterparty CPF/CNPJ, masked as the bank sent it.", example = "***.123.456-**") String counterpartyDocument,
+        @Schema(description = "True on a transfer between accounts of different scopes (personal and business): "
+                              + "owner's draw or capital contribution. Never counts as income or expense.")
+        boolean crossScope
 ) {}

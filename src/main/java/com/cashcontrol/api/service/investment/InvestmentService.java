@@ -1,5 +1,6 @@
 package com.cashcontrol.api.service.investment;
 
+import com.cashcontrol.api.domain.entity.AccountScope;
 import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.AccountType;
 import com.cashcontrol.api.domain.entity.Category;
@@ -186,9 +187,12 @@ public class InvestmentService {
      * mês), sobre a base de hoje — resgates do mês já aparecem como receita.
      */
     @Transactional(readOnly = true)
-    public DashboardFigures getDashboardFigures(UUID userId, LocalDate today) {
+    public DashboardFigures getDashboardFigures(UUID userId, LocalDate today, AccountScope scope) {
         List<FixedIncomeHolding> active = holdingRepository
-                .findAllByUserIdAndStatusAndDeletedAtIsNullOrderByAppliedAtAsc(userId, FixedIncomeStatus.ACTIVE);
+                .findAllByUserIdAndStatusAndDeletedAtIsNullOrderByAppliedAtAsc(userId, FixedIncomeStatus.ACTIVE)
+                .stream()
+                .filter(holding -> inScope(holding, scope))
+                .toList();
         MarketRates rates = loadRates(active, today);
         LocalDate previousMonthEnd = today.withDayOfMonth(1).minusDays(1);
         BigDecimal gross = BigDecimal.ZERO;
@@ -207,6 +211,11 @@ public class InvestmentService {
     public record DashboardFigures(BigDecimal gross, BigDecimal net, BigDecimal yieldMonth) {
     }
 
+    /** A aplicação segue o escopo da conta de investimento; {@code null} aceita todas. */
+    private static boolean inScope(FixedIncomeHolding holding, AccountScope scope) {
+        return scope == null || holding.getAccount().getScope() == scope;
+    }
+
     /**
      * O que o patrimônio a custo ainda não enxerga em cada data: Σ (líquido de IR/IOF − principal)
      * do que estava aplicado naquele dia. Somado ao saldo das contas, dá o patrimônio com os
@@ -218,12 +227,14 @@ public class InvestmentService {
      * passadas, a curva sobre o que estava aplicado.
      */
     @Transactional(readOnly = true)
-    public Map<LocalDate, BigDecimal> unrealizedNetYield(UUID userId, Collection<LocalDate> dates, LocalDate today) {
+    public Map<LocalDate, BigDecimal> unrealizedNetYield(UUID userId, Collection<LocalDate> dates, LocalDate today,
+                                                         AccountScope scope) {
         Map<LocalDate, BigDecimal> result = new HashMap<>();
         dates.forEach(date -> result.put(date, BigDecimal.ZERO));
         List<FixedIncomeHolding> holdings = holdingRepository.findAllByUserIdAndDeletedAtIsNullOrderByAppliedAtAsc(userId)
                 .stream()
                 .filter(holding -> holding.getAccount().getArchivedAt() == null && holding.getAccount().getDeletedAt() == null)
+                .filter(holding -> inScope(holding, scope))
                 .filter(holding -> dates.stream().anyMatch(date -> date.isAfter(holding.getAppliedAt())))
                 .toList();
         if (holdings.isEmpty()) {

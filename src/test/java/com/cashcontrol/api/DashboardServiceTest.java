@@ -73,12 +73,12 @@ class DashboardServiceTest {
         when(dashboardProps.getUpcomingBillsDays()).thenReturn(7);
         when(dashboardProps.getUpcomingBillsMaxResults()).thenReturn(20);
         // Sem aplicações: o patrimônio é o das contas, a custo.
-        when(investmentService.unrealizedNetYield(any(), any(), any())).thenAnswer(invocation -> {
+        when(investmentService.unrealizedNetYield(any(), any(), any(), any())).thenAnswer(invocation -> {
             Map<LocalDate, BigDecimal> zeros = new HashMap<>();
             invocation.<Collection<LocalDate>>getArgument(1).forEach(date -> zeros.put(date, BigDecimal.ZERO));
             return zeros;
         });
-        when(investmentService.getDashboardFigures(any(), any())).thenReturn(
+        when(investmentService.getDashboardFigures(any(), any(), any())).thenReturn(
                 new InvestmentService.DashboardFigures(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO));
     }
 
@@ -86,18 +86,18 @@ class DashboardServiceTest {
 
     @Test
     void getOverviewMetrics_returnsAggregatedValues() {
-        when(transactionRepository.sumTotalBalanceExcludingType(eq(userId), eq(AccountType.INVESTMENT)))
+        when(transactionRepository.sumTotalBalanceExcludingType(eq(userId), eq(AccountType.INVESTMENT), any()))
                 .thenReturn(new BigDecimal("5000.00"));
-        when(transactionRepository.sumTotalNetWorth(eq(userId)))
+        when(transactionRepository.sumTotalNetWorth(eq(userId), any()))
                 .thenReturn(new BigDecimal("8000.00"));
         when(transactionRepository.sumPaidByTypeAndPaymentDateRange(
-                eq(userId), eq(TransactionType.INCOME), any(), any(), eq(null)))
+                eq(userId), eq(TransactionType.INCOME), any(), any(), eq(null), any()))
                 .thenReturn(new BigDecimal("3000.00"));
         when(transactionRepository.sumPaidByTypeAndPaymentDateRange(
-                eq(userId), eq(TransactionType.EXPENSE), any(), any(), eq(null)))
+                eq(userId), eq(TransactionType.EXPENSE), any(), any(), eq(null), any()))
                 .thenReturn(new BigDecimal("1500.00"));
 
-        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId);
+        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId, null);
 
         assertThat(result.totalBalance()).isEqualByComparingTo("5000.00");
         assertThat(result.netWorth()).isEqualByComparingTo("8000.00");
@@ -110,12 +110,12 @@ class DashboardServiceTest {
 
     @Test
     void getOverviewMetrics_handlesNullRepositoryResults() {
-        when(transactionRepository.sumTotalBalanceExcludingType(any(), any())).thenReturn(null);
-        when(transactionRepository.sumTotalNetWorth(any())).thenReturn(null);
-        when(transactionRepository.sumPaidByTypeAndPaymentDateRange(any(), any(), any(), any(), any()))
+        when(transactionRepository.sumTotalBalanceExcludingType(any(), any(), any())).thenReturn(null);
+        when(transactionRepository.sumTotalNetWorth(any(), any())).thenReturn(null);
+        when(transactionRepository.sumPaidByTypeAndPaymentDateRange(any(), any(), any(), any(), any(), any()))
                 .thenReturn(null);
 
-        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId);
+        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId, null);
 
         assertThat(result.totalBalance()).isEqualByComparingTo(BigDecimal.ZERO);
         assertThat(result.netWorth()).isEqualByComparingTo(BigDecimal.ZERO);
@@ -138,15 +138,15 @@ class DashboardServiceTest {
         List<Object[]> breakdown = new ArrayList<>();
         breakdown.add(row);
         when(transactionRepository.findCategoryBreakdown(
-                eq(userId), eq(TransactionType.EXPENSE), eq(from), eq(to), eq(null)))
+                eq(userId), eq(TransactionType.EXPENSE), eq(from), eq(to), eq(null), any()))
                 .thenReturn(breakdown);
         when(transactionRepository.sumUncategorized(
-                eq(userId), eq(TransactionType.EXPENSE), eq(from), eq(to), eq(null)))
+                eq(userId), eq(TransactionType.EXPENSE), eq(from), eq(to), eq(null), any()))
                 .thenReturn(new BigDecimal("100.00"));
         when(categoryRepository.findAllById(List.of(catId))).thenReturn(List.of(cat));
 
         CategoryPieChartResponse result = dashboardService.getCategoryPieChart(
-                userId, from, to, null, TransactionType.EXPENSE);
+                userId, from, to, null, TransactionType.EXPENSE, null);
 
         assertThat(result.totalAmount()).isEqualByComparingTo("400.00");
         assertThat(result.entries()).hasSize(2);
@@ -161,13 +161,13 @@ class DashboardServiceTest {
         LocalDate from = LocalDate.now().withDayOfMonth(1);
         LocalDate to = LocalDate.now();
 
-        when(transactionRepository.findCategoryBreakdown(any(), any(), any(), any(), any()))
+        when(transactionRepository.findCategoryBreakdown(any(), any(), any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
-        when(transactionRepository.sumUncategorized(any(), any(), any(), any(), any()))
+        when(transactionRepository.sumUncategorized(any(), any(), any(), any(), any(), any()))
                 .thenReturn(BigDecimal.ZERO);
 
         CategoryPieChartResponse result = dashboardService.getCategoryPieChart(
-                userId, from, to, null, null);
+                userId, from, to, null, null, null);
 
         assertThat(result.entries()).isEmpty();
         assertThat(result.totalAmount()).isEqualByComparingTo(BigDecimal.ZERO);
@@ -177,10 +177,10 @@ class DashboardServiceTest {
 
     @Test
     void getMonthlyBarChart_includesAllMonthsIncludingEmpty() {
-        when(transactionRepository.findMonthlyIncomeExpense(any(), any(), any(), any()))
+        when(transactionRepository.findMonthlyIncomeExpense(any(), any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
 
-        MonthlyBarChartResponse result = dashboardService.getMonthlyBarChart(userId, 3, null);
+        MonthlyBarChartResponse result = dashboardService.getMonthlyBarChart(userId, 3, null, null);
 
         assertThat(result.months()).hasSize(3);
         result.months().forEach(entry -> {
@@ -200,10 +200,10 @@ class DashboardServiceTest {
         List<Object[]> monthlyRows = new ArrayList<>();
         monthlyRows.add(rowIncome);
         monthlyRows.add(rowExpense);
-        when(transactionRepository.findMonthlyIncomeExpense(any(), any(), any(), any()))
+        when(transactionRepository.findMonthlyIncomeExpense(any(), any(), any(), any(), any()))
                 .thenReturn(monthlyRows);
 
-        MonthlyBarChartResponse result = dashboardService.getMonthlyBarChart(userId, 1, null);
+        MonthlyBarChartResponse result = dashboardService.getMonthlyBarChart(userId, 1, null, null);
 
         assertThat(result.months()).hasSize(1);
         MonthlyBarChartResponse.Entry entry = result.months().get(0);
@@ -215,13 +215,13 @@ class DashboardServiceTest {
     @Test
     void getOverviewMetrics_refundsReduceTheMonthExpenses() {
         when(transactionRepository.sumPaidByTypeAndPaymentDateRange(
-                eq(userId), eq(TransactionType.EXPENSE), any(), any(), eq(null)))
+                eq(userId), eq(TransactionType.EXPENSE), any(), any(), eq(null), any()))
                 .thenReturn(new BigDecimal("1500.00"));
         when(transactionRepository.sumPaidByTypeAndPaymentDateRange(
-                eq(userId), eq(TransactionType.REFUND), any(), any(), eq(null)))
+                eq(userId), eq(TransactionType.REFUND), any(), any(), eq(null), any()))
                 .thenReturn(new BigDecimal("376.52"));
 
-        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId);
+        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId, null);
 
         assertThat(result.monthlyExpenses()).isEqualByComparingTo("1123.48");
     }
@@ -245,14 +245,14 @@ class DashboardServiceTest {
         List<Object[]> refunds = new ArrayList<>();
         refunds.add(new Object[]{marketplace, new BigDecimal("250.00")});
         when(transactionRepository.findCategoryBreakdown(
-                eq(userId), eq(TransactionType.EXPENSE), eq(from), eq(to), eq(null))).thenReturn(expenses);
+                eq(userId), eq(TransactionType.EXPENSE), eq(from), eq(to), eq(null), any())).thenReturn(expenses);
         when(transactionRepository.findCategoryBreakdown(
-                eq(userId), eq(TransactionType.REFUND), eq(from), eq(to), eq(null))).thenReturn(refunds);
-        when(transactionRepository.sumUncategorized(any(), any(), any(), any(), any())).thenReturn(BigDecimal.ZERO);
+                eq(userId), eq(TransactionType.REFUND), eq(from), eq(to), eq(null), any())).thenReturn(refunds);
+        when(transactionRepository.sumUncategorized(any(), any(), any(), any(), any(), any())).thenReturn(BigDecimal.ZERO);
         when(categoryRepository.findAllById(any())).thenReturn(List.of(marketplaceCategory, foodCategory));
 
         CategoryPieChartResponse result = dashboardService.getCategoryPieChart(
-                userId, from, to, null, TransactionType.EXPENSE);
+                userId, from, to, null, TransactionType.EXPENSE, null);
 
         assertThat(result.totalAmount()).isEqualByComparingTo("450.00");
         // Marketplace caiu para 150 e passou a ser a menor.
@@ -267,9 +267,9 @@ class DashboardServiceTest {
         List<Object[]> monthlyRows = new ArrayList<>();
         monthlyRows.add(new Object[]{currentLabel, "EXPENSE", new BigDecimal("800.00")});
         monthlyRows.add(new Object[]{currentLabel, "REFUND", new BigDecimal("125.82")});
-        when(transactionRepository.findMonthlyIncomeExpense(any(), any(), any(), any())).thenReturn(monthlyRows);
+        when(transactionRepository.findMonthlyIncomeExpense(any(), any(), any(), any(), any())).thenReturn(monthlyRows);
 
-        MonthlyBarChartResponse result = dashboardService.getMonthlyBarChart(userId, 1, null);
+        MonthlyBarChartResponse result = dashboardService.getMonthlyBarChart(userId, 1, null, null);
 
         assertThat(result.months().getFirst().expenses()).isEqualByComparingTo("674.18");
     }
@@ -278,14 +278,14 @@ class DashboardServiceTest {
 
     @Test
     void getNetWorthEvolution_monthlyGranularity_returnsOneSnapshotPerMonth() {
-        when(transactionRepository.sumNetWorthUpTo(eq(userId), any()))
+        when(transactionRepository.sumNetWorthUpTo(eq(userId), any(), any()))
                 .thenReturn(new BigDecimal("10000.00"));
 
         LocalDate from = LocalDate.of(2026, 1, 1);
         LocalDate to = LocalDate.of(2026, 3, 31);
 
         NetWorthEvolutionResponse result = dashboardService.getNetWorthEvolution(
-                userId, from, to, ChartGranularity.MONTHLY);
+                userId, from, to, ChartGranularity.MONTHLY, null);
 
         assertThat(result.snapshots()).isNotEmpty();
         result.snapshots().forEach(s -> assertThat(s.netWorth()).isEqualByComparingTo("10000.00"));
@@ -296,16 +296,16 @@ class DashboardServiceTest {
     @Test
     void getMonthlyComparison_computesDeltaValues() {
         when(transactionRepository.sumPaidByTypeAndPaymentDateRange(
-                eq(userId), eq(TransactionType.INCOME), any(), any(), eq(null)))
+                eq(userId), eq(TransactionType.INCOME), any(), any(), eq(null), any()))
                 .thenReturn(new BigDecimal("3000.00"), new BigDecimal("4000.00"));
         when(transactionRepository.sumPaidByTypeAndPaymentDateRange(
-                eq(userId), eq(TransactionType.EXPENSE), any(), any(), eq(null)))
+                eq(userId), eq(TransactionType.EXPENSE), any(), any(), eq(null), any()))
                 .thenReturn(new BigDecimal("1000.00"), new BigDecimal("1500.00"));
-        when(transactionRepository.findCategoryBreakdown(any(), any(), any(), any(), any()))
+        when(transactionRepository.findCategoryBreakdown(any(), any(), any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
 
         MonthlyComparisonResponse result = dashboardService.getMonthlyComparison(
-                userId, "2026-04", "2026-05");
+                userId, "2026-04", "2026-05", null);
 
         assertThat(result.month1().income()).isEqualByComparingTo("3000.00");
         assertThat(result.month2().income()).isEqualByComparingTo("4000.00");
@@ -318,10 +318,10 @@ class DashboardServiceTest {
     @Test
     void getUpcomingBills_returnsFormattedEntries() {
         Transaction tx = buildTransaction(userId, new BigDecimal("250.00"), TransactionStatus.PENDING);
-        when(transactionRepository.findUpcomingBills(eq(userId), any(), any(), any()))
+        when(transactionRepository.findUpcomingBills(eq(userId), any(), any(), any(), any()))
                 .thenReturn(List.of(tx));
 
-        List<UpcomingBillResponse> result = dashboardService.getUpcomingBills(userId, 7);
+        List<UpcomingBillResponse> result = dashboardService.getUpcomingBills(userId, 7, null);
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).amount()).isEqualByComparingTo("250.00");
@@ -330,10 +330,10 @@ class DashboardServiceTest {
 
     @Test
     void getUpcomingBills_usesDefaultWindowWhenDaysAheadIsZero() {
-        when(transactionRepository.findUpcomingBills(any(), any(), any(), any()))
+        when(transactionRepository.findUpcomingBills(any(), any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
 
-        List<UpcomingBillResponse> result = dashboardService.getUpcomingBills(userId, 0);
+        List<UpcomingBillResponse> result = dashboardService.getUpcomingBills(userId, 0, null);
 
         assertThat(result).isEmpty();
     }
@@ -347,7 +347,7 @@ class DashboardServiceTest {
                 eq(userId), any(), any()))
                 .thenReturn(List.of(invoice));
 
-        List<UpcomingInvoiceResponse> result = dashboardService.getUpcomingInvoices(userId, 7);
+        List<UpcomingInvoiceResponse> result = dashboardService.getUpcomingInvoices(userId, 7, null);
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).totalAmount()).isEqualByComparingTo("1000.00");
@@ -361,10 +361,10 @@ class DashboardServiceTest {
     void getLargestExpenses_returnsOrderedByAmount() {
         Transaction t1 = buildTransaction(userId, new BigDecimal("500.00"), TransactionStatus.PAID);
         Transaction t2 = buildTransaction(userId, new BigDecimal("300.00"), TransactionStatus.PAID);
-        when(transactionRepository.findLargestExpenses(eq(userId), any(), any(), any()))
+        when(transactionRepository.findLargestExpenses(eq(userId), any(), any(), any(), any()))
                 .thenReturn(List.of(t1, t2));
 
-        List<LargestExpenseResponse> result = dashboardService.getLargestExpenses(userId, null, null, 5);
+        List<LargestExpenseResponse> result = dashboardService.getLargestExpenses(userId, null, null, 5, null);
 
         assertThat(result).hasSize(2);
         assertThat(result.get(0).amount()).isEqualByComparingTo("500.00");
@@ -375,10 +375,10 @@ class DashboardServiceTest {
     @Test
     void getRecentTransactions_returnsFormattedEntries() {
         Transaction tx = buildTransaction(userId, new BigDecimal("100.00"), TransactionStatus.PAID);
-        when(transactionRepository.findRecentTransactions(eq(userId), any(), any()))
+        when(transactionRepository.findRecentTransactions(eq(userId), any(), any(), any()))
                 .thenReturn(List.of(tx));
 
-        List<RecentTransactionResponse> result = dashboardService.getRecentTransactions(userId, 10);
+        List<RecentTransactionResponse> result = dashboardService.getRecentTransactions(userId, 10, null);
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).amount()).isEqualByComparingTo("100.00");

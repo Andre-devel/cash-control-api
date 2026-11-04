@@ -138,7 +138,7 @@ class CardPurchaseLifecycleIntegrationTest {
                 .satisfies(payment -> assertThat(payment.getAmount()).isEqualByComparingTo("-100.00"));
 
         assertThat(accountService.computeBalance(accountId, userId)).isEqualByComparingTo("900.00");
-        var overview = dashboardService.getOverviewMetrics(userId);
+        var overview = dashboardService.getOverviewMetrics(userId, null);
         assertThat(overview.totalBalance()).isEqualByComparingTo("900.00");
         assertThat(overview.monthlyExpenses()).isEqualByComparingTo("100.00");
     }

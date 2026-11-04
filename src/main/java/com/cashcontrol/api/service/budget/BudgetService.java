@@ -5,6 +5,7 @@ package com.cashcontrol.api.service.budget;
  * 31 de Outubro. de 2026
  */
 
+import com.cashcontrol.api.domain.entity.AccountScope;
 import com.cashcontrol.api.domain.entity.Category;
 import com.cashcontrol.api.domain.entity.CategoryBudget;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
@@ -52,13 +53,23 @@ public class BudgetService {
 
     @Transactional(readOnly = true)
     public BudgetProgressResponse progress(UUID userId, YearMonth month) {
-        return progress(userId, month, LocalDate.now());
+        return progress(userId, month, (AccountScope) null);
+    }
+
+    /** Progresso só com o gasto do escopo ({@code null} soma todos); os tetos são os mesmos. */
+    @Transactional(readOnly = true)
+    public BudgetProgressResponse progress(UUID userId, YearMonth month, AccountScope scope) {
+        return progress(userId, month, LocalDate.now(), scope);
     }
 
     BudgetProgressResponse progress(UUID userId, YearMonth month, LocalDate today) {
+        return progress(userId, month, today, null);
+    }
+
+    private BudgetProgressResponse progress(UUID userId, YearMonth month, LocalDate today, AccountScope scope) {
         Map<UUID, CategoryBudget> budgets = applicableBudgets(userId, month);
         Map<UUID, Category> categories = visibleCategories(userId);
-        Spending spending = spending(userId, month, categories);
+        Spending spending = spending(userId, month, categories, scope);
         Map<UUID, BigDecimal> spent = spending.spent();
         Map<UUID, BigDecimal> forecast = spending.forecast();
         BigDecimal uncategorized = spending.uncategorized();
@@ -102,6 +113,12 @@ public class BudgetService {
      */
     @Transactional(readOnly = true)
     public BudgetHistoryResponse history(UUID userId, YearMonth until, int months) {
+        return history(userId, until, months, null);
+    }
+
+    /** {@link #history(UUID, YearMonth, int)} só com o gasto do escopo; {@code null} soma todos. */
+    @Transactional(readOnly = true)
+    public BudgetHistoryResponse history(UUID userId, YearMonth until, int months, AccountScope scope) {
         if (months < 1 || months > 12) {
             throw new IllegalArgumentException("months must be between 1 and 12: " + months);
         }
@@ -117,7 +134,7 @@ public class BudgetService {
         for (YearMonth month : range) {
             Map<UUID, CategoryBudget> budgets = applicableBudgets(userId, month);
             budgetsByMonth.put(month, budgets);
-            spentByMonth.put(month, spending(userId, month, categories).spent());
+            spentByMonth.put(month, spending(userId, month, categories, scope).spent());
             budgeted.addAll(budgets.keySet());
         }
 
@@ -172,11 +189,11 @@ public class BudgetService {
     /** Gasto realizado e previsto por categoria no mês, e o realizado sem categoria. */
     private record Spending(Map<UUID, BigDecimal> spent, Map<UUID, BigDecimal> forecast, BigDecimal uncategorized) {}
 
-    private Spending spending(UUID userId, YearMonth month, Map<UUID, Category> categories) {
+    private Spending spending(UUID userId, YearMonth month, Map<UUID, Category> categories, AccountScope scope) {
         Map<UUID, BigDecimal> spent = new HashMap<>();
         Map<UUID, BigDecimal> forecast = new HashMap<>();
         BigDecimal uncategorized = BigDecimal.ZERO;
-        for (Object[] row : transactionRepository.sumBudgetSpending(userId, month.atDay(1), month.atEndOfMonth())) {
+        for (Object[] row : transactionRepository.sumBudgetSpending(userId, month.atDay(1), month.atEndOfMonth(), scope)) {
             UUID categoryId = (UUID) row[0];
             UUID subcategoryId = (UUID) row[1];
             TransactionType type = (TransactionType) row[2];

@@ -1,5 +1,6 @@
 package com.cashcontrol.api.controller;
 
+import com.cashcontrol.api.domain.entity.AccountScopeFilter;
 import com.cashcontrol.api.domain.entity.InvoiceImportFormat;
 import com.cashcontrol.api.dto.request.CardReconcileRequest;
 import com.cashcontrol.api.dto.request.CreateCardRequest;
@@ -99,8 +100,9 @@ public class CreditCardController {
     @GetMapping
     @PreAuthorize("isAuthenticated()")
     public List<CreditCardResponse> listCards(
+            @Parameter(description = "PERSONAL, BUSINESS or ALL (default)") @RequestParam(defaultValue = "ALL") AccountScopeFilter scope,
             @AuthenticationPrincipal AuthenticatedUser principal) {
-        return creditCardService.listCards(principal.getUser().getId());
+        return creditCardService.listCards(principal.getUser().getId(), scope.toScope());
     }
 
     @Operation(summary = "Get credit card", description = "Returns one credit card of the authenticated user (archived included).")

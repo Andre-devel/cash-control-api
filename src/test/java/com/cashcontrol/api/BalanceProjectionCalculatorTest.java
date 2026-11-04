@@ -56,15 +56,15 @@ class BalanceProjectionCalculatorTest {
         calculator = new BalanceProjectionCalculator(transactionRepository, invoiceRepository,
                 recurrenceRepository, new RecurrenceGeneratorService(), new InvoiceCycleCalculator());
         userId = UUID.randomUUID();
-        when(transactionRepository.sumNetWorthUpTo(eq(userId), eq(TODAY))).thenReturn(new BigDecimal("1000.00"));
-        when(transactionRepository.findOpenCashFlowsDueBy(eq(userId), any())).thenReturn(List.of());
+        when(transactionRepository.sumNetWorthUpTo(eq(userId), eq(TODAY), any())).thenReturn(new BigDecimal("1000.00"));
+        when(transactionRepository.findOpenCashFlowsDueBy(eq(userId), any(), any())).thenReturn(List.of());
         when(invoiceRepository.findUnpaidWithCardByUserIdDueBy(eq(userId), any())).thenReturn(List.of());
         when(recurrenceRepository.findActiveByUserIdDueBy(eq(userId), any())).thenReturn(List.of());
     }
 
     @Test
     void withoutPendingItems_balanceStaysFlatFromTodayToHorizon() {
-        BalanceProjectionResponse result = calculator.project(userId, TODAY, 30);
+        BalanceProjectionResponse result = calculator.project(userId, TODAY, 30, null);
 
         assertThat(result.from()).isEqualTo(TODAY);
         assertThat(result.to()).isEqualTo(TODAY.plusDays(30));
@@ -78,12 +78,12 @@ class BalanceProjectionCalculatorTest {
 
     @Test
     void pendingTransactions_useDueDateOrCompetenceAndOverdueCountsToday() {
-        when(transactionRepository.findOpenCashFlowsDueBy(userId, TODAY.plusDays(30))).thenReturn(List.of(
+        when(transactionRepository.findOpenCashFlowsDueBy(userId, TODAY.plusDays(30), null)).thenReturn(List.of(
                 transaction(TransactionType.INCOME, "3000.00", "Salário", TODAY.plusDays(4), null),
                 transaction(TransactionType.EXPENSE, "200.00", "Luz", TODAY.minusDays(3), TODAY.minusDays(2)),
                 transaction(TransactionType.EXPENSE, "1500.00", "Aluguel", TODAY.minusDays(20), TODAY.plusDays(9))));
 
-        BalanceProjectionResponse result = calculator.project(userId, TODAY, 30);
+        BalanceProjectionResponse result = calculator.project(userId, TODAY, 30, null);
 
         assertThat(result.events())
                 .extracting(Event::date, Event::description, Event::amount, Event::estimated)
@@ -109,7 +109,7 @@ class BalanceProjectionCalculatorTest {
                 invoice(card, InvoiceStatus.PARTIAL, "900.00", "400.00", TODAY.plusDays(19)),
                 invoice(card, InvoiceStatus.CLOSED, "300.00", "300.00", TODAY.plusDays(5))));
 
-        BalanceProjectionResponse result = calculator.project(userId, TODAY, 30);
+        BalanceProjectionResponse result = calculator.project(userId, TODAY, 30, null);
 
         assertThat(result.events())
                 .extracting(Event::date, Event::kind, Event::description, Event::amount)
@@ -125,7 +125,7 @@ class BalanceProjectionCalculatorTest {
                 LocalDate.of(2026, 1, 15), LocalDate.of(2026, 11, 15), LocalDate.of(2026, 12, 31));
         when(recurrenceRepository.findActiveByUserIdDueBy(userId, TODAY.plusDays(90))).thenReturn(List.of(rent, gym));
 
-        BalanceProjectionResponse result = calculator.project(userId, TODAY, 90);
+        BalanceProjectionResponse result = calculator.project(userId, TODAY, 90, null);
 
         assertThat(result.events())
                 .extracting(Event::date, Event::description, Event::kind, Event::estimated)
@@ -145,7 +145,7 @@ class BalanceProjectionCalculatorTest {
         streaming.setCreditCard(card("Nubank", 10, 20));
         when(recurrenceRepository.findActiveByUserIdDueBy(userId, TODAY.plusDays(60))).thenReturn(List.of(streaming));
 
-        BalanceProjectionResponse result = calculator.project(userId, TODAY, 60);
+        BalanceProjectionResponse result = calculator.project(userId, TODAY, 60, null);
 
         // Compra de 15/11 fecha em 10/12 e vence em 20/12; a de 15/12 só vence em 20/01, fora do horizonte.
         assertThat(result.events())
@@ -162,17 +162,17 @@ class BalanceProjectionCalculatorTest {
         streaming.setCreditCard(archived);
         when(recurrenceRepository.findActiveByUserIdDueBy(userId, TODAY.plusDays(60))).thenReturn(List.of(streaming));
 
-        assertThat(calculator.project(userId, TODAY, 60).events()).isEmpty();
+        assertThat(calculator.project(userId, TODAY, 60, null).events()).isEmpty();
     }
 
     @Test
     void goingBelowZero_reportsFirstNegativeDateAndLowestPoint() {
-        when(transactionRepository.findOpenCashFlowsDueBy(userId, TODAY.plusDays(30))).thenReturn(List.of(
+        when(transactionRepository.findOpenCashFlowsDueBy(userId, TODAY.plusDays(30), null)).thenReturn(List.of(
                 transaction(TransactionType.EXPENSE, "1200.00", "Aluguel", TODAY.plusDays(3), null),
                 transaction(TransactionType.EXPENSE, "300.00", "Escola", TODAY.plusDays(6), null),
                 transaction(TransactionType.INCOME, "5000.00", "Salário", TODAY.plusDays(10), null)));
 
-        BalanceProjectionResponse result = calculator.project(userId, TODAY, 30);
+        BalanceProjectionResponse result = calculator.project(userId, TODAY, 30, null);
 
         assertThat(result.firstNegativeDate()).isEqualTo(TODAY.plusDays(3));
         assertThat(result.lowest().date()).isEqualTo(TODAY.plusDays(6));

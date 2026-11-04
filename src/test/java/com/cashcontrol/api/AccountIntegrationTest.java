@@ -88,11 +88,11 @@ class AccountIntegrationTest {
                 new CreateAccountRequest("Archived", AccountType.SAVINGS, "BRL", null, 1, null), userId);
         accountService.archiveAccount(archived.id(), userId);
 
-        List<AccountResponse> active = accountService.listAccounts(userId, false);
+        List<AccountResponse> active = accountService.listAccounts(userId, false, null);
         assertThat(active).hasSize(1);
         assertThat(active.get(0).name()).isEqualTo("Active");
 
-        List<AccountResponse> all = accountService.listAccounts(userId, true);
+        List<AccountResponse> all = accountService.listAccounts(userId, true, null);
         assertThat(all).hasSize(2);
     }
 
@@ -102,7 +102,7 @@ class AccountIntegrationTest {
         accountService.createAccount(new CreateAccountRequest("A", AccountType.SAVINGS, "BRL", null, 1, null), userId);
         accountService.createAccount(new CreateAccountRequest("C", AccountType.CASH, "BRL", null, 3, null), userId);
 
-        List<AccountResponse> accounts = accountService.listAccounts(userId, false);
+        List<AccountResponse> accounts = accountService.listAccounts(userId, false, null);
 
         assertThat(accounts).extracting(AccountResponse::name)
                 .containsExactly("A", "B", "C");

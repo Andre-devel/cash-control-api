@@ -1,5 +1,6 @@
 package com.cashcontrol.api.repository;
 
+import com.cashcontrol.api.domain.entity.AccountScope;
 import com.cashcontrol.api.domain.entity.Invoice;
 import com.cashcontrol.api.domain.entity.InvoiceStatus;
 import org.springframework.data.domain.Page;
@@ -74,8 +75,9 @@ public interface InvoiceRepository extends JpaRepository<Invoice, UUID> {
      */
     @Query("SELECT COALESCE(SUM(i.totalAmount - i.paidAmount), 0) FROM Invoice i JOIN i.creditCard c " +
            "WHERE i.userId = :userId AND c.deletedAt IS NULL " +
-           "AND i.status <> com.cashcontrol.api.domain.entity.InvoiceStatus.PAID")
-    BigDecimal sumUnpaidRemainingByUserId(@Param("userId") UUID userId);
+           "AND i.status <> com.cashcontrol.api.domain.entity.InvoiceStatus.PAID " +
+           "AND (:scope IS NULL OR c.scope = :scope)")
+    BigDecimal sumUnpaidRemainingByUserId(@Param("userId") UUID userId, @Param("scope") AccountScope scope);
 
     /** Candidatas a casar com um pagamento de fatura lido do extrato; o cartão vem junto para o rótulo. */
     @Query("SELECT i FROM Invoice i JOIN FETCH i.creditCard " +

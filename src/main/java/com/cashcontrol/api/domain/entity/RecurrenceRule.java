@@ -105,4 +105,9 @@ public class RecurrenceRule {
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
+    /** Escopo PF/PJ das ocorrências: o do cartão, na recorrência no cartão, senão o da conta. */
+    public AccountScope scope() {
+        return creditCard != null ? creditCard.getScope() : account.getScope();
+    }
 }

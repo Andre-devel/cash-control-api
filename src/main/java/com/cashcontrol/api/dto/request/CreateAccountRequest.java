@@ -1,5 +1,6 @@
 package com.cashcontrol.api.dto.request;
 
+import com.cashcontrol.api.domain.entity.AccountScope;
 import com.cashcontrol.api.domain.entity.AccountType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Digits;
@@ -27,5 +28,14 @@ public record CreateAccountRequest(
         Integer sortOrder,
 
         @Schema(description = "Initial balance seeded as a MANUAL_ADJUSTMENT transaction. Defaults to zero.", example = "1500.00")
-        @Digits(integer = 17, fraction = 2) BigDecimal initialBalance
-) {}
+        @Digits(integer = 17, fraction = 2) BigDecimal initialBalance,
+
+        @Schema(description = "Personal (PF) or business (PJ) account. Defaults to PERSONAL.")
+        AccountScope scope
+) {
+
+    public CreateAccountRequest(String name, AccountType type, String currencyCode, String description,
+                                Integer sortOrder, BigDecimal initialBalance) {
+        this(name, type, currencyCode, description, sortOrder, initialBalance, null);
+    }
+}

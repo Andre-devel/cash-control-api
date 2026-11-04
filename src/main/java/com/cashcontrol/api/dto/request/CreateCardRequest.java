@@ -1,5 +1,6 @@
 package com.cashcontrol.api.dto.request;
 
+import com.cashcontrol.api.domain.entity.AccountScope;
 import com.cashcontrol.api.domain.entity.CardBrand;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.DecimalMin;
@@ -40,5 +41,14 @@ public record CreateCardRequest(
         @NotNull @Min(1) @Max(31) Integer dueDay,
 
         @Schema(description = "Optional shared limit group UUID. When set, this card's limit is pooled with other cards in the group.")
-        UUID sharedLimitGroupId
-) {}
+        UUID sharedLimitGroupId,
+
+        @Schema(description = "Personal (PF) or business (PJ) card. Defaults to PERSONAL.")
+        AccountScope scope
+) {
+
+    public CreateCardRequest(String name, CardBrand brand, String issuer, String last4Digits,
+                             BigDecimal creditLimit, Integer closingDay, Integer dueDay, UUID sharedLimitGroupId) {
+        this(name, brand, issuer, last4Digits, creditLimit, closingDay, dueDay, sharedLimitGroupId, null);
+    }
+}

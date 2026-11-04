@@ -75,7 +75,7 @@ class DashboardRepositoryIntegrationTest {
                 userId,
                 LocalDate.of(2026, 3, 1),
                 LocalDate.of(2026, 4, 30),
-                null);
+                null, null);
 
         // Expect 3 rows: March INCOME, March EXPENSE, April INCOME
         assertThat(rows).hasSize(3);
@@ -106,7 +106,7 @@ class DashboardRepositoryIntegrationTest {
                 userId,
                 LocalDate.of(2026, 5, 1),
                 LocalDate.of(2026, 5, 31),
-                defaultAccount.getId());
+                defaultAccount.getId(), null);
 
         assertThat(withAccount).hasSize(1);
         Object[] row = withAccount.get(0);
@@ -124,8 +124,8 @@ class DashboardRepositoryIntegrationTest {
         saveTransaction(userId, defaultAccount, TransactionType.EXPENSE, TransactionStatus.PAID,
                 new BigDecimal("200.00"), feb15);
 
-        BigDecimal netWorthAtJan = transactionRepository.sumNetWorthUpTo(userId, jan15);
-        BigDecimal netWorthAtFeb = transactionRepository.sumNetWorthUpTo(userId, feb15);
+        BigDecimal netWorthAtJan = transactionRepository.sumNetWorthUpTo(userId, jan15, null);
+        BigDecimal netWorthAtFeb = transactionRepository.sumNetWorthUpTo(userId, feb15, null);
 
         assertThat(netWorthAtJan).isEqualByComparingTo("1000.00");
         assertThat(netWorthAtFeb).isEqualByComparingTo("800.00");
@@ -144,7 +144,7 @@ class DashboardRepositoryIntegrationTest {
         List<Object[]> breakdown = transactionRepository.findCategoryBreakdown(
                 userId, TransactionType.EXPENSE,
                 today.withDayOfMonth(1), today,
-                null);
+                null, null);
 
         assertThat(breakdown).hasSize(2);
         UUID firstCategory = (UUID) breakdown.get(0)[0];
@@ -168,7 +168,7 @@ class DashboardRepositoryIntegrationTest {
         saveTransaction(userId, archivedAccount, TransactionType.INCOME, TransactionStatus.PAID,
                 new BigDecimal("5000.00"), today);
 
-        BigDecimal netWorth = transactionRepository.sumTotalNetWorth(userId);
+        BigDecimal netWorth = transactionRepository.sumTotalNetWorth(userId, null);
 
         assertThat(netWorth).isEqualByComparingTo("1000.00");
     }

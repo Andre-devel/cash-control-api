@@ -1,5 +1,6 @@
 package com.cashcontrol.api.service;
 
+import com.cashcontrol.api.domain.entity.AccountScope;
 import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.BankConnectionAccount;
 import com.cashcontrol.api.domain.entity.Category;
@@ -103,6 +104,7 @@ public class CreditCardServiceImpl implements CreditCardService {
         card.setClosingDay(request.closingDay());
         card.setDueDay(request.dueDay());
         card.setSharedLimitGroup(sharedGroup);
+        card.setScope(request.scope() != null ? request.scope() : AccountScope.PERSONAL);
         card = creditCardRepository.save(card);
 
         // Fatura do ciclo corrente, para o cartão já aparecer com uma aberta.
@@ -114,8 +116,9 @@ public class CreditCardServiceImpl implements CreditCardService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<CreditCardResponse> listCards(UUID userId) {
+    public List<CreditCardResponse> listCards(UUID userId, AccountScope scope) {
         return creditCardRepository.findAllByUserIdAndDeletedAtIsNull(userId).stream()
+                .filter(card -> scope == null || card.getScope() == scope)
                 .map(this::toResponse)
                 .toList();
     }
@@ -143,6 +146,9 @@ public class CreditCardServiceImpl implements CreditCardService {
         boolean cycleChanged = card.getClosingDay() != request.closingDay() || card.getDueDay() != request.dueDay();
         card.setClosingDay(request.closingDay());
         card.setDueDay(request.dueDay());
+        if (request.scope() != null) {
+            card.setScope(request.scope());
+        }
         card = creditCardRepository.save(card);
         if (cycleChanged) {
             realignInvoicesToCycle(card);
@@ -710,6 +716,7 @@ public class CreditCardServiceImpl implements CreditCardService {
                 card.getId(),
                 card.getName(),
                 card.getBrand(),
+                card.getScope(),
                 card.getIssuer(),
                 card.getLast4Digits(),
                 card.getCreditLimit(),

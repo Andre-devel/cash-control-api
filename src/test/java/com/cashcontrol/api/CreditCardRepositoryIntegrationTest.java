@@ -126,8 +126,8 @@ class CreditCardRepositoryIntegrationTest {
         deleted.setDeletedAt(Instant.now());
         invoiceRepository.flush();
 
-        assertThat(invoiceRepository.sumUnpaidRemainingByUserId(userId)).isEqualByComparingTo("850.00");
-        assertThat(invoiceRepository.sumUnpaidRemainingByUserId(UUID.randomUUID())).isEqualByComparingTo("0");
+        assertThat(invoiceRepository.sumUnpaidRemainingByUserId(userId, null)).isEqualByComparingTo("850.00");
+        assertThat(invoiceRepository.sumUnpaidRemainingByUserId(UUID.randomUUID(), null)).isEqualByComparingTo("0");
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -77,7 +77,7 @@ class BudgetServiceTest {
         when(budgetRepository.findApplicable(userId, OCTOBER.atDay(1))).thenReturn(List.of(budget));
         when(categoryRepository.findAllSystemCategories()).thenReturn(List.of());
         when(categoryRepository.findAllByUserId(userId)).thenReturn(List.of(category));
-        when(transactionRepository.sumBudgetSpending(userId, OCTOBER.atDay(1), OCTOBER.atEndOfMonth())).thenReturn(List.of());
+        when(transactionRepository.sumBudgetSpending(userId, OCTOBER.atDay(1), OCTOBER.atEndOfMonth(), null)).thenReturn(List.of());
 
         BudgetProgressResponse progress = budgetService.progress(userId, OCTOBER, LocalDate.of(2026, 10, 12));
 
@@ -106,16 +106,16 @@ class BudgetServiceTest {
         when(budgetRepository.findApplicable(userId, september.atDay(1)))
                 .thenReturn(List.of(budget(null, "300.00"), budget(september, "200.00")));
         when(budgetRepository.findApplicable(userId, OCTOBER.atDay(1))).thenReturn(List.of(budget(null, "400.00")));
-        when(transactionRepository.sumBudgetSpending(userId, august.atDay(1), august.atEndOfMonth()))
+        when(transactionRepository.sumBudgetSpending(userId, august.atDay(1), august.atEndOfMonth(), null))
                 .thenReturn(rows(row(TransactionType.EXPENSE, TransactionStatus.PAID, false, "150.00")));
-        when(transactionRepository.sumBudgetSpending(userId, september.atDay(1), september.atEndOfMonth()))
+        when(transactionRepository.sumBudgetSpending(userId, september.atDay(1), september.atEndOfMonth(), null))
                 .thenReturn(rows(
                         row(TransactionType.EXPENSE, TransactionStatus.PAID, false, "180.00"),
                         row(TransactionType.EXPENSE, TransactionStatus.PENDING, true, "70.00"),
                         row(TransactionType.REFUND, TransactionStatus.PAID, false, "10.00"),
                         // Conta a vencer é previsto, não gasto.
                         row(TransactionType.EXPENSE, TransactionStatus.PENDING, false, "999.00")));
-        when(transactionRepository.sumBudgetSpending(userId, OCTOBER.atDay(1), OCTOBER.atEndOfMonth()))
+        when(transactionRepository.sumBudgetSpending(userId, OCTOBER.atDay(1), OCTOBER.atEndOfMonth(), null))
                 .thenReturn(rows(row(TransactionType.EXPENSE, TransactionStatus.PAID, true, "100.00")));
 
         BudgetHistoryResponse history = budgetService.history(userId, OCTOBER, 3);
@@ -138,9 +138,9 @@ class BudgetServiceTest {
         when(categoryRepository.findAllByUserId(userId)).thenReturn(List.of(category));
         when(budgetRepository.findApplicable(userId, september.atDay(1))).thenReturn(List.of());
         when(budgetRepository.findApplicable(userId, OCTOBER.atDay(1))).thenReturn(List.of(budget(OCTOBER, "100.00")));
-        when(transactionRepository.sumBudgetSpending(userId, september.atDay(1), september.atEndOfMonth()))
+        when(transactionRepository.sumBudgetSpending(userId, september.atDay(1), september.atEndOfMonth(), null))
                 .thenReturn(rows(row(TransactionType.EXPENSE, TransactionStatus.PAID, false, "80.00")));
-        when(transactionRepository.sumBudgetSpending(userId, OCTOBER.atDay(1), OCTOBER.atEndOfMonth())).thenReturn(List.of());
+        when(transactionRepository.sumBudgetSpending(userId, OCTOBER.atDay(1), OCTOBER.atEndOfMonth(), null)).thenReturn(List.of());
 
         BudgetHistoryResponse history = budgetService.history(userId, OCTOBER, 2);
 
@@ -184,6 +184,6 @@ class BudgetServiceTest {
         when(budgetRepository.findApplicable(any(), any())).thenReturn(List.of());
         when(categoryRepository.findAllSystemCategories()).thenReturn(List.of());
         when(categoryRepository.findAllByUserId(userId)).thenReturn(List.of());
-        when(transactionRepository.sumBudgetSpending(any(), any(), any())).thenReturn(List.of());
+        when(transactionRepository.sumBudgetSpending(any(), any(), any(), any())).thenReturn(List.of());
     }
 }

@@ -1,5 +1,6 @@
 package com.cashcontrol.api.controller;
 
+import com.cashcontrol.api.domain.entity.AccountScopeFilter;
 import com.cashcontrol.api.dto.request.CreateAccountRequest;
 import com.cashcontrol.api.dto.request.EditAccountRequest;
 import com.cashcontrol.api.dto.request.ManualAdjustmentRequest;
@@ -74,8 +75,9 @@ public class AccountController {
     @PreAuthorize("isAuthenticated()")
     public List<AccountResponse> listAccounts(
             @Parameter(description = "Include archived accounts in the response") @RequestParam(defaultValue = "false") boolean includeArchived,
+            @Parameter(description = "PERSONAL, BUSINESS or ALL (default)") @RequestParam(defaultValue = "ALL") AccountScopeFilter scope,
             @AuthenticationPrincipal AuthenticatedUser principal) {
-        return accountService.listAccounts(principal.getUser().getId(), includeArchived);
+        return accountService.listAccounts(principal.getUser().getId(), includeArchived, scope.toScope());
     }
 
     @Operation(summary = "Get account", description = "Returns details and computed balance for a single account.")

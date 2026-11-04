@@ -1,5 +1,6 @@
 package com.cashcontrol.api.service;
 
+import com.cashcontrol.api.domain.entity.AccountScope;
 import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.CreditCard;
 import com.cashcontrol.api.domain.entity.Invoice;
@@ -26,7 +27,8 @@ public interface CreditCardService {
 
     CreditCardResponse createCard(CreateCardRequest request, UUID userId);
 
-    List<CreditCardResponse> listCards(UUID userId);
+    /** Cartões não excluídos, só do escopo; {@code scope} nulo traz todos. */
+    List<CreditCardResponse> listCards(UUID userId, AccountScope scope);
 
     CreditCardResponse getCard(UUID id, UUID userId);
 

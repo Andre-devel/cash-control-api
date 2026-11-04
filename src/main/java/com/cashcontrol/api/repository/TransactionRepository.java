@@ -1,5 +1,6 @@
 package com.cashcontrol.api.repository;
 
+import com.cashcontrol.api.domain.entity.AccountScope;
 import com.cashcontrol.api.domain.entity.AccountType;
 import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.Transaction;
@@ -278,6 +279,17 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     List<Transaction> findAllByReimbursedBy_IdIn(Collection<UUID> incomeIds);
 
+    // ── Escopo PF/PJ (V52) ────────────────────────────────────────────────────
+    // O lançamento é do escopo do cartão, quando é compra no cartão, ou do da conta. :scope nulo
+    // é "todos" — o mesmo resultado de antes do escopo existir. O cartão entra por subconsulta
+    // para não virar join interno e derrubar os lançamentos sem cartão.
+
+    String SCOPE_PREDICATE = """
+             AND (:scope IS NULL
+                  OR (t.creditCard IS NULL AND t.account.scope = :scope)
+                  OR t.creditCard.id IN (SELECT scc.id FROM CreditCard scc WHERE scc.scope = :scope))
+            """;
+
     String FILTER_PREDICATES = """
             WHERE t.userId = :userId
             AND t.account.deletedAt IS NULL
@@ -298,7 +310,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             AND (:includeCancelled = TRUE OR t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED)
             AND (:paymentMethod IS NULL OR t.paymentMethod.slug = :paymentMethod)
             AND (:includeCreditCard = TRUE OR t.creditCard IS NULL)
-            """;
+            """ + SCOPE_PREDICATE;
 
     @Query(value = "SELECT t FROM Transaction t " + FILTER_PREDICATES + INSTALLMENT_GROUPING,
            countQuery = "SELECT COUNT(t) FROM Transaction t " + FILTER_PREDICATES + INSTALLMENT_GROUPING)
@@ -319,6 +331,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("paymentMethod") PaymentMethodSlug paymentMethod,
             @Param("groupInstallments") boolean groupInstallments,
             @Param("includeCreditCard") boolean includeCreditCard,
+            @Param("scope") AccountScope scope,
             Pageable pageable);
 
     /** {@code [type, quantidade, soma]} das transações não canceladas que casam com o filtro. */
@@ -340,7 +353,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("searchText") String searchText,
             @Param("includeCancelled") boolean includeCancelled,
             @Param("paymentMethod") PaymentMethodSlug paymentMethod,
-            @Param("includeCreditCard") boolean includeCreditCard);
+            @Param("includeCreditCard") boolean includeCreditCard,
+            @Param("scope") AccountScope scope);
 
     /**
      * Agregados por série usados para montar a linha colapsada do parcelamento:
@@ -421,10 +435,11 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
            "AND t.creditCard IS NULL " +
            "AND t.account.archivedAt IS NULL AND t.account.deletedAt IS NULL " +
-           "AND t.account.type <> :excludedType")
+           "AND t.account.type <> :excludedType" + SCOPE_PREDICATE)
     BigDecimal sumTotalBalanceExcludingType(
             @Param("userId") UUID userId,
-            @Param("excludedType") AccountType excludedType);
+            @Param("excludedType") AccountType excludedType,
+            @Param("scope") AccountScope scope);
 
     @Query("SELECT COALESCE(SUM(CASE " +
            "WHEN t.type = com.cashcontrol.api.domain.entity.TransactionType.INCOME " +
@@ -435,8 +450,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "WHERE t.userId = :userId " +
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
            "AND t.creditCard IS NULL " +
-           "AND t.account.archivedAt IS NULL AND t.account.deletedAt IS NULL")
-    BigDecimal sumTotalNetWorth(@Param("userId") UUID userId);
+           "AND t.account.archivedAt IS NULL AND t.account.deletedAt IS NULL" + SCOPE_PREDICATE)
+    BigDecimal sumTotalNetWorth(@Param("userId") UUID userId, @Param("scope") AccountScope scope);
 
     @Query("SELECT COALESCE(SUM(" + NET_OF_REIMBURSEMENT + "), 0) FROM Transaction t " + REIMBURSEMENT_JOIN +
            "WHERE t.userId = :userId " +
@@ -444,13 +459,14 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "AND t.type = :type " +
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
            "AND t.paymentDate >= :from AND t.paymentDate <= :to " +
-           "AND (:accountId IS NULL OR t.account.id = :accountId)" + NOT_A_REIMBURSEMENT)
+           "AND (:accountId IS NULL OR t.account.id = :accountId)" + NOT_A_REIMBURSEMENT + SCOPE_PREDICATE)
     BigDecimal sumPaidByTypeAndPaymentDateRange(
             @Param("userId") UUID userId,
             @Param("type") TransactionType type,
             @Param("from") LocalDate from,
             @Param("to") LocalDate to,
-            @Param("accountId") UUID accountId);
+            @Param("accountId") UUID accountId,
+            @Param("scope") AccountScope scope);
 
     /**
      * Despesas e estornos do orçamento, pelo mês da compra ({@code competence_date}), não pelo
@@ -464,11 +480,12 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "AND t.type IN (com.cashcontrol.api.domain.entity.TransactionType.EXPENSE, " +
            "               com.cashcontrol.api.domain.entity.TransactionType.REFUND) " +
            "AND t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED " +
-           "AND t.competenceDate >= :from AND t.competenceDate <= :to" + NOT_A_REIMBURSEMENT +
+           "AND t.competenceDate >= :from AND t.competenceDate <= :to" + NOT_A_REIMBURSEMENT + SCOPE_PREDICATE +
            "GROUP BY c.id, s.id, t.type, t.status, CASE WHEN cc.id IS NULL THEN false ELSE true END")
     List<Object[]> sumBudgetSpending(@Param("userId") UUID userId,
                                      @Param("from") LocalDate from,
-                                     @Param("to") LocalDate to);
+                                     @Param("to") LocalDate to,
+                                     @Param("scope") AccountScope scope);
 
     @Query("SELECT t.category.id, SUM(" + NET_OF_REIMBURSEMENT + ") FROM Transaction t " + REIMBURSEMENT_JOIN +
            "WHERE t.userId = :userId " +
@@ -477,7 +494,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "AND t.type = :type " +
            "AND t.paymentDate >= :from AND t.paymentDate <= :to " +
            "AND (:accountId IS NULL OR t.account.id = :accountId) " +
-           "AND t.category IS NOT NULL" + NOT_A_REIMBURSEMENT +
+           "AND t.category IS NOT NULL" + NOT_A_REIMBURSEMENT + SCOPE_PREDICATE +
            "GROUP BY t.category.id " +
            "HAVING SUM(" + NET_OF_REIMBURSEMENT + ") > 0 " +
            "ORDER BY SUM(" + NET_OF_REIMBURSEMENT + ") DESC")
@@ -486,7 +503,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("type") TransactionType type,
             @Param("from") LocalDate from,
             @Param("to") LocalDate to,
-            @Param("accountId") UUID accountId);
+            @Param("accountId") UUID accountId,
+            @Param("scope") AccountScope scope);
 
     @Query("SELECT COALESCE(SUM(" + NET_OF_REIMBURSEMENT + "), 0) FROM Transaction t " + REIMBURSEMENT_JOIN +
            "WHERE t.userId = :userId " +
@@ -495,13 +513,14 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
            "AND t.paymentDate >= :from AND t.paymentDate <= :to " +
            "AND (:accountId IS NULL OR t.account.id = :accountId) " +
-           "AND t.category IS NULL" + NOT_A_REIMBURSEMENT)
+           "AND t.category IS NULL" + NOT_A_REIMBURSEMENT + SCOPE_PREDICATE)
     BigDecimal sumUncategorized(
             @Param("userId") UUID userId,
             @Param("type") TransactionType type,
             @Param("from") LocalDate from,
             @Param("to") LocalDate to,
-            @Param("accountId") UUID accountId);
+            @Param("accountId") UUID accountId,
+            @Param("scope") AccountScope scope);
 
     // Pendente só tem payment_date quando o usuário informou o vencimento; ocorrência de
     // recorrência e parcela nascem sem, e vencem na competência. Compra no cartão fica de fora:
@@ -511,12 +530,13 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "AND t.account.deletedAt IS NULL " +
            "AND t.creditCard IS NULL " +
            "AND t.status IN :statuses " +
-           "AND COALESCE(t.paymentDate, t.competenceDate) <= :deadline " +
+           "AND COALESCE(t.paymentDate, t.competenceDate) <= :deadline" + SCOPE_PREDICATE +
            "ORDER BY COALESCE(t.paymentDate, t.competenceDate) ASC")
     List<Transaction> findUpcomingBills(
             @Param("userId") UUID userId,
             @Param("statuses") List<TransactionStatus> statuses,
             @Param("deadline") LocalDate deadline,
+            @Param("scope") AccountScope scope,
             Pageable pageable);
 
     /**
@@ -533,10 +553,11 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "               com.cashcontrol.api.domain.entity.TransactionType.REFUND) " +
            "AND t.creditCard IS NULL " +
            "AND t.account.archivedAt IS NULL AND t.account.deletedAt IS NULL " +
-           "AND COALESCE(t.paymentDate, t.competenceDate) <= :upTo")
+           "AND COALESCE(t.paymentDate, t.competenceDate) <= :upTo" + SCOPE_PREDICATE)
     List<Transaction> findOpenCashFlowsDueBy(
             @Param("userId") UUID userId,
-            @Param("upTo") LocalDate upTo);
+            @Param("upTo") LocalDate upTo,
+            @Param("scope") AccountScope scope);
 
     /** Ordenadas pelo valor líquido de reembolso; reembolsável que ainda não voltou fica de fora. */
     @Query("SELECT t FROM Transaction t LEFT JOIN FETCH t.reimbursedBy rb " +
@@ -545,23 +566,25 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "AND t.type = com.cashcontrol.api.domain.entity.TransactionType.EXPENSE " +
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
            "AND t.paymentDate >= :from AND t.paymentDate <= :to " +
-           "AND (" + NET_OF_REIMBURSEMENT + ") > 0 " +
+           "AND (" + NET_OF_REIMBURSEMENT + ") > 0" + SCOPE_PREDICATE +
            "ORDER BY (" + NET_OF_REIMBURSEMENT + ") DESC")
     List<Transaction> findLargestExpenses(
             @Param("userId") UUID userId,
             @Param("from") LocalDate from,
             @Param("to") LocalDate to,
+            @Param("scope") AccountScope scope,
             Pageable pageable);
 
     @Query("SELECT t FROM Transaction t " +
            "WHERE t.userId = :userId " +
            "AND t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED " +
            "AND t.account.archivedAt IS NULL AND t.account.deletedAt IS NULL " +
-           "AND t.competenceDate <= :today " +
+           "AND t.competenceDate <= :today" + SCOPE_PREDICATE +
            "ORDER BY t.competenceDate DESC, t.createdAt DESC")
     List<Transaction> findRecentTransactions(
             @Param("userId") UUID userId,
             @Param("today") LocalDate today,
+            @Param("scope") AccountScope scope,
             Pageable pageable);
 
     @Query("SELECT COALESCE(SUM(CASE " +
@@ -574,10 +597,11 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
            "AND t.creditCard IS NULL " +
            "AND t.account.archivedAt IS NULL AND t.account.deletedAt IS NULL " +
-           "AND t.paymentDate <= :upTo")
+           "AND t.paymentDate <= :upTo" + SCOPE_PREDICATE)
     BigDecimal sumNetWorthUpTo(
             @Param("userId") UUID userId,
-            @Param("upTo") LocalDate upTo);
+            @Param("upTo") LocalDate upTo,
+            @Param("scope") AccountScope scope);
 
     // Mesma regra de NET_OF_REIMBURSEMENT / NOT_A_REIMBURSEMENT, em SQL.
     @Query(value = "SELECT TO_CHAR(t.payment_date, 'YYYY-MM') AS month, t.type, " +
@@ -589,6 +613,11 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
                    "AND (CAST(:accountId AS uuid) IS NULL OR t.account_id = CAST(:accountId AS uuid)) " +
                    "AND t.account_id IN (SELECT id FROM accounts WHERE deleted_at IS NULL) " +
                    "AND NOT EXISTS (SELECT 1 FROM transactions ro WHERE ro.reimbursed_by_id = t.id) " +
+                   // Mesmo recorte de SCOPE_PREDICATE: escopo do cartão na compra no cartão, senão o da conta.
+                   "AND (CAST(:scope AS varchar) IS NULL OR CASE WHEN t.credit_card_id IS NULL " +
+                   "     THEN (SELECT a.scope FROM accounts a WHERE a.id = t.account_id) " +
+                   "     ELSE (SELECT cc.scope FROM credit_cards cc WHERE cc.id = t.credit_card_id) END " +
+                   "     = CAST(:scope AS varchar)) " +
                    "GROUP BY TO_CHAR(t.payment_date, 'YYYY-MM'), t.type " +
                    "ORDER BY TO_CHAR(t.payment_date, 'YYYY-MM') ASC",
            nativeQuery = true)
@@ -596,7 +625,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("userId") UUID userId,
             @Param("from") LocalDate from,
             @Param("to") LocalDate to,
-            @Param("accountId") UUID accountId);
+            @Param("accountId") UUID accountId,
+            @Param("scope") String scope);
 
     // ── Category suggestion queries ───────────────────────────────────────────
 

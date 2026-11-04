@@ -103,7 +103,7 @@ class CreditCardServiceIntegrationTest {
         creditCardService.createCard(new CreateCardRequest("Card B", CardBrand.MASTERCARD,
                 "Bank B", null, new BigDecimal("3000.00"), 20, 5, null), userId);
 
-        List<CreditCardResponse> cards = creditCardService.listCards(userId);
+        List<CreditCardResponse> cards = creditCardService.listCards(userId, null);
         assertThat(cards).hasSize(2);
     }
 

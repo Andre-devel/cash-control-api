@@ -1,5 +1,6 @@
 package com.cashcontrol.api.service;
 
+import com.cashcontrol.api.domain.entity.AccountScope;
 import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.BankConnectionAccount;
 import com.cashcontrol.api.domain.entity.PaymentMethod;
@@ -61,6 +62,7 @@ public class AccountServiceImpl implements AccountService {
         account.setCurrencyCode(resolveCurrency(request.currencyCode()));
         account.setDescription(request.description());
         account.setSortOrder(request.sortOrder() != null ? request.sortOrder() : 0);
+        account.setScope(request.scope() != null ? request.scope() : AccountScope.PERSONAL);
         account = accountRepository.save(account);
 
         BigDecimal initialBalance = request.initialBalance();
@@ -76,7 +78,7 @@ public class AccountServiceImpl implements AccountService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<AccountResponse> listAccounts(UUID userId, boolean includeArchived) {
+    public List<AccountResponse> listAccounts(UUID userId, boolean includeArchived, AccountScope scope) {
         List<Account> accounts = includeArchived
                 ? accountRepository.findAllByUserIdAndDeletedAtIsNullOrderBySortOrderAscCreatedAtAsc(userId)
                 : accountRepository.findAllByUserIdAndDeletedAtIsNullAndArchivedAtIsNullOrderBySortOrderAscCreatedAtAsc(userId);
@@ -86,6 +88,7 @@ public class AccountServiceImpl implements AccountService {
             balances.put((UUID) row[0], (BigDecimal) row[1]);
         }
         return accounts.stream()
+                .filter(a -> scope == null || a.getScope() == scope)
                 .map(a -> toResponse(a, balances.getOrDefault(a.getId(), BigDecimal.ZERO)))
                 .toList();
     }
@@ -114,6 +117,9 @@ public class AccountServiceImpl implements AccountService {
             throw new BusinessRuleException("A moeda da conta não pode ser alterada.");
         }
         account.setDescription(request.description());
+        if (request.scope() != null) {
+            account.setScope(request.scope());
+        }
         if (request.sortOrder() != null) {
             account.setSortOrder(request.sortOrder());
         }
@@ -391,6 +397,7 @@ public class AccountServiceImpl implements AccountService {
                 account.getId(),
                 account.getName(),
                 account.getType(),
+                account.getScope(),
                 account.getCurrencyCode(),
                 account.getDescription(),
                 account.getSortOrder(),

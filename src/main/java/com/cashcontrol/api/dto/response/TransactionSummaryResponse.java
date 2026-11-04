@@ -32,7 +32,10 @@ public record TransactionSummaryResponse(
         @Schema(description = "True when this row stands for the whole series (groupInstallments=true) instead of a single installment.") boolean installmentGroup,
         @Schema(description = "Reimbursement link. Null when the transaction is not part of one.") ReimbursementResponse reimbursement,
         @Schema(description = "Who received (outflow) or paid (inflow), as reported by the bank. Null when not imported from the bank.", example = "Fulano de Tal") String counterpartyName,
-        @Schema(description = "Counterparty CPF/CNPJ, masked as the bank sent it.", example = "***.123.456-**") String counterpartyDocument
+        @Schema(description = "Counterparty CPF/CNPJ, masked as the bank sent it.", example = "***.123.456-**") String counterpartyDocument,
+        @Schema(description = "True on a transfer between accounts of different scopes (personal and business): "
+                              + "owner's draw or capital contribution. Never counts as income or expense.")
+        boolean crossScope
 ) {
 
     /** Non-installment row, or an installment listed individually (groupInstallments=false). */
@@ -46,7 +49,7 @@ public record TransactionSummaryResponse(
                 id, accountId, accountName, type, status, amount, description,
                 competenceDate, paymentDate, categoryId, categoryName, createdAt, paymentMethod,
                 installmentSeriesId, installmentNumber, totalInstallments, null, null, false, null,
-                counterpartyName, counterpartyDocument);
+                counterpartyName, counterpartyDocument, false);
     }
 
     public TransactionSummaryResponse withReimbursement(ReimbursementResponse value) {
@@ -54,6 +57,14 @@ public record TransactionSummaryResponse(
                 id, accountId, accountName, type, status, amount, description,
                 competenceDate, paymentDate, categoryId, categoryName, createdAt, paymentMethod,
                 installmentSeriesId, installmentNumber, totalInstallments, installmentTotalAmount,
-                paidInstallments, installmentGroup, value, counterpartyName, counterpartyDocument);
+                paidInstallments, installmentGroup, value, counterpartyName, counterpartyDocument, crossScope);
+    }
+
+    public TransactionSummaryResponse withCrossScope(boolean value) {
+        return new TransactionSummaryResponse(
+                id, accountId, accountName, type, status, amount, description,
+                competenceDate, paymentDate, categoryId, categoryName, createdAt, paymentMethod,
+                installmentSeriesId, installmentNumber, totalInstallments, installmentTotalAmount,
+                paidInstallments, installmentGroup, reimbursement, counterpartyName, counterpartyDocument, value);
     }
 }

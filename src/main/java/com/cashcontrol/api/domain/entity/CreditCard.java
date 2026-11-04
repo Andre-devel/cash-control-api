@@ -66,6 +66,11 @@ public class CreditCard {
     @Column(name = "due_day", nullable = false)
     private int dueDay;
 
+    /** Pessoa física ou jurídica (V52); as compras no cartão herdam este escopo. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "scope", nullable = false, length = 10)
+    private AccountScope scope = AccountScope.PERSONAL;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "shared_limit_group_id")
     private SharedLimitGroup sharedLimitGroup;

@@ -1,5 +1,6 @@
 package com.cashcontrol.api;
 
+import com.cashcontrol.api.domain.entity.AccountScope;
 import com.cashcontrol.api.config.PostgresTestContainerConfig;
 import com.cashcontrol.api.domain.UserSlugConstants;
 import com.cashcontrol.api.domain.entity.CardBrand;
@@ -127,7 +128,7 @@ class CreditCardControllerTest {
 
     @Test
     void listCards_returns200() throws Exception {
-        when(creditCardService.listCards(eq(userId)))
+        when(creditCardService.listCards(eq(userId), any()))
                 .thenReturn(List.of(buildCardResponse(UUID.randomUUID())));
 
         mockMvc.perform(get("/api/v1/cards")
@@ -374,7 +375,7 @@ class CreditCardControllerTest {
     }
 
     private CreditCardResponse buildCardResponse(UUID id) {
-        return new CreditCardResponse(id, "My Visa", CardBrand.VISA, "Test Bank", null,
+        return new CreditCardResponse(id, "My Visa", CardBrand.VISA, AccountScope.PERSONAL, "Test Bank", null,
                 new BigDecimal("5000.00"), 15, 10, null, null, Instant.now(), Instant.now());
     }
 

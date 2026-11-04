@@ -83,7 +83,7 @@ class DashboardServiceIntegrationTest {
         LocalDate to = today.withDayOfMonth(today.lengthOfMonth());
 
         CategoryPieChartResponse result = dashboardService.getCategoryPieChart(
-                userId, from, to, null, TransactionType.EXPENSE);
+                userId, from, to, null, TransactionType.EXPENSE, null);
 
         assertThat(result.totalAmount()).isEqualByComparingTo("1000.00");
         assertThat(result.entries()).hasSize(3);
@@ -112,7 +112,7 @@ class DashboardServiceIntegrationTest {
         createPaidIncome("Income month 1", "1000.00", twoMonthsAgo);
         createPaidIncome("Income month 3", "500.00", currentMonth);
 
-        MonthlyBarChartResponse result = dashboardService.getMonthlyBarChart(userId, 3, null);
+        MonthlyBarChartResponse result = dashboardService.getMonthlyBarChart(userId, 3, null, null);
 
         assertThat(result.months()).hasSize(3);
 
@@ -140,7 +140,7 @@ class DashboardServiceIntegrationTest {
         createPaidExpense("Expense February", "200.00", feb1, null);
 
         NetWorthEvolutionResponse result = dashboardService.getNetWorthEvolution(
-                userId, jan1, feb28, ChartGranularity.MONTHLY);
+                userId, jan1, feb28, ChartGranularity.MONTHLY, null);
 
         assertThat(result.snapshots()).isNotEmpty();
 
@@ -167,7 +167,7 @@ class DashboardServiceIntegrationTest {
         LocalDate from = today.withDayOfMonth(1);
         LocalDate to = today.withDayOfMonth(today.lengthOfMonth());
 
-        List<LargestExpenseResponse> result = dashboardService.getLargestExpenses(userId, from, to, 3);
+        List<LargestExpenseResponse> result = dashboardService.getLargestExpenses(userId, from, to, 3, null);
 
         assertThat(result).hasSize(3);
         assertThat(result.get(0).amount()).isEqualByComparingTo("1000.00");
@@ -182,7 +182,7 @@ class DashboardServiceIntegrationTest {
         createPendingExpense("Bill in 3 days", "200.00", today.plusDays(3));
         createPendingExpense("Bill in 8 days", "300.00", today.plusDays(8));
 
-        List<UpcomingBillResponse> result = dashboardService.getUpcomingBills(userId, 7);
+        List<UpcomingBillResponse> result = dashboardService.getUpcomingBills(userId, 7, null);
 
         assertThat(result).hasSize(2);
         assertThat(result.get(0).paymentDate()).isEqualTo(today.plusDays(1));

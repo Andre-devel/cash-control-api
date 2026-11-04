@@ -1,5 +1,6 @@
 package com.cashcontrol.api.controller;
 
+import com.cashcontrol.api.domain.entity.AccountScopeFilter;
 import com.cashcontrol.api.dto.request.ApplyReconciliationRequest;
 import com.cashcontrol.api.dto.request.CreateTransactionRequest;
 import com.cashcontrol.api.dto.request.EditTransactionRequest;
@@ -135,6 +136,8 @@ public class TransactionController {
             @RequestParam(defaultValue = "false") boolean groupInstallments,
             @Parameter(description = "Include credit card purchases (they never touch the account balance)")
             @RequestParam(defaultValue = "true") boolean includeCreditCard,
+            @Parameter(description = "PERSONAL, BUSINESS or ALL (default): scope of the credit card, or of the account when it is not a card purchase")
+            @RequestParam(defaultValue = "ALL") AccountScopeFilter scope,
             @PageableDefault(sort = "competenceDate", direction = Sort.Direction.DESC) Pageable pageable,
             @AuthenticationPrincipal AuthenticatedUser principal) {
 
@@ -142,7 +145,8 @@ public class TransactionController {
                 accountId, type, status, categoryId,
                 competenceDateFrom, competenceDateTo,
                 paymentDateFrom, paymentDateTo,
-                amountMin, amountMax, searchText, includeCancelled, paymentMethod, groupInstallments, includeCreditCard);
+                amountMin, amountMax, searchText, includeCancelled, paymentMethod, groupInstallments, includeCreditCard,
+                scope.toScope());
 
         return transactionService.listTransactions(filter, principal.getUser().getId(), pageable);
     }
@@ -173,13 +177,16 @@ public class TransactionController {
             @Parameter(description = "Filter by payment method slug") @RequestParam(required = false) PaymentMethodSlug paymentMethod,
             @Parameter(description = "Include credit card purchases (they never touch the account balance)")
             @RequestParam(defaultValue = "true") boolean includeCreditCard,
+            @Parameter(description = "PERSONAL, BUSINESS or ALL (default): scope of the credit card, or of the account when it is not a card purchase")
+            @RequestParam(defaultValue = "ALL") AccountScopeFilter scope,
             @AuthenticationPrincipal AuthenticatedUser principal) {
 
         TransactionFilterRequest filter = new TransactionFilterRequest(
                 accountId, type, status, categoryId,
                 competenceDateFrom, competenceDateTo,
                 paymentDateFrom, paymentDateTo,
-                amountMin, amountMax, searchText, false, paymentMethod, false, includeCreditCard);
+                amountMin, amountMax, searchText, false, paymentMethod, false, includeCreditCard,
+                scope.toScope());
 
         return transactionService.summarizeTransactions(filter, principal.getUser().getId());
     }

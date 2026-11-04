@@ -186,7 +186,7 @@ class AccountServiceTest {
         balances.add(new Object[] {accountId, new BigDecimal("100.00")});
         when(transactionRepository.sumPaidAmountByAccountForUser(userId)).thenReturn(balances);
 
-        List<AccountResponse> result = accountService.listAccounts(userId, false);
+        List<AccountResponse> result = accountService.listAccounts(userId, false, null);
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).id()).isEqualTo(accountId);
@@ -202,7 +202,7 @@ class AccountServiceTest {
                 .thenReturn(List.of(account, archived));
         when(transactionRepository.sumPaidAmountByAccountForUser(userId)).thenReturn(List.of());
 
-        List<AccountResponse> result = accountService.listAccounts(userId, true);
+        List<AccountResponse> result = accountService.listAccounts(userId, true, null);
 
         assertThat(result).hasSize(2);
         // Conta sem lançamento pago não aparece no agrupamento e tem saldo zero.

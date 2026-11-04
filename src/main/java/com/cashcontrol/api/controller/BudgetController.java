@@ -5,6 +5,7 @@ package com.cashcontrol.api.controller;
  * 31 de Outubro. de 2026
  */
 
+import com.cashcontrol.api.domain.entity.AccountScopeFilter;
 import com.cashcontrol.api.dto.request.CategoryBudgetRequest;
 import com.cashcontrol.api.dto.response.BudgetHistoryResponse;
 import com.cashcontrol.api.dto.response.BudgetProgressResponse;
@@ -55,8 +56,11 @@ public class BudgetController {
     public BudgetProgressResponse progress(
             @AuthenticationPrincipal AuthenticatedUser principal,
             @Parameter(description = "Month in YYYY-MM format; current month when omitted")
-            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM") YearMonth month) {
-        return budgetService.progress(principal.getUser().getId(), month != null ? month : YearMonth.now());
+            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM") YearMonth month,
+            @Parameter(description = "PERSONAL, BUSINESS or ALL (default): spending of the accounts and cards of that scope")
+            @RequestParam(defaultValue = "ALL") AccountScopeFilter scope) {
+        return budgetService.progress(principal.getUser().getId(), month != null ? month : YearMonth.now(),
+                scope.toScope());
     }
 
     @Operation(summary = "Budget history", description = "Cap against spending per category for each of the last N months up to `until`, by purchase date.")
@@ -69,8 +73,11 @@ public class BudgetController {
             @Parameter(description = "Number of months, 1 to 12 (default 6)")
             @RequestParam(defaultValue = "6") @Min(1) @Max(12) int months,
             @Parameter(description = "Last month in YYYY-MM format; current month when omitted")
-            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM") YearMonth until) {
-        return budgetService.history(principal.getUser().getId(), until != null ? until : YearMonth.now(), months);
+            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM") YearMonth until,
+            @Parameter(description = "PERSONAL, BUSINESS or ALL (default): spending of the accounts and cards of that scope")
+            @RequestParam(defaultValue = "ALL") AccountScopeFilter scope) {
+        return budgetService.history(principal.getUser().getId(), until != null ? until : YearMonth.now(), months,
+                scope.toScope());
     }
 
     @Operation(summary = "Set a cap", description = "Creates or replaces the default cap of the category, or only the cap of one month.")

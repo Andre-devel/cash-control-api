@@ -1,6 +1,7 @@
 package com.cashcontrol.api.service;
 
 import com.cashcontrol.api.config.AppProperties;
+import com.cashcontrol.api.domain.entity.AccountScope;
 import com.cashcontrol.api.domain.entity.AccountType;
 import com.cashcontrol.api.domain.entity.ChartGranularity;
 import com.cashcontrol.api.domain.entity.Invoice;
@@ -21,7 +22,9 @@ import com.cashcontrol.api.dto.response.RecentTransactionResponse;
 import com.cashcontrol.api.dto.response.SubscriptionsResponse;
 import com.cashcontrol.api.dto.response.UpcomingBillResponse;
 import com.cashcontrol.api.dto.response.UpcomingInvoiceResponse;
+import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
+import com.cashcontrol.api.repository.CreditCardRepository;
 import com.cashcontrol.api.repository.InvoiceRepository;
 import com.cashcontrol.api.repository.RecurrenceRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
@@ -38,8 +41,10 @@ import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -61,19 +66,21 @@ public class DashboardServiceImpl implements DashboardService {
     private final InvestmentService investmentService;
     private final RecurrenceRepository recurrenceRepository;
     private final RecurrenceService recurrenceService;
+    private final AccountRepository accountRepository;
+    private final CreditCardRepository creditCardRepository;
 
     @Override
-    public OverviewMetricsResponse getOverviewMetrics(UUID userId) {
+    public OverviewMetricsResponse getOverviewMetrics(UUID userId, AccountScope scope) {
         LocalDate today = LocalDate.now();
         LocalDate monthStart = today.withDayOfMonth(1);
         LocalDate monthEnd = today.withDayOfMonth(today.lengthOfMonth());
         String currentMonth = today.format(MONTH_FORMATTER);
 
-        BigDecimal totalBalance = safe(transactionRepository.sumTotalBalanceExcludingType(userId, AccountType.INVESTMENT));
+        BigDecimal totalBalance = safe(transactionRepository.sumTotalBalanceExcludingType(userId, AccountType.INVESTMENT, scope));
 
         BigDecimal monthlyIncome = safe(transactionRepository.sumPaidByTypeAndPaymentDateRange(
-                userId, TransactionType.INCOME, monthStart, monthEnd, null));
-        BigDecimal monthlyExpenses = netExpenses(userId, monthStart, monthEnd);
+                userId, TransactionType.INCOME, monthStart, monthEnd, null, scope));
+        BigDecimal monthlyExpenses = netExpenses(userId, monthStart, monthEnd, scope);
         BigDecimal monthlySavings = monthlyIncome.subtract(monthlyExpenses);
         BigDecimal cashFlow = monthlySavings;
 
@@ -83,38 +90,38 @@ public class DashboardServiceImpl implements DashboardService {
         // Patrimônio com as aplicações pelo valor de resgate, hoje e no fim do mês anterior pelo
         // mesmo critério — senão a variação mistura custo com valor de mercado.
         Map<LocalDate, BigDecimal> unrealized = investmentService.unrealizedNetYield(
-                userId, List.of(today, previousEnd), today);
-        BigDecimal netWorth = safe(transactionRepository.sumTotalNetWorth(userId)).add(unrealized.get(today));
-        BigDecimal previousNetWorth = safe(transactionRepository.sumNetWorthUpTo(userId, previousEnd))
+                userId, List.of(today, previousEnd), today, scope);
+        BigDecimal netWorth = safe(transactionRepository.sumTotalNetWorth(userId, scope)).add(unrealized.get(today));
+        BigDecimal previousNetWorth = safe(transactionRepository.sumNetWorthUpTo(userId, previousEnd, scope))
                 .add(unrealized.get(previousEnd));
         BigDecimal previousIncome = safe(transactionRepository.sumPaidByTypeAndPaymentDateRange(
-                userId, TransactionType.INCOME, previousStart, previousEnd, null));
-        BigDecimal previousExpenses = netExpenses(userId, previousStart, previousEnd);
+                userId, TransactionType.INCOME, previousStart, previousEnd, null, scope));
+        BigDecimal previousExpenses = netExpenses(userId, previousStart, previousEnd, scope);
 
-        InvestmentService.DashboardFigures investments = investmentService.getDashboardFigures(userId, today);
+        InvestmentService.DashboardFigures investments = investmentService.getDashboardFigures(userId, today, scope);
 
         return new OverviewMetricsResponse(
                 totalBalance, netWorth, monthlyIncome, monthlyExpenses,
                 monthlySavings, cashFlow, currentMonth,
                 previousNetWorth, previousIncome, previousExpenses,
                 investments.gross(), investments.net(), investments.yieldMonth(),
-                safe(invoiceRepository.sumUnpaidRemainingByUserId(userId)));
+                safe(invoiceRepository.sumUnpaidRemainingByUserId(userId, scope)));
     }
 
     @Override
     public CategoryPieChartResponse getCategoryPieChart(
-            UUID userId, LocalDate from, LocalDate to, UUID accountId, TransactionType type) {
+            UUID userId, LocalDate from, LocalDate to, UUID accountId, TransactionType type, AccountScope scope) {
 
         TransactionType effectiveType = type != null ? type : TransactionType.EXPENSE;
 
         List<Object[]> rows = effectiveType == TransactionType.EXPENSE
-                ? netExpenseBreakdown(userId, from, to, accountId)
-                : transactionRepository.findCategoryBreakdown(userId, effectiveType, from, to, accountId);
+                ? netExpenseBreakdown(userId, from, to, accountId, scope)
+                : transactionRepository.findCategoryBreakdown(userId, effectiveType, from, to, accountId, scope);
         Map<UUID, String> categoryNames = categoryNamesOf(rows);
-        BigDecimal uncategorized = safe(transactionRepository.sumUncategorized(userId, effectiveType, from, to, accountId));
+        BigDecimal uncategorized = safe(transactionRepository.sumUncategorized(userId, effectiveType, from, to, accountId, scope));
         if (effectiveType == TransactionType.EXPENSE) {
             uncategorized = uncategorized.subtract(
-                    safe(transactionRepository.sumUncategorized(userId, TransactionType.REFUND, from, to, accountId)))
+                    safe(transactionRepository.sumUncategorized(userId, TransactionType.REFUND, from, to, accountId, scope)))
                     .max(BigDecimal.ZERO);
         }
 
@@ -145,14 +152,14 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
-    public MonthlyBarChartResponse getMonthlyBarChart(UUID userId, int months, UUID accountId) {
+    public MonthlyBarChartResponse getMonthlyBarChart(UUID userId, int months, UUID accountId, AccountScope scope) {
         int effectiveMonths = Math.min(months, 24);
         LocalDate today = LocalDate.now();
         LocalDate to = today.withDayOfMonth(today.lengthOfMonth());
         LocalDate from = today.minusMonths(effectiveMonths - 1L).withDayOfMonth(1);
 
         List<Object[]> rows = transactionRepository.findMonthlyIncomeExpense(
-                userId, from, to, accountId);
+                userId, from, to, accountId, scope != null ? scope.name() : null);
 
         Map<String, BigDecimal> incomeMap = new HashMap<>();
         Map<String, BigDecimal> expenseMap = new HashMap<>();
@@ -185,7 +192,7 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public NetWorthEvolutionResponse getNetWorthEvolution(
-            UUID userId, LocalDate from, LocalDate to, ChartGranularity granularity) {
+            UUID userId, LocalDate from, LocalDate to, ChartGranularity granularity, AccountScope scope) {
 
         ChartGranularity effectiveGranularity = granularity != null ? granularity : ChartGranularity.MONTHLY;
 
@@ -197,19 +204,19 @@ public class DashboardServiceImpl implements DashboardService {
             dates.add(to);
         }
 
-        Map<LocalDate, BigDecimal> unrealized = investmentService.unrealizedNetYield(userId, dates, LocalDate.now());
+        Map<LocalDate, BigDecimal> unrealized = investmentService.unrealizedNetYield(userId, dates, LocalDate.now(), scope);
         List<NetWorthEvolutionResponse.Snapshot> snapshots = dates.stream()
                 .map(date -> new NetWorthEvolutionResponse.Snapshot(date,
-                        safe(transactionRepository.sumNetWorthUpTo(userId, date)).add(unrealized.get(date))))
+                        safe(transactionRepository.sumNetWorthUpTo(userId, date, scope)).add(unrealized.get(date))))
                 .toList();
 
         return new NetWorthEvolutionResponse(snapshots);
     }
 
     @Override
-    public MonthlyComparisonResponse getMonthlyComparison(UUID userId, String month1, String month2) {
-        MonthlyComparisonResponse.MonthMetrics m1 = buildMonthMetrics(userId, month1);
-        MonthlyComparisonResponse.MonthMetrics m2 = buildMonthMetrics(userId, month2);
+    public MonthlyComparisonResponse getMonthlyComparison(UUID userId, String month1, String month2, AccountScope scope) {
+        MonthlyComparisonResponse.MonthMetrics m1 = buildMonthMetrics(userId, month1, scope);
+        MonthlyComparisonResponse.MonthMetrics m2 = buildMonthMetrics(userId, month2, scope);
 
         BigDecimal incomeDelta = m2.income().subtract(m1.income());
         BigDecimal expensesDelta = m2.expenses().subtract(m1.expenses());
@@ -226,13 +233,13 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
-    public List<UpcomingBillResponse> getUpcomingBills(UUID userId, int daysAhead) {
+    public List<UpcomingBillResponse> getUpcomingBills(UUID userId, int daysAhead, AccountScope scope) {
         int effectiveDays = daysAhead > 0 ? daysAhead : appProperties.getDashboard().getUpcomingBillsDays();
         int maxResults = appProperties.getDashboard().getUpcomingBillsMaxResults();
         LocalDate deadline = LocalDate.now().plusDays(effectiveDays);
 
         List<Transaction> transactions = transactionRepository.findUpcomingBills(
-                userId, UPCOMING_BILL_STATUSES, deadline, PageRequest.of(0, maxResults));
+                userId, UPCOMING_BILL_STATUSES, deadline, scope, PageRequest.of(0, maxResults));
 
         return transactions.stream()
                 .map(t -> new UpcomingBillResponse(
@@ -247,7 +254,7 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
-    public List<UpcomingInvoiceResponse> getUpcomingInvoices(UUID userId, int daysAhead) {
+    public List<UpcomingInvoiceResponse> getUpcomingInvoices(UUID userId, int daysAhead, AccountScope scope) {
         int effectiveDays = daysAhead > 0 ? daysAhead : appProperties.getDashboard().getUpcomingBillsDays();
         LocalDate deadline = LocalDate.now().plusDays(effectiveDays);
 
@@ -255,6 +262,7 @@ public class DashboardServiceImpl implements DashboardService {
                 .findAllByUserIdAndDueDateLessThanEqualAndStatusIn(userId, deadline, UPCOMING_INVOICE_STATUSES);
 
         return invoices.stream()
+                .filter(inv -> scope == null || inv.getCreditCard().getScope() == scope)
                 .sorted((a, b) -> a.getDueDate().compareTo(b.getDueDate()))
                 .map(inv -> {
                     BigDecimal remaining = inv.getTotalAmount().subtract(inv.getPaidAmount());
@@ -271,13 +279,13 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
-    public List<LargestExpenseResponse> getLargestExpenses(UUID userId, LocalDate from, LocalDate to, int limit) {
+    public List<LargestExpenseResponse> getLargestExpenses(UUID userId, LocalDate from, LocalDate to, int limit, AccountScope scope) {
         int effectiveLimit = limit > 0 ? limit : 5;
         LocalDate effectiveTo = to != null ? to : LocalDate.now().withDayOfMonth(LocalDate.now().lengthOfMonth());
         LocalDate effectiveFrom = from != null ? from : LocalDate.now().withDayOfMonth(1);
 
         List<Transaction> transactions = transactionRepository.findLargestExpenses(
-                userId, effectiveFrom, effectiveTo, PageRequest.of(0, effectiveLimit));
+                userId, effectiveFrom, effectiveTo, scope, PageRequest.of(0, effectiveLimit));
 
         return transactions.stream()
                 .map(t -> new LargestExpenseResponse(
@@ -291,12 +299,12 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
-    public List<RecentTransactionResponse> getRecentTransactions(UUID userId, int limit) {
+    public List<RecentTransactionResponse> getRecentTransactions(UUID userId, int limit, AccountScope scope) {
         int effectiveLimit = limit > 0 ? limit : 10;
 
         // Só o que já aconteceu: parcelas e recorrências futuras não são "recentes".
         List<Transaction> transactions = transactionRepository.findRecentTransactions(
-                userId, LocalDate.now(), PageRequest.of(0, effectiveLimit));
+                userId, LocalDate.now(), scope, PageRequest.of(0, effectiveLimit));
 
         return transactions.stream()
                 .map(t -> new RecentTransactionResponse(
@@ -318,17 +326,17 @@ public class DashboardServiceImpl implements DashboardService {
      * cartão. O estorno conta no mês em que aconteceu, não no da compra que ele desfaz.
      */
     @Override
-    public BalanceProjectionResponse getBalanceProjection(UUID userId, int days) {
+    public BalanceProjectionResponse getBalanceProjection(UUID userId, int days, AccountScope scope) {
         AppProperties.Dashboard props = appProperties.getDashboard();
         int effectiveDays = days > 0 ? Math.min(days, props.getProjectionMaxDays()) : props.getProjectionDefaultDays();
-        return balanceProjectionCalculator.project(userId, LocalDate.now(), effectiveDays);
+        return balanceProjectionCalculator.project(userId, LocalDate.now(), effectiveDays, scope);
     }
 
-    private BigDecimal netExpenses(UUID userId, LocalDate from, LocalDate to) {
+    private BigDecimal netExpenses(UUID userId, LocalDate from, LocalDate to, AccountScope scope) {
         return safe(transactionRepository.sumPaidByTypeAndPaymentDateRange(
-                        userId, TransactionType.EXPENSE, from, to, null))
+                        userId, TransactionType.EXPENSE, from, to, null, scope))
                 .subtract(safe(transactionRepository.sumPaidByTypeAndPaymentDateRange(
-                        userId, TransactionType.REFUND, from, to, null)));
+                        userId, TransactionType.REFUND, from, to, null, scope)));
     }
 
     /**
@@ -336,14 +344,15 @@ public class DashboardServiceImpl implements DashboardService {
      * {@code findCategoryBreakdown}: [categoryId, valor], do maior para o menor. Categoria que
      * o estorno zerou (ou que só teve estorno) sai da lista — o gráfico é de gasto.
      */
-    private List<Object[]> netExpenseBreakdown(UUID userId, LocalDate from, LocalDate to, UUID accountId) {
+    private List<Object[]> netExpenseBreakdown(UUID userId, LocalDate from, LocalDate to, UUID accountId,
+                                               AccountScope scope) {
         Map<UUID, BigDecimal> net = new HashMap<>();
         for (Object[] row : transactionRepository.findCategoryBreakdown(
-                userId, TransactionType.EXPENSE, from, to, accountId)) {
+                userId, TransactionType.EXPENSE, from, to, accountId, scope)) {
             net.merge((UUID) row[0], (BigDecimal) row[1], BigDecimal::add);
         }
         for (Object[] row : transactionRepository.findCategoryBreakdown(
-                userId, TransactionType.REFUND, from, to, accountId)) {
+                userId, TransactionType.REFUND, from, to, accountId, scope)) {
             net.computeIfPresent((UUID) row[0], (id, amount) -> amount.subtract((BigDecimal) row[1]));
         }
         return net.entrySet().stream()
@@ -353,17 +362,17 @@ public class DashboardServiceImpl implements DashboardService {
                 .toList();
     }
 
-    private MonthlyComparisonResponse.MonthMetrics buildMonthMetrics(UUID userId, String month) {
+    private MonthlyComparisonResponse.MonthMetrics buildMonthMetrics(UUID userId, String month, AccountScope scope) {
         YearMonth ym = YearMonth.parse(month, MONTH_FORMATTER);
         LocalDate from = ym.atDay(1);
         LocalDate to = ym.atEndOfMonth();
 
         BigDecimal income = safe(transactionRepository.sumPaidByTypeAndPaymentDateRange(
-                userId, TransactionType.INCOME, from, to, null));
-        BigDecimal expenses = netExpenses(userId, from, to);
+                userId, TransactionType.INCOME, from, to, null, scope));
+        BigDecimal expenses = netExpenses(userId, from, to, scope);
         BigDecimal savings = income.subtract(expenses);
 
-        List<Object[]> rows = netExpenseBreakdown(userId, from, to, null);
+        List<Object[]> rows = netExpenseBreakdown(userId, from, to, null, scope);
         Map<UUID, String> categoryNames = categoryNamesOf(rows);
         BigDecimal total = rows.stream().map(r -> (BigDecimal) r[1])
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -419,16 +428,20 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
-    public SubscriptionsResponse getSubscriptions(UUID userId) {
+    public SubscriptionsResponse getSubscriptions(UUID userId, AccountScope scope) {
         List<SubscriptionsResponse.Item> items = new ArrayList<>();
         recurrenceRepository.findAllByUserIdAndDeletedAtIsNull(userId).stream()
+                .filter(rule -> scope == null || rule.scope() == scope)
                 .filter(rule -> rule.getStatus() == RecurrenceStatus.ACTIVE
                         && rule.getType() == TransactionType.EXPENSE
                         && rule.getFrequency() == RecurrenceFrequency.MONTHLY)
                 .map(rule -> new SubscriptionsResponse.Item(rule.getDescription(), rule.getAmount(),
                         SubscriptionsResponse.Source.RECURRENCE))
                 .forEach(items::add);
+        Set<UUID> outOfScope = outOfScopeOwners(userId, scope);
         recurrenceService.listSuggestions(userId).stream()
+                .filter(suggestion -> !outOfScope.contains(suggestion.creditCardId() != null
+                        ? suggestion.creditCardId() : suggestion.accountId()))
                 .map(suggestion -> new SubscriptionsResponse.Item(suggestion.description(), suggestion.amount(),
                         SubscriptionsResponse.Source.SUGGESTION))
                 .forEach(items::add);
@@ -436,5 +449,20 @@ public class DashboardServiceImpl implements DashboardService {
                 .map(SubscriptionsResponse.Item::amount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         return new SubscriptionsResponse(total, items);
+    }
+
+    /** Ids das contas e dos cartões fora do escopo pedido; vazio quando {@code scope} é nulo. */
+    private Set<UUID> outOfScopeOwners(UUID userId, AccountScope scope) {
+        Set<UUID> ids = new HashSet<>();
+        if (scope == null) {
+            return ids;
+        }
+        accountRepository.findAllByUserIdAndDeletedAtIsNull(userId).stream()
+                .filter(account -> account.getScope() != scope)
+                .forEach(account -> ids.add(account.getId()));
+        creditCardRepository.findAllByUserIdAndDeletedAtIsNull(userId).stream()
+                .filter(card -> card.getScope() != scope)
+                .forEach(card -> ids.add(card.getId()));
+        return ids;
     }
 }

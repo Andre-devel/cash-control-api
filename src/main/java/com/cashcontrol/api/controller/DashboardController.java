@@ -1,5 +1,6 @@
 package com.cashcontrol.api.controller;
 
+import com.cashcontrol.api.domain.entity.AccountScopeFilter;
 import com.cashcontrol.api.domain.entity.ChartGranularity;
 import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.dto.response.BalanceProjectionResponse;
@@ -44,6 +45,9 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public class DashboardController {
 
+    static final String SCOPE_DESCRIPTION = "PERSONAL, BUSINESS or ALL (default). Filters by the scope of the "
+            + "transaction's credit card, or of its account when it is not a card purchase";
+
     private final DashboardService dashboardService;
 
     @Operation(summary = "Overview metrics", description = "Returns total balance, net worth, monthly income, expenses, savings, and cash flow for the authenticated user.")
@@ -55,8 +59,9 @@ public class DashboardController {
     @GetMapping("/overview")
     @PreAuthorize("isAuthenticated()")
     public OverviewMetricsResponse getOverviewMetrics(
+            @Parameter(description = SCOPE_DESCRIPTION) @RequestParam(defaultValue = "ALL") AccountScopeFilter scope,
             @AuthenticationPrincipal AuthenticatedUser principal) {
-        return dashboardService.getOverviewMetrics(principal.getUser().getId());
+        return dashboardService.getOverviewMetrics(principal.getUser().getId(), scope.toScope());
     }
 
     @Operation(summary = "Category pie chart data", description = "Returns expense (or income) distribution by category for a given date range, suitable for pie chart rendering.")
@@ -72,8 +77,9 @@ public class DashboardController {
             @Parameter(description = "End date (inclusive), ISO 8601") @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @Parameter(description = "Filter to a specific account") @RequestParam(required = false) UUID accountId,
             @Parameter(description = "Transaction type to analyse (default: EXPENSE)") @RequestParam(required = false) TransactionType type,
+            @Parameter(description = SCOPE_DESCRIPTION) @RequestParam(defaultValue = "ALL") AccountScopeFilter scope,
             @AuthenticationPrincipal AuthenticatedUser principal) {
-        return dashboardService.getCategoryPieChart(principal.getUser().getId(), from, to, accountId, type);
+        return dashboardService.getCategoryPieChart(principal.getUser().getId(), from, to, accountId, type, scope.toScope());
     }
 
     @Operation(summary = "Monthly bar chart data", description = "Returns monthly income and expense totals for the last N months. Months with no transactions are included with zero values.")
@@ -87,8 +93,9 @@ public class DashboardController {
     public MonthlyBarChartResponse getMonthlyBarChart(
             @Parameter(description = "Number of months to include (max 24, default 6)") @RequestParam(defaultValue = "6") int months,
             @Parameter(description = "Filter to a specific account") @RequestParam(required = false) UUID accountId,
+            @Parameter(description = SCOPE_DESCRIPTION) @RequestParam(defaultValue = "ALL") AccountScopeFilter scope,
             @AuthenticationPrincipal AuthenticatedUser principal) {
-        return dashboardService.getMonthlyBarChart(principal.getUser().getId(), months, accountId);
+        return dashboardService.getMonthlyBarChart(principal.getUser().getId(), months, accountId, scope.toScope());
     }
 
     @Operation(summary = "Net worth evolution chart data", description = "Replays transaction history to compute net worth snapshots over the requested period.")
@@ -103,8 +110,9 @@ public class DashboardController {
             @Parameter(description = "Start date (inclusive), ISO 8601") @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @Parameter(description = "End date (inclusive), ISO 8601") @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @Parameter(description = "Snapshot granularity: DAILY, WEEKLY, MONTHLY (default: MONTHLY)") @RequestParam(defaultValue = "MONTHLY") ChartGranularity granularity,
+            @Parameter(description = SCOPE_DESCRIPTION) @RequestParam(defaultValue = "ALL") AccountScopeFilter scope,
             @AuthenticationPrincipal AuthenticatedUser principal) {
-        return dashboardService.getNetWorthEvolution(principal.getUser().getId(), from, to, granularity);
+        return dashboardService.getNetWorthEvolution(principal.getUser().getId(), from, to, granularity, scope.toScope());
     }
 
     @Operation(summary = "Monthly comparison data", description = "Compares income, expenses, and category breakdowns between two calendar months, including delta values.")
@@ -118,8 +126,9 @@ public class DashboardController {
     public MonthlyComparisonResponse getMonthlyComparison(
             @Parameter(description = "First month in YYYY-MM format") @RequestParam String month1,
             @Parameter(description = "Second month in YYYY-MM format") @RequestParam String month2,
+            @Parameter(description = SCOPE_DESCRIPTION) @RequestParam(defaultValue = "ALL") AccountScopeFilter scope,
             @AuthenticationPrincipal AuthenticatedUser principal) {
-        return dashboardService.getMonthlyComparison(principal.getUser().getId(), month1, month2);
+        return dashboardService.getMonthlyComparison(principal.getUser().getId(), month1, month2, scope.toScope());
     }
 
     @Operation(summary = "Upcoming bills widget", description = "Returns PENDING and OVERDUE transactions due within the specified number of days, sorted by urgency.")
@@ -132,8 +141,9 @@ public class DashboardController {
     @PreAuthorize("isAuthenticated()")
     public List<UpcomingBillResponse> getUpcomingBills(
             @Parameter(description = "Number of days ahead to look (default: configured value)") @RequestParam(defaultValue = "0") int daysAhead,
+            @Parameter(description = SCOPE_DESCRIPTION) @RequestParam(defaultValue = "ALL") AccountScopeFilter scope,
             @AuthenticationPrincipal AuthenticatedUser principal) {
-        return dashboardService.getUpcomingBills(principal.getUser().getId(), daysAhead);
+        return dashboardService.getUpcomingBills(principal.getUser().getId(), daysAhead, scope.toScope());
     }
 
     @Operation(summary = "Balance projection", description = """
@@ -150,8 +160,9 @@ public class DashboardController {
     @PreAuthorize("isAuthenticated()")
     public BalanceProjectionResponse getBalanceProjection(
             @Parameter(description = "Days ahead to project (default: configured value; capped at the configured maximum)") @RequestParam(defaultValue = "0") int days,
+            @Parameter(description = SCOPE_DESCRIPTION) @RequestParam(defaultValue = "ALL") AccountScopeFilter scope,
             @AuthenticationPrincipal AuthenticatedUser principal) {
-        return dashboardService.getBalanceProjection(principal.getUser().getId(), days);
+        return dashboardService.getBalanceProjection(principal.getUser().getId(), days, scope.toScope());
     }
 
     @Operation(summary = "Upcoming invoices widget", description = "Returns credit card invoices due within the specified number of days that are not yet fully paid.")
@@ -164,8 +175,9 @@ public class DashboardController {
     @PreAuthorize("isAuthenticated()")
     public List<UpcomingInvoiceResponse> getUpcomingInvoices(
             @Parameter(description = "Number of days ahead to look (default: configured value)") @RequestParam(defaultValue = "0") int daysAhead,
+            @Parameter(description = SCOPE_DESCRIPTION) @RequestParam(defaultValue = "ALL") AccountScopeFilter scope,
             @AuthenticationPrincipal AuthenticatedUser principal) {
-        return dashboardService.getUpcomingInvoices(principal.getUser().getId(), daysAhead);
+        return dashboardService.getUpcomingInvoices(principal.getUser().getId(), daysAhead, scope.toScope());
     }
 
     @Operation(summary = "Largest expenses widget", description = "Returns the top N largest PAID EXPENSE transactions for the given period.")
@@ -180,8 +192,9 @@ public class DashboardController {
             @Parameter(description = "Start date (inclusive), ISO 8601. Defaults to start of current month.") @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @Parameter(description = "End date (inclusive), ISO 8601. Defaults to end of current month.") @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @Parameter(description = "Maximum number of results (default 5)") @RequestParam(defaultValue = "5") int limit,
+            @Parameter(description = SCOPE_DESCRIPTION) @RequestParam(defaultValue = "ALL") AccountScopeFilter scope,
             @AuthenticationPrincipal AuthenticatedUser principal) {
-        return dashboardService.getLargestExpenses(principal.getUser().getId(), from, to, limit);
+        return dashboardService.getLargestExpenses(principal.getUser().getId(), from, to, limit, scope.toScope());
     }
 
     @Operation(summary = "Recent transactions widget", description = "Returns the N most recent transactions across all active accounts.")
@@ -194,8 +207,9 @@ public class DashboardController {
     @PreAuthorize("isAuthenticated()")
     public List<RecentTransactionResponse> getRecentTransactions(
             @Parameter(description = "Number of transactions to return (default 10)") @RequestParam(defaultValue = "10") int limit,
+            @Parameter(description = SCOPE_DESCRIPTION) @RequestParam(defaultValue = "ALL") AccountScopeFilter scope,
             @AuthenticationPrincipal AuthenticatedUser principal) {
-        return dashboardService.getRecentTransactions(principal.getUser().getId(), limit);
+        return dashboardService.getRecentTransactions(principal.getUser().getId(), limit, scope.toScope());
     }
 
     @Operation(summary = "Subscriptions card", description = """
@@ -208,7 +222,9 @@ public class DashboardController {
     })
     @GetMapping("/subscriptions")
     @PreAuthorize("isAuthenticated()")
-    public SubscriptionsResponse getSubscriptions(@AuthenticationPrincipal AuthenticatedUser principal) {
-        return dashboardService.getSubscriptions(principal.getUser().getId());
+    public SubscriptionsResponse getSubscriptions(
+            @Parameter(description = SCOPE_DESCRIPTION) @RequestParam(defaultValue = "ALL") AccountScopeFilter scope,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return dashboardService.getSubscriptions(principal.getUser().getId(), scope.toScope());
     }
 }

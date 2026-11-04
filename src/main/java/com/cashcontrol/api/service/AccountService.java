@@ -1,5 +1,6 @@
 package com.cashcontrol.api.service;
 
+import com.cashcontrol.api.domain.entity.AccountScope;
 import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.dto.request.CreateAccountRequest;
@@ -18,7 +19,8 @@ public interface AccountService {
 
     AccountResponse createAccount(CreateAccountRequest request, UUID userId);
 
-    List<AccountResponse> listAccounts(UUID userId, boolean includeArchived);
+    /** Contas só do escopo; {@code scope} nulo traz todas. */
+    List<AccountResponse> listAccounts(UUID userId, boolean includeArchived, AccountScope scope);
 
     AccountResponse getAccount(UUID id, UUID userId);
 

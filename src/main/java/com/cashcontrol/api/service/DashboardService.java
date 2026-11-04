@@ -1,5 +1,6 @@
 package com.cashcontrol.api.service;
 
+import com.cashcontrol.api.domain.entity.AccountScope;
 import com.cashcontrol.api.domain.entity.ChartGranularity;
 import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.dto.response.BalanceProjectionResponse;
@@ -18,30 +19,34 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Agregados do dashboard. {@code scope} nulo soma pessoa física e jurídica; com valor, só os
+ * lançamentos do escopo (o do cartão na compra no cartão, senão o da conta).
+ */
 public interface DashboardService {
 
-    OverviewMetricsResponse getOverviewMetrics(UUID userId);
+    OverviewMetricsResponse getOverviewMetrics(UUID userId, AccountScope scope);
 
     CategoryPieChartResponse getCategoryPieChart(
-            UUID userId, LocalDate from, LocalDate to, UUID accountId, TransactionType type);
+            UUID userId, LocalDate from, LocalDate to, UUID accountId, TransactionType type, AccountScope scope);
 
-    MonthlyBarChartResponse getMonthlyBarChart(UUID userId, int months, UUID accountId);
+    MonthlyBarChartResponse getMonthlyBarChart(UUID userId, int months, UUID accountId, AccountScope scope);
 
     NetWorthEvolutionResponse getNetWorthEvolution(
-            UUID userId, LocalDate from, LocalDate to, ChartGranularity granularity);
+            UUID userId, LocalDate from, LocalDate to, ChartGranularity granularity, AccountScope scope);
 
-    MonthlyComparisonResponse getMonthlyComparison(UUID userId, String month1, String month2);
+    MonthlyComparisonResponse getMonthlyComparison(UUID userId, String month1, String month2, AccountScope scope);
 
-    List<UpcomingBillResponse> getUpcomingBills(UUID userId, int daysAhead);
+    List<UpcomingBillResponse> getUpcomingBills(UUID userId, int daysAhead, AccountScope scope);
 
-    List<UpcomingInvoiceResponse> getUpcomingInvoices(UUID userId, int daysAhead);
+    List<UpcomingInvoiceResponse> getUpcomingInvoices(UUID userId, int daysAhead, AccountScope scope);
 
-    List<LargestExpenseResponse> getLargestExpenses(UUID userId, LocalDate from, LocalDate to, int limit);
+    List<LargestExpenseResponse> getLargestExpenses(UUID userId, LocalDate from, LocalDate to, int limit, AccountScope scope);
 
-    List<RecentTransactionResponse> getRecentTransactions(UUID userId, int limit);
+    List<RecentTransactionResponse> getRecentTransactions(UUID userId, int limit, AccountScope scope);
 
-    BalanceProjectionResponse getBalanceProjection(UUID userId, int days);
+    BalanceProjectionResponse getBalanceProjection(UUID userId, int days, AccountScope scope);
 
     /** Recorrências ativas de despesa mensais mais as sugestões de recorrência não recusadas, com o total mensal. */
-    SubscriptionsResponse getSubscriptions(UUID userId);
+    SubscriptionsResponse getSubscriptions(UUID userId, AccountScope scope);
 }

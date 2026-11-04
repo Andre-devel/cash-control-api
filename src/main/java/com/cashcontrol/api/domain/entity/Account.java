@@ -46,6 +46,11 @@ public class Account {
     @Column(name = "currency_code", nullable = false, length = 3)
     private String currencyCode = "BRL";
 
+    /** Pessoa física ou jurídica (V52); os lançamentos da conta herdam este escopo. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "scope", nullable = false, length = 10)
+    private AccountScope scope = AccountScope.PERSONAL;
+
     @Column(name = "description", length = 255)
     private String description;
 

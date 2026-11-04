@@ -79,7 +79,7 @@ class DashboardControllerTest {
                 "2026-05", new BigDecimal("7000.00"), new BigDecimal("2800.00"), new BigDecimal("1700.00"),
                 new BigDecimal("3000.00"), new BigDecimal("2950.00"), new BigDecimal("25.00"), new BigDecimal("800.00"));
 
-        when(dashboardService.getOverviewMetrics(userId)).thenReturn(response);
+        when(dashboardService.getOverviewMetrics(userId, null)).thenReturn(response);
 
         mockMvc.perform(get("/api/v1/dashboard/overview")
                         .with(user(principal)))
@@ -105,7 +105,7 @@ class DashboardControllerTest {
                         UUID.randomUUID(), "Food", new BigDecimal("300.00"), new BigDecimal("75.00"))),
                 new BigDecimal("400.00"));
 
-        when(dashboardService.getCategoryPieChart(eq(userId), any(), any(), any(), any()))
+        when(dashboardService.getCategoryPieChart(eq(userId), any(), any(), any(), any(), any()))
                 .thenReturn(response);
 
         mockMvc.perform(get("/api/v1/dashboard/charts/categories")
@@ -133,7 +133,7 @@ class DashboardControllerTest {
                         "2026-05", new BigDecimal("2000.00"),
                         new BigDecimal("800.00"), new BigDecimal("1200.00"))));
 
-        when(dashboardService.getMonthlyBarChart(eq(userId), eq(6), eq(null)))
+        when(dashboardService.getMonthlyBarChart(eq(userId), eq(6), eq(null), any()))
                 .thenReturn(response);
 
         mockMvc.perform(get("/api/v1/dashboard/charts/monthly")
@@ -158,7 +158,7 @@ class DashboardControllerTest {
                         LocalDate.of(2026, 5, 1), new BigDecimal("10000.00"))));
 
         when(dashboardService.getNetWorthEvolution(
-                eq(userId), any(), any(), eq(ChartGranularity.MONTHLY)))
+                eq(userId), any(), any(), eq(ChartGranularity.MONTHLY), any()))
                 .thenReturn(response);
 
         mockMvc.perform(get("/api/v1/dashboard/charts/net-worth")
@@ -183,7 +183,7 @@ class DashboardControllerTest {
                 new BigDecimal("1000.00"), new BigDecimal("500.00"), new BigDecimal("500.00"),
                 new BigDecimal("33.33"), new BigDecimal("50.00"), new BigDecimal("25.00"));
 
-        when(dashboardService.getMonthlyComparison(userId, "2026-04", "2026-05"))
+        when(dashboardService.getMonthlyComparison(userId, "2026-04", "2026-05", null))
                 .thenReturn(new MonthlyComparisonResponse(m1, m2, delta));
 
         mockMvc.perform(get("/api/v1/dashboard/charts/comparison")
@@ -204,7 +204,7 @@ class DashboardControllerTest {
                 UUID.randomUUID(), new BigDecimal("250.00"), "Electricity",
                 "Checking", "Utilities", LocalDate.now().plusDays(3), TransactionStatus.PENDING);
 
-        when(dashboardService.getUpcomingBills(eq(userId), eq(0))).thenReturn(List.of(bill));
+        when(dashboardService.getUpcomingBills(eq(userId), eq(0), any())).thenReturn(List.of(bill));
 
         mockMvc.perform(get("/api/v1/dashboard/widgets/upcoming-bills")
                         .with(user(principal)))
@@ -222,7 +222,7 @@ class DashboardControllerTest {
                 BigDecimal.ZERO, new BigDecimal("1500.00"),
                 LocalDate.now().plusDays(5), InvoiceStatus.CLOSED);
 
-        when(dashboardService.getUpcomingInvoices(eq(userId), eq(0))).thenReturn(List.of(invoice));
+        when(dashboardService.getUpcomingInvoices(eq(userId), eq(0), any())).thenReturn(List.of(invoice));
 
         mockMvc.perform(get("/api/v1/dashboard/widgets/upcoming-invoices")
                         .with(user(principal)))
@@ -239,7 +239,7 @@ class DashboardControllerTest {
                 UUID.randomUUID(), new BigDecimal("800.00"), "Rent",
                 "Housing", "Checking", LocalDate.now());
 
-        when(dashboardService.getLargestExpenses(eq(userId), any(), any(), eq(5)))
+        when(dashboardService.getLargestExpenses(eq(userId), any(), any(), eq(5), any()))
                 .thenReturn(List.of(expense));
 
         mockMvc.perform(get("/api/v1/dashboard/widgets/largest-expenses")
@@ -258,7 +258,7 @@ class DashboardControllerTest {
                 TransactionType.EXPENSE, TransactionStatus.PAID,
                 "Checking", "Food", LocalDate.now());
 
-        when(dashboardService.getRecentTransactions(eq(userId), eq(10))).thenReturn(List.of(tx));
+        when(dashboardService.getRecentTransactions(eq(userId), eq(10), any())).thenReturn(List.of(tx));
 
         mockMvc.perform(get("/api/v1/dashboard/widgets/recent-transactions")
                         .with(user(principal)))

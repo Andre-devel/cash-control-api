@@ -1,5 +1,6 @@
 package com.cashcontrol.api.dto.response;
 
+import com.cashcontrol.api.domain.entity.AccountScope;
 import com.cashcontrol.api.domain.entity.AccountType;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -12,6 +13,7 @@ public record AccountResponse(
         @Schema(description = "Account UUID") UUID id,
         @Schema(description = "User-defined account name", example = "Nubank Checking") String name,
         @Schema(description = "Account type") AccountType type,
+        @Schema(description = "Personal (PF) or business (PJ) account") AccountScope scope,
         @Schema(description = "ISO 4217 currency code", example = "BRL") String currencyCode,
         @Schema(description = "Optional account description") String description,
         @Schema(description = "User-defined display order", example = "0") int sortOrder,

@@ -69,7 +69,7 @@ class OverviewMetricsIntegrationTest {
 
     @Test
     void getOverviewMetrics_withNoTransactions_returnsZeros() {
-        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId);
+        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId, null);
 
         assertThat(result.totalBalance()).isEqualByComparingTo(BigDecimal.ZERO);
         assertThat(result.netWorth()).isEqualByComparingTo(BigDecimal.ZERO);
@@ -83,7 +83,7 @@ class OverviewMetricsIntegrationTest {
         createPaidTransaction(checkingAccountId, TransactionType.INCOME, "5000.00");
         createPaidTransaction(investmentAccountId, TransactionType.INCOME, "2000.00");
 
-        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId);
+        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId, null);
 
         assertThat(result.totalBalance()).isEqualByComparingTo("5000.00");
         assertThat(result.netWorth()).isEqualByComparingTo("7000.00");
@@ -94,7 +94,7 @@ class OverviewMetricsIntegrationTest {
         createPaidTransaction(checkingAccountId, TransactionType.INCOME, "3000.00");
         createPaidTransaction(checkingAccountId, TransactionType.EXPENSE, "1200.00");
 
-        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId);
+        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId, null);
 
         assertThat(result.monthlyIncome()).isEqualByComparingTo("3000.00");
         assertThat(result.monthlyExpenses()).isEqualByComparingTo("1200.00");
@@ -107,7 +107,7 @@ class OverviewMetricsIntegrationTest {
         // Conta com saldo não arquiva pela API; simula uma arquivada antes dessa regra.
         jdbcTemplate.update("UPDATE accounts SET archived_at = NOW() WHERE id = ?", checkingAccountId);
 
-        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId);
+        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId, null);
 
         assertThat(result.totalBalance()).isEqualByComparingTo(BigDecimal.ZERO);
     }
@@ -120,7 +120,7 @@ class OverviewMetricsIntegrationTest {
         LocalDate to = LocalDate.now();
 
         CategoryPieChartResponse result = dashboardService.getCategoryPieChart(
-                userId, from, to, null, TransactionType.EXPENSE);
+                userId, from, to, null, TransactionType.EXPENSE, null);
 
         assertThat(result.entries()).isEmpty();
         assertThat(result.totalAmount()).isEqualByComparingTo(BigDecimal.ZERO);
@@ -134,7 +134,7 @@ class OverviewMetricsIntegrationTest {
         LocalDate to = LocalDate.now().withDayOfMonth(LocalDate.now().lengthOfMonth());
 
         CategoryPieChartResponse result = dashboardService.getCategoryPieChart(
-                userId, from, to, null, TransactionType.EXPENSE);
+                userId, from, to, null, TransactionType.EXPENSE, null);
 
         assertThat(result.totalAmount()).isEqualByComparingTo("400.00");
         boolean hasUncategorized = result.entries().stream()
@@ -150,7 +150,7 @@ class OverviewMetricsIntegrationTest {
         createTransaction(investmentAccountId, TransactionType.INCOME, "300.00", lastMonth, TransactionStatus.PAID);
         createPaidTransaction(checkingAccountId, TransactionType.INCOME, "100.00");
 
-        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId);
+        OverviewMetricsResponse result = dashboardService.getOverviewMetrics(userId, null);
 
         assertThat(result.previousMonthIncome()).isEqualByComparingTo("2300.00");
         assertThat(result.previousMonthExpenses()).isEqualByComparingTo("500.00");
@@ -165,7 +165,7 @@ class OverviewMetricsIntegrationTest {
         createPaidTransaction(checkingAccountId, TransactionType.INCOME, "2500.00");
         createPaidTransaction(checkingAccountId, TransactionType.EXPENSE, "900.00");
 
-        MonthlyBarChartResponse result = dashboardService.getMonthlyBarChart(userId, 1, null);
+        MonthlyBarChartResponse result = dashboardService.getMonthlyBarChart(userId, 1, null, null);
 
         assertThat(result.months()).hasSize(1);
         MonthlyBarChartResponse.Entry current = result.months().get(0);
@@ -176,7 +176,7 @@ class OverviewMetricsIntegrationTest {
 
     @Test
     void getMonthlyBarChart_emptyMonths_includedWithZeroValues() {
-        MonthlyBarChartResponse result = dashboardService.getMonthlyBarChart(userId, 6, null);
+        MonthlyBarChartResponse result = dashboardService.getMonthlyBarChart(userId, 6, null, null);
 
         assertThat(result.months()).hasSize(6);
         result.months().forEach(m -> {
@@ -195,7 +195,7 @@ class OverviewMetricsIntegrationTest {
         LocalDate to = LocalDate.now();
 
         NetWorthEvolutionResponse result = dashboardService.getNetWorthEvolution(
-                userId, from, to, ChartGranularity.MONTHLY);
+                userId, from, to, ChartGranularity.MONTHLY, null);
 
         assertThat(result.snapshots()).isNotEmpty();
         NetWorthEvolutionResponse.Snapshot last = result.snapshots().getLast();
@@ -209,7 +209,7 @@ class OverviewMetricsIntegrationTest {
         createPaidTransaction(checkingAccountId, TransactionType.INCOME, "100.00");
         createPaidTransaction(checkingAccountId, TransactionType.EXPENSE, "50.00");
 
-        List<RecentTransactionResponse> result = dashboardService.getRecentTransactions(userId, 10);
+        List<RecentTransactionResponse> result = dashboardService.getRecentTransactions(userId, 10, null);
 
         assertThat(result).hasSizeGreaterThanOrEqualTo(2);
     }
@@ -220,7 +220,7 @@ class OverviewMetricsIntegrationTest {
         createTransaction(checkingAccountId, TransactionType.EXPENSE, "80.00",
                 LocalDate.now().plusMonths(3), TransactionStatus.PENDING);
 
-        List<RecentTransactionResponse> result = dashboardService.getRecentTransactions(userId, 10);
+        List<RecentTransactionResponse> result = dashboardService.getRecentTransactions(userId, 10, null);
 
         assertThat(result).extracting(RecentTransactionResponse::competenceDate)
                 .allSatisfy(date -> assertThat(date).isBeforeOrEqualTo(LocalDate.now()));
@@ -233,7 +233,7 @@ class OverviewMetricsIntegrationTest {
             createPaidTransaction(checkingAccountId, TransactionType.INCOME, "100.00");
         }
 
-        List<RecentTransactionResponse> result = dashboardService.getRecentTransactions(userId, 3);
+        List<RecentTransactionResponse> result = dashboardService.getRecentTransactions(userId, 3, null);
 
         assertThat(result).hasSize(3);
     }

@@ -1,5 +1,6 @@
 package com.cashcontrol.api.dto.response;
 
+import com.cashcontrol.api.domain.entity.AccountScope;
 import com.cashcontrol.api.domain.entity.CardBrand;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -12,6 +13,7 @@ public record CreditCardResponse(
         @Schema(description = "Credit card UUID") UUID id,
         @Schema(description = "User-defined card name", example = "Nubank Platinum") String name,
         @Schema(description = "Card network brand") CardBrand brand,
+        @Schema(description = "Personal (PF) or business (PJ) card") AccountScope scope,
         @Schema(description = "Issuing bank or institution name", example = "Nubank") String issuer,
         @Schema(description = "Last four digits printed on the card. Null when not informed.", example = "7866") String last4Digits,
         @Schema(description = "Total credit limit. Serialized as decimal string.", example = "10000.00") BigDecimal creditLimit,

@@ -187,6 +187,11 @@ public class Transaction {
      * voltou (zero enquanto nada voltou). Mesma regra de
      * {@code TransactionRepository#NET_OF_REIMBURSEMENT}.
      */
+    /** Escopo PF/PJ do lançamento: o do cartão, na compra no cartão, senão o da conta. */
+    public AccountScope scope() {
+        return creditCard != null ? creditCard.getScope() : account.getScope();
+    }
+
     public BigDecimal amountNetOfReimbursement() {
         if (!reimbursable) {
             return amount;

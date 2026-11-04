@@ -1,5 +1,6 @@
 package com.cashcontrol.api.service;
 
+import com.cashcontrol.api.domain.entity.AccountScope;
 import com.cashcontrol.api.domain.entity.CreditCard;
 import com.cashcontrol.api.domain.entity.Invoice;
 import com.cashcontrol.api.domain.entity.RecurrenceRule;
@@ -27,7 +28,9 @@ import java.util.UUID;
  * de {@code sumNetWorthUpTo}) e aplica, na data prevista, as receitas/despesas pendentes, o
  * restante das faturas e as ocorrências de recorrência que o job ainda não gerou.
  *
- * <p>Gasto que ainda não foi lançado não entra: a projeção não adivinha consumo.
+ * <p>Gasto que ainda não foi lançado não entra: a projeção não adivinha consumo. Com {@code scope},
+ * só o escopo pedido: contas e lançamentos dele, faturas dos cartões dele e recorrências cuja
+ * conta (ou cartão) é dele; {@code null} soma todos.
  */
 @Component
 @RequiredArgsConstructor
@@ -39,16 +42,16 @@ public class BalanceProjectionCalculator {
     private final RecurrenceGeneratorService recurrenceGenerator;
     private final InvoiceCycleCalculator invoiceCycleCalculator;
 
-    public BalanceProjectionResponse project(UUID userId, LocalDate today, int days) {
+    public BalanceProjectionResponse project(UUID userId, LocalDate today, int days, AccountScope scope) {
         LocalDate horizon = today.plusDays(days);
 
         List<Event> events = new ArrayList<>();
-        addPendingTransactions(events, userId, today, horizon);
-        addUnpaidInvoices(events, userId, today, horizon);
-        addFutureRecurrences(events, userId, today, horizon);
+        addPendingTransactions(events, userId, today, horizon, scope);
+        addUnpaidInvoices(events, userId, today, horizon, scope);
+        addFutureRecurrences(events, userId, today, horizon, scope);
         events.sort(Comparator.comparing(Event::date));
 
-        BigDecimal startBalance = orZero(transactionRepository.sumNetWorthUpTo(userId, today));
+        BigDecimal startBalance = orZero(transactionRepository.sumNetWorthUpTo(userId, today, scope));
         List<Point> points = balancePoints(startBalance, events, today, horizon);
 
         Point lowest = points.getFirst();
@@ -66,16 +69,21 @@ public class BalanceProjectionCalculator {
                 lowest, firstNegativeDate, points, events);
     }
 
-    private void addPendingTransactions(List<Event> events, UUID userId, LocalDate today, LocalDate horizon) {
-        for (Transaction tx : transactionRepository.findOpenCashFlowsDueBy(userId, horizon)) {
+    private void addPendingTransactions(List<Event> events, UUID userId, LocalDate today, LocalDate horizon,
+                                        AccountScope scope) {
+        for (Transaction tx : transactionRepository.findOpenCashFlowsDueBy(userId, horizon, scope)) {
             LocalDate expected = tx.getPaymentDate() != null ? tx.getPaymentDate() : tx.getCompetenceDate();
             events.add(new Event(notBefore(expected, today), EventKind.TRANSACTION, tx.getDescription(),
                     signed(tx.getType(), tx.getAmount()), false));
         }
     }
 
-    private void addUnpaidInvoices(List<Event> events, UUID userId, LocalDate today, LocalDate horizon) {
+    private void addUnpaidInvoices(List<Event> events, UUID userId, LocalDate today, LocalDate horizon,
+                                   AccountScope scope) {
         for (Invoice invoice : invoiceRepository.findUnpaidWithCardByUserIdDueBy(userId, horizon)) {
+            if (scope != null && invoice.getCreditCard().getScope() != scope) {
+                continue;
+            }
             BigDecimal remaining = invoice.getTotalAmount().subtract(invoice.getPaidAmount());
             if (remaining.signum() <= 0) {
                 continue;
@@ -90,8 +98,12 @@ public class BalanceProjectionCalculator {
      * para frente nada do que se estima existe como transação. No cartão, a ocorrência pesa no
      * vencimento da fatura do ciclo em que cai.
      */
-    private void addFutureRecurrences(List<Event> events, UUID userId, LocalDate today, LocalDate horizon) {
+    private void addFutureRecurrences(List<Event> events, UUID userId, LocalDate today, LocalDate horizon,
+                                      AccountScope scope) {
         for (RecurrenceRule rule : recurrenceRepository.findActiveByUserIdDueBy(userId, horizon)) {
+            if (scope != null && rule.scope() != scope) {
+                continue;
+            }
             if (rule.getType() != TransactionType.INCOME && rule.getType() != TransactionType.EXPENSE
                     && rule.getType() != TransactionType.REFUND) {
                 continue;
