@@ -257,7 +257,7 @@ public class BankConnectionService {
     /**
      * Evento {@code transactions/created}. Loga o atraso (etapa 6.0): quantos lançamentos a Pluggy
      * recebeu desde {@code createdAtFrom} e quanto tempo passou entre o mais novo deles — pela data
-     * do banco e pela chegada na Pluggy — e o aviso. Na conta corrente vinculada, põe os novos na
+     * do banco e pela chegada na Pluggy — e o aviso. Na conta corrente ou no cartão vinculado, põe os novos na
      * fila de revisão (etapa 6A). Só para conta vinculada de um item cadastrado: o corpo não é
      * confiável e não pode disparar leitura à toa.
      */
@@ -289,9 +289,9 @@ public class BankConnectionService {
                     newestDate == null ? null : Duration.between(newestDate, receivedAt).toMinutes(),
                     newestCreatedAt == null ? null : Duration.between(newestCreatedAt, receivedAt).toMinutes());
             run.setWebhookDelayMinutes(newestCreatedAt == null ? null : Duration.between(newestCreatedAt, receivedAt).toMinutes());
-            if (link.get().getKind() == BankAccountKind.BANK && link.get().getAccountId() != null) {
-                run.setTransactionsQueued(bankPendingService.enqueue(
-                        connection.get().getUserId(), link.get().getAccountId(), createdAtFrom, receivedAt));
+            Integer queued = queue(connection.get().getUserId(), link.get(), createdAtFrom, receivedAt);
+            if (queued != null) {
+                run.setTransactionsQueued(queued);
             }
             run.setOutcome(BankSyncOutcome.SUCCESS);
         } catch (BankProviderException | BusinessRuleException e) {
@@ -346,7 +346,7 @@ public class BankConnectionService {
 
     /**
      * {@link #sync} e, se o item sincronizou na Pluggy desde a última leitura, põe na fila de revisão
-     * o que chegou nesse meio-tempo nas contas correntes vinculadas. A fila não aceita a mesma linha
+     * o que chegou nesse meio-tempo nas contas correntes e nos cartões vinculados. A fila não aceita a mesma linha
      * duas vezes, então coincidir com o {@code transactions/created} não duplica.
      */
     private BankConnectionResponse syncAndQueue(BankConnection connection, PluggyItem item, BankSyncRun run) {
@@ -370,16 +370,28 @@ public class BankConnectionService {
         return response;
     }
 
-    /** Fila de revisão de cada conta corrente vinculada; devolve quantos lançamentos entraram. */
+    /**
+     * Fila de revisão de uma conta do banco: a conta corrente vinculada a uma conta, o cartão
+     * vinculado a um cartão. {@code null} quando ela não está vinculada.
+     */
+    private Integer queue(UUID userId, BankConnectionAccount account, Instant since, Instant now) {
+        if (account.getKind() == BankAccountKind.BANK && account.getAccountId() != null) {
+            return bankPendingService.enqueue(userId, account.getAccountId(), since, now);
+        }
+        if (account.getKind() == BankAccountKind.CREDIT && account.getCreditCardId() != null) {
+            return bankPendingService.enqueueCard(userId, account.getCreditCardId(), since, now);
+        }
+        return null;
+    }
+
+    /** Fila de revisão de cada conta corrente e cartão vinculados; devolve quantos lançamentos entraram. */
     private int queueSince(BankConnection connection, Instant previous, List<String> problems) {
         int queued = 0;
         Instant now = Instant.now();
         for (BankConnectionAccount account : connectionAccountRepository.findAllByConnectionId(connection.getId())) {
-            if (account.getKind() != BankAccountKind.BANK || account.getAccountId() == null) {
-                continue;
-            }
             try {
-                queued += bankPendingService.enqueue(connection.getUserId(), account.getAccountId(), previous, now);
+                Integer count = queue(connection.getUserId(), account, previous, now);
+                queued += count == null ? 0 : count;
             } catch (BankProviderException | BusinessRuleException e) {
                 log.warn("Pluggy sync: could not queue transactions of {}: {}", account.getExternalAccountId(), describe(e));
                 problems.add("Fila de revisão de " + account.getName() + ": " + describe(e));

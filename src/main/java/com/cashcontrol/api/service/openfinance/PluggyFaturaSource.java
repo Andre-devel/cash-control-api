@@ -6,6 +6,8 @@ import com.cashcontrol.api.domain.exception.BusinessRuleException;
 import com.cashcontrol.api.dto.response.BankBillResponse;
 import com.cashcontrol.api.repository.BankConnectionAccountRepository;
 import com.cashcontrol.api.repository.BankConnectionRepository;
+import com.cashcontrol.api.service.fatura.FaturaRowHasher;
+import com.cashcontrol.api.service.fatura.FaturaRowHasher.RowKey;
 import com.cashcontrol.api.service.fatura.ParsedCardSection;
 import com.cashcontrol.api.service.fatura.ParsedFatura;
 import com.cashcontrol.api.service.fatura.ParsedFaturaRow;
@@ -54,6 +56,7 @@ public class PluggyFaturaSource {
     private final AppProperties appProperties;
     private final BankConnectionAccountRepository connectionAccountRepository;
     private final BankConnectionRepository connectionRepository;
+    private final FaturaRowHasher rowHasher;
 
     /** Faturas fechadas do cartão do banco vinculado, da mais recente para a mais antiga. */
     public List<BankBillResponse> listBills(UUID creditCardId, UUID userId) {
@@ -99,6 +102,62 @@ public class PluggyFaturaSource {
             totalAmount = bill.totalAmount();
         }
 
+        String fallbackLast4 = link.getNumber();
+        // O titular (o final do vínculo) vem primeiro, como no PDF; os virtuais e adicionais depois.
+        return new ParsedFatura(dueDate, totalAmount,
+                linesBySection(link, billId).entrySet().stream()
+                        .sorted(Comparator.comparing(entry -> !entry.getKey().equals(fallbackLast4)))
+                        .map(entry -> new ParsedCardSection(entry.getKey(),
+                                entry.getValue().stream().map(Line::row).toList()))
+                        .toList(),
+                List.of());
+    }
+
+    /**
+     * Compra da fatura atual pronta para a fila de revisão.
+     *
+     * @param cardLast4 final da seção da fatura, que entra na chave
+     * @param key       a chave e o ordinal que a prévia da fatura atual dá a esta linha
+     * @param row       a linha como a prévia a lê, com o {@code creditCardMetadata} já aplicado:
+     *                  na parcela, a data da compra, o número e o total
+     * @param postedOn  o dia do lançamento na fatura, que diz em que fatura ele cai
+     */
+    public record CardCharge(String cardLast4, RowKey key, ParsedFaturaRow row, LocalDate postedOn) {}
+
+    /**
+     * O que entrou na fatura atual do cartão vinculado desde {@code since} (pelo {@code createdAt}
+     * da Pluggy), já liquidado. A compra {@code PENDING} fica de fora: ao liquidar ela pode trocar
+     * de id e de valor, e entra na varredura seguinte. O pagamento da fatura anterior também fica
+     * de fora, como na prévia.
+     *
+     * <p>A chave é calculada sobre a fatura atual inteira, pendentes inclusive, e não só sobre o
+     * que é devolvido: o ordinal conta as linhas idênticas da seção, e contar num subconjunto
+     * daria chave diferente da que o diálogo "Buscar do banco" mostra para a mesma linha.
+     */
+    public List<CardCharge> fetchCurrentSince(UUID creditCardId, UUID userId, Instant since) {
+        BankConnectionAccount link = requireLink(creditCardId, userId);
+        List<CardCharge> charges = new ArrayList<>();
+        linesBySection(link, OPEN_BILL_ID).forEach((last4, lines) -> {
+            List<Line> expenses = lines.stream().filter(line -> !line.row().isInvoicePayment()).toList();
+            List<RowKey> keys = rowHasher.hashAll(last4, expenses.stream().map(Line::row).toList());
+            for (int i = 0; i < expenses.size(); i++) {
+                PluggyTransaction tx = expenses.get(i).tx();
+                if ("POSTED".equals(tx.status()) && tx.createdAt() != null && !tx.createdAt().isBefore(since)) {
+                    charges.add(new CardCharge(last4, keys.get(i), expenses.get(i).row(), dateOf(tx)));
+                }
+            }
+        });
+        return charges;
+    }
+
+    private record Line(PluggyTransaction tx, ParsedFaturaRow row) {}
+
+    /**
+     * Os lançamentos da fatura {@code billId} por final de cartão, na ordem da prévia. A fatura
+     * atual ({@link #OPEN_BILL_ID}) traz os que ainda não têm fatura, pendentes inclusive.
+     */
+    private Map<String, List<Line>> linesBySection(BankConnectionAccount link, String billId) {
+        boolean open = OPEN_BILL_ID.equals(billId);
         List<PluggyTransaction> rows = pluggyClient.listTransactions(link.getExternalAccountId()).stream()
                 .filter(tx -> tx.date() != null && tx.amount() != null && tx.creditCardMetadata() != null)
                 .filter(tx -> open
@@ -111,20 +170,13 @@ public class PluggyFaturaSource {
                         .thenComparing(tx -> tx.id() == null ? "" : tx.id()))
                 .toList();
 
-        String fallbackLast4 = link.getNumber();
-        Map<String, List<ParsedFaturaRow>> sections = new LinkedHashMap<>();
+        Map<String, List<Line>> sections = new LinkedHashMap<>();
         for (int i = 0; i < rows.size(); i++) {
             PluggyTransaction tx = rows.get(i);
-            sections.computeIfAbsent(last4Of(tx.creditCardMetadata().cardNumber(), fallbackLast4),
-                    key -> new ArrayList<>()).add(toRow(i + 1, tx));
+            sections.computeIfAbsent(last4Of(tx.creditCardMetadata().cardNumber(), link.getNumber()),
+                    key -> new ArrayList<>()).add(new Line(tx, toRow(i + 1, tx)));
         }
-        // O titular (o final do vínculo) vem primeiro, como no PDF; os virtuais e adicionais depois.
-        return new ParsedFatura(dueDate, totalAmount,
-                sections.entrySet().stream()
-                        .sorted(Comparator.comparing(entry -> !entry.getKey().equals(fallbackLast4)))
-                        .map(entry -> new ParsedCardSection(entry.getKey(), entry.getValue()))
-                        .toList(),
-                List.of());
+        return sections;
     }
 
     /**

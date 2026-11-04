@@ -2,6 +2,7 @@ package com.cashcontrol.api.service.fatura;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Locale;
 
 /**
  * Uma linha de lançamento lida da fatura, ainda crua: sem categoria e sem
@@ -23,4 +24,15 @@ public record ParsedFaturaRow(
         BigDecimal signedAmount,
         Integer installmentNumber,
         Integer totalInstallments
-) {}
+) {
+
+    /**
+     * Crédito que é o pagamento da fatura anterior ("PAGTO DEBITO AUTOMATICO", "PAGAMENTO
+     * FATURA"). Qualquer outro crédito é estorno; se a regra errar, a linha aparece como
+     * estorno na prévia e o usuário a desmarca.
+     */
+    public boolean isInvoicePayment() {
+        String lower = description.toLowerCase(Locale.ROOT);
+        return signedAmount.signum() > 0 && (lower.contains("pagto") || lower.contains("pagamento"));
+    }
+}

@@ -26,17 +26,28 @@ public interface BankPendingTransactionRepository extends JpaRepository<BankPend
     List<String> findExistingExternalRefs(@Param("accountId") UUID accountId,
                                           @Param("externalRefs") Collection<String> externalRefs);
 
+    @Query("SELECT p.externalRef FROM BankPendingTransaction p "
+           + "WHERE p.creditCardId = :creditCardId AND p.externalRef IN :externalRefs")
+    List<String> findExistingCardExternalRefs(@Param("creditCardId") UUID creditCardId,
+                                              @Param("externalRefs") Collection<String> externalRefs);
+
     /**
      * Tira da fila o que já virou lançamento, por qualquer caminho: confirmado aqui ou importado
      * pelo diálogo "Buscar do banco". A descartada fica (é o que impede o webhook de trazê-la de novo).
+     * No cartão vale o item de fatura com a chave, com o mesmo alcance da prévia da fatura (o
+     * usuário inteiro): ele fica mesmo quando o lançamento é excluído.
      */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(value = """
             DELETE FROM bank_pending_transactions p
             WHERE p.user_id = :userId
-              AND EXISTS (SELECT 1 FROM transactions t
-                          WHERE t.user_id = p.user_id AND t.account_id = p.account_id
-                            AND t.external_ref = p.external_ref)
+              AND (EXISTS (SELECT 1 FROM transactions t
+                           WHERE p.account_id IS NOT NULL
+                             AND t.user_id = p.user_id AND t.account_id = p.account_id
+                             AND t.external_ref = p.external_ref)
+                   OR EXISTS (SELECT 1 FROM invoice_items i
+                              WHERE p.credit_card_id IS NOT NULL
+                                AND i.user_id = p.user_id AND i.external_ref = p.external_ref))
             """, nativeQuery = true)
     int deleteImported(@Param("userId") UUID userId);
 }

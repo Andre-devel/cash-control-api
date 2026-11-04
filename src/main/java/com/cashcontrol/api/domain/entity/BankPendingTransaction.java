@@ -44,8 +44,31 @@ public class BankPendingTransaction {
     @Column(name = "user_id", nullable = false, updatable = false)
     private UUID userId;
 
-    @Column(name = "account_id", nullable = false, updatable = false)
+    /** Conta corrente de onde veio a linha; nulo quando ela é do cartão. */
+    @Column(name = "account_id", updatable = false)
     private UUID accountId;
+
+    /** Cartão de cuja fatura atual veio a linha; nulo quando ela é da conta corrente. */
+    @Column(name = "credit_card_id", updatable = false)
+    private UUID creditCardId;
+
+    /** Só no cartão: final da seção da fatura, que entra na chave do {@code FaturaRowHasher}. */
+    @Column(name = "card_last4", updatable = false, length = 4)
+    private String cardLast4;
+
+    /** Só no cartão: posição entre as linhas idênticas da fatura, como a prévia devolve. */
+    @Column(name = "ordinal", updatable = false)
+    private Integer ordinal;
+
+    @Column(name = "installment_number", updatable = false)
+    private Integer installmentNumber;
+
+    @Column(name = "total_installments", updatable = false)
+    private Integer totalInstallments;
+
+    /** Só no cartão: data da compra, que a parcela repete mês a mês. */
+    @Column(name = "purchase_date", updatable = false)
+    private LocalDate purchaseDate;
 
     @Column(name = "external_ref", nullable = false, updatable = false, length = 64)
     private String externalRef;

@@ -39,6 +39,7 @@ import com.cashcontrol.api.service.InvoiceCycleCalculator.InvoiceCycleInfo;
 import com.cashcontrol.api.service.fatura.FaturaParser;
 import com.cashcontrol.api.service.fatura.FaturaRowHasher;
 import com.cashcontrol.api.service.fatura.FaturaRowHasher.RowKey;
+import com.cashcontrol.api.service.fatura.KeyedFaturaRow;
 import com.cashcontrol.api.service.fatura.ParsedCardSection;
 import com.cashcontrol.api.service.fatura.ParsedFatura;
 import com.cashcontrol.api.service.fatura.ParsedFaturaRow;
@@ -60,7 +61,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -118,14 +118,9 @@ public class FaturaImportServiceImpl implements FaturaImportService {
     private FaturaImportPreviewResponse buildPreview(ParsedFatura fatura, String fileName, InvoiceImportFormat format,
                                                      Function<String, Optional<CreditCard>> cardOf, UUID userId) {
         String referenceMonth = referenceMonthOf(fatura.dueDate());
-        List<CategoryRule> rules = categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId);
-        // Uma consulta de histórico para o arquivo inteiro, não uma por linha nem uma por
-        // seção de cartão.
-        CategorySuggester.History history = categorySuggester.loadHistory(userId,
-                fatura.cardSections().stream().flatMap(section -> section.rows().stream())
-                        .map(ParsedFaturaRow::description).toList());
-        // Idem para os apelidos: a tabela inteira do usuário, uma vez, indexada em memória.
-        MerchantAliasService.Aliases aliases = merchantAliasService.load(userId);
+        // Regras, histórico e apelidos uma vez para o arquivo inteiro, não por linha nem por seção.
+        PreviewLookups lookups = loadLookups(fatura.cardSections().stream()
+                .flatMap(section -> section.rows().stream()).toList(), userId);
 
         List<FaturaImportGroupPreview> groups = new ArrayList<>(fatura.cardSections().size());
         int excludedPayments = 0;
@@ -135,7 +130,7 @@ public class FaturaImportServiceImpl implements FaturaImportService {
             // lançamento aqui — ele sai da conta e entra pelo extrato — e só é contado. O
             // estorno fica: abate a fatura e a despesa do mês.
             List<ParsedFaturaRow> expenses = section.rows().stream()
-                    .filter(row -> row.signedAmount().signum() < 0 || !isInvoicePayment(row))
+                    .filter(row -> !row.isInvoicePayment())
                     .toList();
             excludedPayments += section.rows().size() - expenses.size();
             if (expenses.isEmpty() && format == InvoiceImportFormat.OPEN_FINANCE) {
@@ -144,18 +139,8 @@ public class FaturaImportServiceImpl implements FaturaImportService {
             }
 
             CreditCard suggested = cardOf.apply(section.cardLast4()).orElse(null);
-            List<RowKey> keys = rowHasher.hashAll(section.cardLast4(), expenses);
-            List<String> refs = keys.stream().map(RowKey::externalRef).toList();
-            Set<String> alreadyImported = findAlreadyImported(refs, userId);
-            PossibleDuplicates possibleDuplicates = loadPossibleDuplicates(suggested, referenceMonth, refs);
-
-            List<FaturaImportPreviewRow> rows = new ArrayList<>(expenses.size());
-            for (int i = 0; i < expenses.size(); i++) {
-                ParsedFaturaRow row = expenses.get(i);
-                boolean duplicate = alreadyImported.contains(keys.get(i).externalRef());
-                rows.add(toPreviewRow(row, keys.get(i), duplicate, !duplicate && possibleDuplicates.claim(row),
-                        rules, history, aliases));
-            }
+            List<FaturaImportPreviewRow> rows = previewRows(expenses,
+                    rowHasher.hashAll(section.cardLast4(), expenses), suggested, referenceMonth, lookups, userId);
 
             groups.add(new FaturaImportGroupPreview(
                     section.cardLast4(),
@@ -181,6 +166,56 @@ public class FaturaImportServiceImpl implements FaturaImportService {
                 duplicateCount,
                 excludedPayments,
                 fatura.errors());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public String referenceMonthForCharge(UUID creditCardId, LocalDate chargeDate, UUID userId) {
+        CreditCard card = requireImportableCard(creditCardId, userId);
+        return referenceMonthOf(cycleCalculator.calculateForCharge(chargeDate, card.getClosingDay(), card.getDueDay()).dueDate());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<FaturaImportPreviewRow> previewKeyedRows(UUID creditCardId, String referenceMonth,
+                                                         List<KeyedFaturaRow> rows, UUID userId) {
+        CreditCard card = requireImportableCard(creditCardId, userId);
+        parseReferenceMonth(referenceMonth);
+        List<ParsedFaturaRow> parsed = rows.stream().map(KeyedFaturaRow::row).toList();
+        return previewRows(parsed, rows.stream().map(KeyedFaturaRow::key).toList(), card, referenceMonth,
+                loadLookups(parsed, userId), userId);
+    }
+
+    /** Regras, histórico de categorias e apelidos do usuário, carregados uma vez por prévia. */
+    private record PreviewLookups(List<CategoryRule> rules, CategorySuggester.History history,
+                                  MerchantAliasService.Aliases aliases) {}
+
+    private PreviewLookups loadLookups(List<ParsedFaturaRow> rows, UUID userId) {
+        return new PreviewLookups(
+                categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId),
+                categorySuggester.loadHistory(userId, rows.stream().map(ParsedFaturaRow::description).toList()),
+                merchantAliasService.load(userId));
+    }
+
+    /**
+     * As linhas de uma seção como a prévia as mostra: já importada pela chave, possível duplicata
+     * contra a fatura em que a confirmação vai gravar, sugestões de apelido e categoria.
+     */
+    private List<FaturaImportPreviewRow> previewRows(List<ParsedFaturaRow> expenses, List<RowKey> keys,
+                                                     CreditCard suggested, String referenceMonth,
+                                                     PreviewLookups lookups, UUID userId) {
+        List<String> refs = keys.stream().map(RowKey::externalRef).toList();
+        Set<String> alreadyImported = findAlreadyImported(refs, userId);
+        PossibleDuplicates possibleDuplicates = loadPossibleDuplicates(suggested, referenceMonth, refs);
+
+        List<FaturaImportPreviewRow> rows = new ArrayList<>(expenses.size());
+        for (int i = 0; i < expenses.size(); i++) {
+            ParsedFaturaRow row = expenses.get(i);
+            boolean duplicate = alreadyImported.contains(keys.get(i).externalRef());
+            rows.add(toPreviewRow(row, keys.get(i), duplicate, !duplicate && possibleDuplicates.claim(row),
+                    lookups.rules(), lookups.history(), lookups.aliases()));
+        }
+        return rows;
     }
 
     /**
@@ -353,17 +388,6 @@ public class FaturaImportServiceImpl implements FaturaImportService {
             }
             return false;
         }
-    }
-
-    /**
-     * Crédito que é o pagamento da fatura anterior ("PAGTO DEBITO AUTOMATICO", "PAGAMENTO
-     * FATURA"). Qualquer outro crédito é estorno; se a regra errar, a linha aparece como
-     * estorno na prévia e o usuário a desmarca.
-     */
-    private static boolean isInvoicePayment(ParsedFaturaRow row) {
-        String description = row.description().toLowerCase(Locale.ROOT);
-        return row.signedAmount().signum() > 0
-               && (description.contains("pagto") || description.contains("pagamento"));
     }
 
     /**

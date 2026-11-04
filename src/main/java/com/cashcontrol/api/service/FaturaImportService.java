@@ -6,9 +6,12 @@ import com.cashcontrol.api.dto.request.FaturaImportDuplicateCheckRequest;
 import com.cashcontrol.api.dto.response.BankBillResponse;
 import com.cashcontrol.api.dto.response.FaturaImportDuplicateCheckResponse;
 import com.cashcontrol.api.dto.response.FaturaImportPreviewResponse;
+import com.cashcontrol.api.dto.response.FaturaImportPreviewRow;
 import com.cashcontrol.api.dto.response.FaturaImportResultResponse;
+import com.cashcontrol.api.service.fatura.KeyedFaturaRow;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -39,6 +42,22 @@ public interface FaturaImportService {
     FaturaImportPreviewResponse previewFromBank(UUID creditCardId, String billId, UUID userId);
 
     FaturaImportResultResponse commit(FaturaImportCommitRequest request, UUID userId);
+
+    /**
+     * A chave de mês da prévia (a que o {@link #commit} recebe) da fatura do cartão em que cai uma
+     * cobrança lançada em {@code chargeDate}, pelo ciclo cadastrado do cartão.
+     */
+    String referenceMonthForCharge(UUID creditCardId, LocalDate chargeDate, UUID userId);
+
+    /**
+     * A classificação da prévia — apelido, categoria sugerida, já importada e possível
+     * duplicata — para linhas do cartão que já têm chave, todas da fatura {@code referenceMonth}.
+     * É o que a fila de revisão mostra das compras do cartão; a confirmação é o {@link #commit}.
+     *
+     * @return na ordem recebida
+     */
+    List<FaturaImportPreviewRow> previewKeyedRows(UUID creditCardId, String referenceMonth,
+                                                  List<KeyedFaturaRow> rows, UUID userId);
 
     /**
      * Refaz a marcação de duplicatas de uma seção do PDF contra um cartão escolhido

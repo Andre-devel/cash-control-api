@@ -25,6 +25,12 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     Optional<Transaction> findByIdAndUserId(UUID id, UUID userId);
 
+    /** Contas das compras do cartão, da mais recente para a mais antiga. */
+    @Query("SELECT t.account.id FROM Transaction t "
+           + "WHERE t.userId = :userId AND t.creditCard.id = :creditCardId ORDER BY t.createdAt DESC")
+    List<UUID> findAccountIdsByCreditCard(@Param("userId") UUID userId, @Param("creditCardId") UUID creditCardId,
+                                          Pageable pageable);
+
     Page<Transaction> findAllByUserId(UUID userId, Pageable pageable);
 
     Page<Transaction> findAllByAccount_IdAndUserId(UUID accountId, UUID userId, Pageable pageable);
