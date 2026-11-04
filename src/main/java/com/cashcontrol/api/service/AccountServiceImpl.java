@@ -1,6 +1,7 @@
 package com.cashcontrol.api.service;
 
 import com.cashcontrol.api.domain.entity.Account;
+import com.cashcontrol.api.domain.entity.BankConnectionAccount;
 import com.cashcontrol.api.domain.entity.PaymentMethod;
 import com.cashcontrol.api.domain.entity.PaymentMethodSlug;
 import com.cashcontrol.api.domain.entity.Transaction;
@@ -13,8 +14,10 @@ import com.cashcontrol.api.dto.request.CreateAccountRequest;
 import com.cashcontrol.api.dto.request.EditAccountRequest;
 import com.cashcontrol.api.dto.request.ManualAdjustmentRequest;
 import com.cashcontrol.api.dto.request.TransferRequest;
+import com.cashcontrol.api.dto.response.AccountReconciliationResponse;
 import com.cashcontrol.api.dto.response.AccountResponse;
 import com.cashcontrol.api.repository.AccountRepository;
+import com.cashcontrol.api.repository.BankConnectionAccountRepository;
 import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
@@ -29,16 +32,20 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class AccountServiceImpl implements AccountService {
 
+    static final String BANK_RECONCILE_DESCRIPTION = "Ajuste para conferir com o banco";
+
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
     private final PaymentMethodRepository paymentMethodRepository;
     private final AttachmentService attachmentService;
+    private final BankConnectionAccountRepository bankConnectionAccountRepository;
 
     @Override
     @Transactional
@@ -206,6 +213,39 @@ public class AccountServiceImpl implements AccountService {
             adjustment.setPaymentDate(date);
         }
         accountRepository.save(account);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AccountReconciliationResponse getReconciliation(UUID id, UUID userId) {
+        findActiveAccount(id, userId);
+        return toReconciliation(id, userId, bankBalanceOf(id).orElse(null));
+    }
+
+    @Override
+    @Transactional
+    public AccountReconciliationResponse reconcileWithBank(UUID id, UUID userId) {
+        Account account = findActiveAccount(id, userId);
+        BankConnectionAccount bankAccount = bankBalanceOf(id)
+                .orElseThrow(() -> new BusinessRuleException(
+                        "O banco ainda não informou o saldo desta conta. Atualize a conexão e tente de novo."));
+        reconcileBalance(account, bankAccount.getBankBalance(), LocalDate.now(), BANK_RECONCILE_DESCRIPTION);
+        return toReconciliation(id, userId, bankAccount);
+    }
+
+    /** A conta do banco vinculada a esta conta, se o banco já informou o saldo dela. */
+    private Optional<BankConnectionAccount> bankBalanceOf(UUID accountId) {
+        return bankConnectionAccountRepository.findByAccountId(accountId)
+                .filter(bankAccount -> bankAccount.getBankBalance() != null);
+    }
+
+    private AccountReconciliationResponse toReconciliation(UUID id, UUID userId, BankConnectionAccount bankAccount) {
+        BigDecimal appBalance = computeBalance(id, userId);
+        if (bankAccount == null) {
+            return new AccountReconciliationResponse(appBalance, null, null, null);
+        }
+        return new AccountReconciliationResponse(appBalance, bankAccount.getBankBalance(), bankAccount.getBankBalanceAt(),
+                bankAccount.getBankBalance().subtract(appBalance));
     }
 
     @Override

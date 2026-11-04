@@ -328,8 +328,22 @@ public class PluggyClient {
                                    BigDecimal fixedAnnualRate, String status) {
     }
 
-    /** {@code type}: BANK ou CREDIT. */
+    /**
+     * {@code type}: BANK ou CREDIT. {@code balance}: saldo atual; no cartão, o saldo devedor.
+     * {@code creditData} só vem preenchido no cartão (na conta BANK chega vazio).
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record PluggyAccount(String id, String type, String subtype, String name, String marketingName, String number) {
+    public record PluggyAccount(String id, String type, String subtype, String name, String marketingName, String number,
+                                BigDecimal balance, CreditData creditData) {
+
+        public PluggyAccount(String id, String type, String subtype, String name, String marketingName, String number) {
+            this(id, type, subtype, name, marketingName, number, null, null);
+        }
+    }
+
+    /** Limite do cartão segundo o banco; usado = {@code creditLimit - availableCreditLimit}. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CreditData(BigDecimal creditLimit, BigDecimal availableCreditLimit,
+                             Instant balanceCloseDate, Instant balanceDueDate) {
     }
 }

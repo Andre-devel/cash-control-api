@@ -1,6 +1,7 @@
 package com.cashcontrol.api.controller;
 
 import com.cashcontrol.api.domain.entity.InvoiceImportFormat;
+import com.cashcontrol.api.dto.request.CardReconcileRequest;
 import com.cashcontrol.api.dto.request.CreateCardRequest;
 import com.cashcontrol.api.dto.request.EditCardRequest;
 import com.cashcontrol.api.dto.request.FaturaImportCommitRequest;
@@ -9,6 +10,7 @@ import com.cashcontrol.api.dto.request.PayInvoiceRequest;
 import com.cashcontrol.api.dto.request.RecordChargeRequest;
 import com.cashcontrol.api.dto.request.UpdateInvoiceItemRequest;
 import com.cashcontrol.api.dto.response.BankBillResponse;
+import com.cashcontrol.api.dto.response.CardReconciliationResponse;
 import com.cashcontrol.api.dto.response.CreditCardResponse;
 import com.cashcontrol.api.dto.response.ErrorResponse;
 import com.cashcontrol.api.dto.response.FaturaImportDuplicateCheckResponse;
@@ -493,6 +495,44 @@ public class CreditCardController {
             @Parameter(description = "Credit card UUID", required = true) @PathVariable UUID id,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         return creditCardService.getLimitUsage(id, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Bank reconciliation", description = "Compares the limit usage the bank reported on the last read of the linked card (limit - available) with the usage the app computes. Bank fields and difference are null when the card is not linked or the bank has not reported a limit.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Reconciliation returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Card not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @GetMapping("/{id}/reconciliation")
+    @PreAuthorize("isAuthenticated()")
+    public CardReconciliationResponse getReconciliation(
+            @Parameter(description = "Credit card UUID", required = true) @PathVariable UUID id,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return creditCardService.getReconciliation(id, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Reconcile with bank", description = "Records the adjustment as a standalone charge on the open invoice, in the user's \"Tarifas e IOF\" category (created when missing).")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Adjustment charge recorded"),
+            @ApiResponse(responseCode = "400", description = "Validation error",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Card not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "Card is archived",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping("/{id}/reconcile")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("isAuthenticated()")
+    public InvoiceItemResponse reconcile(
+            @Parameter(description = "Credit card UUID", required = true) @PathVariable UUID id,
+            @Valid @RequestBody CardReconcileRequest request,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return creditCardService.reconcileWithBank(id, request, principal.getUser().getId());
     }
 
     @Operation(summary = "Get spending by category", description = "Returns aggregated spending by category for the card, optionally filtered by date range.")

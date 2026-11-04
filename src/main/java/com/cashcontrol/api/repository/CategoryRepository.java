@@ -45,4 +45,11 @@ public interface CategoryRepository extends JpaRepository<Category, UUID> {
            "AND (:excludeId IS NULL OR c.id <> :excludeId)")
     boolean existsNameInScope(@Param("userId") UUID userId, @Param("parentId") UUID parentId,
                               @Param("name") String name, @Param("excludeId") UUID excludeId);
+
+    /** Categoria raiz ativa com o nome, sem diferenciar maiúsculas: a do usuário antes da do sistema. */
+    @Query("SELECT c FROM Category c " +
+           "WHERE ((c.userId = :userId AND c.archivedAt IS NULL) OR c.userId IS NULL) " +
+           "AND c.parent IS NULL AND LOWER(c.name) = LOWER(:name) " +
+           "ORDER BY CASE WHEN c.userId IS NULL THEN 1 ELSE 0 END")
+    List<Category> findRootsByNameVisibleToUser(@Param("userId") UUID userId, @Param("name") String name);
 }

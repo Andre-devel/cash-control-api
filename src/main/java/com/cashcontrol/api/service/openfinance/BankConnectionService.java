@@ -431,6 +431,7 @@ public class BankConnectionService {
                 .collect(Collectors.toMap(BankConnectionAccount::getExternalAccountId, Function.identity()));
         List<PluggyAccount> remote = pluggyClient.listAccounts(connection.getItemId());
         run.setAccountsRead(remote.size());
+        Instant readAt = Instant.now();
         for (PluggyAccount account : remote) {
             BankConnectionAccount local = existing.remove(account.id());
             if (local == null) {
@@ -442,6 +443,10 @@ public class BankConnectionService {
             String name = account.marketingName() != null ? account.marketingName() : account.name();
             local.setName(truncate(name != null ? name : account.id(), 255));
             local.setNumber(truncate(account.number(), 64));
+            local.setBankBalance(account.balance());
+            local.setBankBalanceAt(account.balance() != null ? readAt : null);
+            local.setCreditLimit(account.creditData() != null ? account.creditData().creditLimit() : null);
+            local.setCreditAvailable(account.creditData() != null ? account.creditData().availableCreditLimit() : null);
             connectionAccountRepository.save(local);
         }
         // O banco deixou de compartilhar a conta: o vínculo some com ela.

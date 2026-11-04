@@ -6,6 +6,7 @@ import com.cashcontrol.api.dto.request.CreateAccountRequest;
 import com.cashcontrol.api.dto.request.EditAccountRequest;
 import com.cashcontrol.api.dto.request.ManualAdjustmentRequest;
 import com.cashcontrol.api.dto.request.TransferRequest;
+import com.cashcontrol.api.dto.response.AccountReconciliationResponse;
 import com.cashcontrol.api.dto.response.AccountResponse;
 
 import java.math.BigDecimal;
@@ -50,4 +51,15 @@ public interface AccountService {
      * diferença some. Entra na transação de quem chama.
      */
     void reconcileBalance(Account account, BigDecimal target, LocalDate date, String description);
+
+    /** Saldo do app ao lado do saldo lido do banco, para a conta vinculada a uma conexão. */
+    AccountReconciliationResponse getReconciliation(UUID id, UUID userId);
+
+    /**
+     * Leva o saldo do app ao saldo lido do banco por {@link #reconcileBalance}: um único ajuste
+     * flutuante por conta, reescrito a cada conciliação.
+     *
+     * @throws com.cashcontrol.api.domain.exception.BusinessRuleException sem saldo do banco
+     */
+    AccountReconciliationResponse reconcileWithBank(UUID id, UUID userId);
 }

@@ -1,6 +1,7 @@
 package com.cashcontrol.api.service;
 
 import com.cashcontrol.api.domain.entity.Account;
+import com.cashcontrol.api.domain.entity.BankConnectionAccount;
 import com.cashcontrol.api.domain.entity.Category;
 import com.cashcontrol.api.domain.entity.CreditCard;
 import com.cashcontrol.api.domain.entity.Invoice;
@@ -15,16 +16,20 @@ import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.domain.exception.BusinessRuleException;
 import com.cashcontrol.api.domain.exception.ConflictException;
 import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
+import com.cashcontrol.api.dto.request.CardReconcileRequest;
 import com.cashcontrol.api.dto.request.CreateCardRequest;
 import com.cashcontrol.api.dto.request.EditCardRequest;
 import com.cashcontrol.api.dto.request.PayInvoiceRequest;
 import com.cashcontrol.api.dto.request.RecordChargeRequest;
+import com.cashcontrol.api.dto.response.CardReconciliationResponse;
 import com.cashcontrol.api.dto.response.CreditCardResponse;
 import com.cashcontrol.api.dto.response.InvoiceItemResponse;
 import com.cashcontrol.api.dto.response.InvoiceResponse;
 import com.cashcontrol.api.dto.response.LimitUsageResponse;
 import com.cashcontrol.api.dto.response.SpendingByCategoryResponse;
 import com.cashcontrol.api.repository.AccountRepository;
+import com.cashcontrol.api.repository.BankConnectionAccountRepository;
+import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CreditCardRepository;
 import com.cashcontrol.api.repository.InvoiceItemRepository;
 import com.cashcontrol.api.repository.InvoiceRepository;
@@ -62,6 +67,11 @@ public class CreditCardServiceImpl implements CreditCardService {
     private final CategoryResolver categoryResolver;
     private final PaymentMethodRepository paymentMethodRepository;
     private final InvoiceCycleCalculator cycleCalculator;
+    private final BankConnectionAccountRepository bankConnectionAccountRepository;
+    private final CategoryRepository categoryRepository;
+
+    static final String BANK_RECONCILE_CATEGORY = "Tarifas e IOF";
+    static final String BANK_RECONCILE_DESCRIPTION = "Ajuste para conferir com o banco";
 
     @Override
     public CreditCardResponse createCard(CreateCardRequest request, UUID userId) {
@@ -371,6 +381,47 @@ public class CreditCardServiceImpl implements CreditCardService {
         }
 
         return new LimitUsageResponse(cardId, creditLimit, usedLimit, availableLimit);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CardReconciliationResponse getReconciliation(UUID cardId, UUID userId) {
+        CreditCard card = findActiveCard(cardId, userId);
+        BigDecimal appUsed = getLimitUsage(cardId, userId).usedLimit();
+        InvoiceCycleInfo cycle = cycleCalculator.calculateForCharge(LocalDate.now(), card.getClosingDay(), card.getDueDay());
+        UUID openInvoiceId = invoiceRepository.findByCreditCard_IdAndReferenceMonth(cardId, cycle.referenceMonth())
+                .map(Invoice::getId).orElse(null);
+        BankConnectionAccount bankCard = bankConnectionAccountRepository.findByCreditCardId(cardId)
+                .filter(found -> found.getCreditLimit() != null && found.getCreditAvailable() != null)
+                .orElse(null);
+        if (bankCard == null) {
+            return new CardReconciliationResponse(null, null, null, appUsed, null, openInvoiceId);
+        }
+        BigDecimal bankUsed = bankCard.getCreditLimit().subtract(bankCard.getCreditAvailable());
+        return new CardReconciliationResponse(bankCard.getCreditLimit(), bankCard.getCreditAvailable(), bankUsed,
+                appUsed, bankUsed.subtract(appUsed), openInvoiceId);
+    }
+
+    @Override
+    public InvoiceItemResponse reconcileWithBank(UUID cardId, CardReconcileRequest request, UUID userId) {
+        findActiveCard(cardId, userId);
+        String description = request.description() != null && !request.description().isBlank()
+                ? request.description().trim() : BANK_RECONCILE_DESCRIPTION;
+        Category category = feesCategory(userId);
+        return recordCharge(cardId, new RecordChargeRequest(description, request.amount(), LocalDate.now(),
+                category.getId(), null, null), userId);
+    }
+
+    /** "Tarifas e IOF" que o usuário enxerga (a dele antes da do sistema), criada para ele se faltar. */
+    private Category feesCategory(UUID userId) {
+        return categoryRepository.findRootsByNameVisibleToUser(userId, BANK_RECONCILE_CATEGORY).stream()
+                .findFirst()
+                .orElseGet(() -> {
+                    Category created = new Category();
+                    created.setUserId(userId);
+                    created.setName(BANK_RECONCILE_CATEGORY);
+                    return categoryRepository.save(created);
+                });
     }
 
     @Override

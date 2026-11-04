@@ -13,6 +13,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -55,4 +57,18 @@ public class BankConnectionAccount {
 
     @Column(name = "credit_card_id")
     private UUID creditCardId;
+
+    /** Saldo que o banco informou na última leitura; no cartão, o saldo devedor atual. */
+    @Column(name = "bank_balance", precision = 15, scale = 2)
+    private BigDecimal bankBalance;
+
+    @Column(name = "bank_balance_at")
+    private Instant bankBalanceAt;
+
+    /** Só no cartão: limite total e disponível segundo o banco. */
+    @Column(name = "credit_limit", precision = 15, scale = 2)
+    private BigDecimal creditLimit;
+
+    @Column(name = "credit_available", precision = 15, scale = 2)
+    private BigDecimal creditAvailable;
 }

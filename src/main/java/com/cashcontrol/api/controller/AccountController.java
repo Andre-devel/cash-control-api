@@ -4,6 +4,7 @@ import com.cashcontrol.api.dto.request.CreateAccountRequest;
 import com.cashcontrol.api.dto.request.EditAccountRequest;
 import com.cashcontrol.api.dto.request.ManualAdjustmentRequest;
 import com.cashcontrol.api.dto.request.TransferRequest;
+import com.cashcontrol.api.dto.response.AccountReconciliationResponse;
 import com.cashcontrol.api.dto.response.AccountResponse;
 import com.cashcontrol.api.dto.response.ErrorResponse;
 import com.cashcontrol.api.security.AuthenticatedUser;
@@ -186,6 +187,40 @@ public class AccountController {
             @Valid @RequestBody ManualAdjustmentRequest request,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         return accountService.manualAdjustment(id, request, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Bank reconciliation", description = "Compares the app balance with the balance the bank reported on the last read of the linked bank account. bankBalance, bankBalanceAt and difference are null when the account is not linked or the bank has not reported a balance.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Reconciliation returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Account not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @GetMapping("/{id}/reconciliation")
+    @PreAuthorize("isAuthenticated()")
+    public AccountReconciliationResponse getReconciliation(
+            @Parameter(description = "Account UUID", required = true) @PathVariable UUID id,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return accountService.getReconciliation(id, principal.getUser().getId());
+    }
+
+    @Operation(summary = "Reconcile with bank", description = "Brings the app balance to the bank balance with a single floating MANUAL_ADJUSTMENT per account: a second reconcile rewrites the same adjustment instead of creating another.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Adjustment applied; updated reconciliation returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Account not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "422", description = "The bank has not reported a balance for this account",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping("/{id}/reconcile")
+    @PreAuthorize("isAuthenticated()")
+    public AccountReconciliationResponse reconcile(
+            @Parameter(description = "Account UUID", required = true) @PathVariable UUID id,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return accountService.reconcileWithBank(id, principal.getUser().getId());
     }
 
     @Operation(summary = "Create transfer", description = "Atomically creates two linked TRANSFER transactions between two accounts owned by the authenticated user.")

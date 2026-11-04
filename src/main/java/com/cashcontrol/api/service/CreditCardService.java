@@ -4,10 +4,12 @@ import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.CreditCard;
 import com.cashcontrol.api.domain.entity.Invoice;
 import com.cashcontrol.api.domain.entity.Transaction;
+import com.cashcontrol.api.dto.request.CardReconcileRequest;
 import com.cashcontrol.api.dto.request.CreateCardRequest;
 import com.cashcontrol.api.dto.request.EditCardRequest;
 import com.cashcontrol.api.dto.request.PayInvoiceRequest;
 import com.cashcontrol.api.dto.request.RecordChargeRequest;
+import com.cashcontrol.api.dto.response.CardReconciliationResponse;
 import com.cashcontrol.api.dto.response.CreditCardResponse;
 import com.cashcontrol.api.dto.response.InvoiceItemResponse;
 import com.cashcontrol.api.dto.response.InvoiceResponse;
@@ -48,6 +50,15 @@ public interface CreditCardService {
     Transaction recordInvoicePayment(Invoice invoice, Account sourceAccount, BigDecimal amount, LocalDate paymentDate);
 
     LimitUsageResponse getLimitUsage(UUID cardId, UUID userId);
+
+    /** Uso do limite lido do banco ao lado do calculado por {@link #getLimitUsage}. */
+    CardReconciliationResponse getReconciliation(UUID cardId, UUID userId);
+
+    /**
+     * Lança o ajuste como despesa avulsa na fatura aberta (a que recebe uma compra de hoje), na
+     * categoria "Tarifas e IOF" do usuário, criada se ele ainda não tiver.
+     */
+    InvoiceItemResponse reconcileWithBank(UUID cardId, CardReconcileRequest request, UUID userId);
 
     List<SpendingByCategoryResponse> getSpendingByCategory(UUID cardId, LocalDate from, LocalDate to, UUID userId);
 
