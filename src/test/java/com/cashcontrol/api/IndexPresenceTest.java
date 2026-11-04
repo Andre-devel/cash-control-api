@@ -44,6 +44,12 @@ class IndexPresenceTest {
         assertIndexExists("login_attempts", "idx_login_attempts_ip_time");
     }
 
+    @Test
+    void transactions_searchTrigramIndexes_exist() {
+        assertIndexExists("transactions", "idx_transactions_description_trgm");
+        assertIndexExists("transactions", "idx_transactions_counterparty_name_trgm");
+    }
+
     // ── helper ────────────────────────────────────────────────────────────────
 
     private void assertIndexExists(String tableName, String indexName) {
