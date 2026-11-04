@@ -291,7 +291,7 @@ public class StatementImportServiceImpl implements StatementImportService {
                                           MerchantAliasService.Aliases aliases, Account investmentAccount,
                                           InvoicePaymentMatcher invoices) {
         StatementHistoryMapper.Mapping mapping = historyMapper.map(row.rawHistory(), row.signedAmount());
-        CategorySuggester.Suggestion suggestion = categorySuggester.suggest(row.description(), rules, history);
+        CategorySuggester.Suggestion suggestion = categorySuggester.suggest(row.description(), row.counterpartyName(), rules, history);
         String alias = merchantAliasService.suggest(row.description(), aliases);
         BigDecimal amount = row.signedAmount().abs();
 
@@ -352,7 +352,9 @@ public class StatementImportServiceImpl implements StatementImportService {
                 invoiceOptions,
                 mapping.investment(),
                 invoicePaymentUnmatched,
-                possibleDuplicate);
+                possibleDuplicate,
+                row.counterpartyName(),
+                row.counterpartyDocument());
     }
 
     private static ImportInvoiceOption toInvoiceOption(Invoice invoice) {
@@ -448,6 +450,8 @@ public class StatementImportServiceImpl implements StatementImportService {
         tx.setPaymentDate(row.date());
         tx.setPaymentMethod(paymentMethod);
         tx.setExternalRef(row.externalRef());
+        tx.setCounterpartyName(row.counterpartyName());
+        tx.setCounterpartyDocument(row.counterpartyDocument());
 
         if (row.categoryId() != null) {
             Category category = categories.get(row.categoryId());

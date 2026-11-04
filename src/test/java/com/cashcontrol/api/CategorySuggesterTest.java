@@ -56,6 +56,20 @@ class CategorySuggesterTest {
     }
 
     @Test
+    void suggest_matchesTheRuleAgainstTheCounterpartyName() {
+        Category rent = category("Moradia");
+        List<CategoryRule> rules = List.of(rule("fulano", rent));
+        CategorySuggester.History empty = new CategorySuggester.History(Map.of(), Map.of());
+
+        CategorySuggester.Suggestion withCounterparty = suggester.suggest("Pix enviado", "Fulano de Tal", rules, empty);
+        CategorySuggester.Suggestion without = suggester.suggest("Pix enviado", null, rules, empty);
+
+        assertThat(withCounterparty.source()).isEqualTo(SuggestionSource.RULE);
+        assertThat(withCounterparty.categoryId()).isEqualTo(rent.getId());
+        assertThat(without.source()).isEqualTo(SuggestionSource.NONE);
+    }
+
+    @Test
     void suggest_fallsBackToTheHistoryWhenNoRuleMatches() {
         Category market = category("Mercado");
         Category marketSub = category("Hortifruti");

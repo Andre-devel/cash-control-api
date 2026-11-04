@@ -244,7 +244,8 @@ public class BankPendingService {
                 row.description(), row.amount(), row.type(), row.paymentMethod(),
                 movement ? null : row.suggestedCategoryId(), row.outgoing(),
                 row.type() == TransactionType.TRANSFER ? row.transferAccountId() : null,
-                row.type() == TransactionType.INVOICE_PAYMENT ? row.invoiceId() : null);
+                row.type() == TransactionType.INVOICE_PAYMENT ? row.invoiceId() : null,
+                row.counterpartyName(), row.counterpartyDocument());
     }
 
     private static ImportCommitRow editedRow(ImportPreviewRow row, ImportCommitRow edits) {
@@ -253,7 +254,8 @@ public class BankPendingService {
                 row.description(), row.amount(), edits.type(), edits.paymentMethod(),
                 movement ? null : edits.categoryId(), row.outgoing(),
                 edits.type() == TransactionType.TRANSFER ? edits.transferAccountId() : null,
-                edits.type() == TransactionType.INVOICE_PAYMENT ? edits.invoiceId() : null);
+                edits.type() == TransactionType.INVOICE_PAYMENT ? edits.invoiceId() : null,
+                row.counterpartyName(), row.counterpartyDocument());
     }
 
     // ── Classificação ────────────────────────────────────────────────────────
@@ -271,7 +273,8 @@ public class BankPendingService {
             List<ParsedStatementRow> rows = new ArrayList<>();
             for (BankPendingTransaction pending : group) {
                 rows.add(new ParsedStatementRow(rows.size() + 1, pending.getDate(), pending.getHistory(),
-                        pending.getDescription(), pending.getAmount()));
+                        pending.getDescription(), pending.getAmount(), pending.getCounterpartyName(),
+                        pending.getCounterpartyDocument()));
             }
             ParsedStatement statement = new ParsedStatement(account.getName(), null, null, rows, List.of());
             List<ImportPreviewRow> preview = statementImportService.previewRows(accountId, statement,
@@ -293,19 +296,27 @@ public class BankPendingService {
         pending.setHistory(truncate(row.rawHistory()));
         pending.setDescription(truncate(row.description()));
         pending.setAmount(row.signedAmount());
+        pending.setCounterpartyName(row.counterpartyName());
+        pending.setCounterpartyDocument(row.counterpartyDocument());
         return pending;
     }
 
     // ── Notificação ──────────────────────────────────────────────────────────
 
-    /** "Pix enviado · −R$ 615,23" / "Pix Marketplace → Alimentação?" */
+    /**
+     * "Pix enviado · −R$ 615,23" / "Para Fulano → Alimentação?" (ou "De Fulano" na entrada). Sem
+     * contraparte, o nome do lançamento: "Pix Marketplace → Alimentação?".
+     */
     private static String singlePayload(BankPendingItem item, String token, PushSubscription subscription) {
         ImportPreviewRow row = item.row();
         String title = row.rawHistory().isBlank() ? item.accountName() : row.rawHistory();
         if (!subscription.isHideAmounts()) {
             title += " · " + signedMoney(row);
         }
-        String body = nameOf(row) + (row.suggestedCategoryName() != null ? " → " + row.suggestedCategoryName() + "?" : "");
+        String who = row.counterpartyName() != null
+                ? (row.outgoing() ? "Para " : "De ") + row.counterpartyName()
+                : nameOf(row);
+        String body = who + (row.suggestedCategoryName() != null ? " → " + row.suggestedCategoryName() + "?" : "");
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("type", "pending");
         payload.put("pendingId", item.id().toString());

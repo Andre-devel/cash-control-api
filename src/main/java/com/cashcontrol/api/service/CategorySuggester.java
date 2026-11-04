@@ -107,7 +107,15 @@ public class CategorySuggester {
      * token mais específico (mais longo) em comum com alguma chave já vista.
      */
     public Suggestion suggest(String description, List<CategoryRule> rules, History history) {
-        Optional<CategoryRule> rule = categoryRuleMatcher.match(rules, description);
+        return suggest(description, null, rules, history);
+    }
+
+    /**
+     * Como {@link #suggest(String, List, History)}, com a regra casando também pelo nome da
+     * contraparte. O histórico continua só pela descrição.
+     */
+    public Suggestion suggest(String description, String counterpartyName, List<CategoryRule> rules, History history) {
+        Optional<CategoryRule> rule = categoryRuleMatcher.match(rules, description, counterpartyName);
         if (rule.isPresent()) {
             CategoryRule matched = rule.get();
             return new Suggestion(

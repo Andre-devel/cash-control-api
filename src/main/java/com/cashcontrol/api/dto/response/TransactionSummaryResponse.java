@@ -30,7 +30,9 @@ public record TransactionSummaryResponse(
         @Schema(description = "Sum of the non-cancelled installments of the series. Only filled on grouped rows.", example = "1000.00") BigDecimal installmentTotalAmount,
         @Schema(description = "How many installments of the series are already PAID. Only filled on grouped rows.", example = "1") Integer paidInstallments,
         @Schema(description = "True when this row stands for the whole series (groupInstallments=true) instead of a single installment.") boolean installmentGroup,
-        @Schema(description = "Reimbursement link. Null when the transaction is not part of one.") ReimbursementResponse reimbursement
+        @Schema(description = "Reimbursement link. Null when the transaction is not part of one.") ReimbursementResponse reimbursement,
+        @Schema(description = "Who received (outflow) or paid (inflow), as reported by the bank. Null when not imported from the bank.", example = "Fulano de Tal") String counterpartyName,
+        @Schema(description = "Counterparty CPF/CNPJ, masked as the bank sent it.", example = "***.123.456-**") String counterpartyDocument
 ) {
 
     /** Non-installment row, or an installment listed individually (groupInstallments=false). */
@@ -38,11 +40,13 @@ public record TransactionSummaryResponse(
             UUID id, UUID accountId, String accountName, TransactionType type, TransactionStatus status,
             BigDecimal amount, String description, LocalDate competenceDate, LocalDate paymentDate,
             UUID categoryId, String categoryName, Instant createdAt, PaymentMethodResponse paymentMethod,
-            UUID installmentSeriesId, Integer installmentNumber, Integer totalInstallments) {
+            UUID installmentSeriesId, Integer installmentNumber, Integer totalInstallments,
+            String counterpartyName, String counterpartyDocument) {
         return new TransactionSummaryResponse(
                 id, accountId, accountName, type, status, amount, description,
                 competenceDate, paymentDate, categoryId, categoryName, createdAt, paymentMethod,
-                installmentSeriesId, installmentNumber, totalInstallments, null, null, false, null);
+                installmentSeriesId, installmentNumber, totalInstallments, null, null, false, null,
+                counterpartyName, counterpartyDocument);
     }
 
     public TransactionSummaryResponse withReimbursement(ReimbursementResponse value) {
@@ -50,6 +54,6 @@ public record TransactionSummaryResponse(
                 id, accountId, accountName, type, status, amount, description,
                 competenceDate, paymentDate, categoryId, categoryName, createdAt, paymentMethod,
                 installmentSeriesId, installmentNumber, totalInstallments, installmentTotalAmount,
-                paidInstallments, installmentGroup, value);
+                paidInstallments, installmentGroup, value, counterpartyName, counterpartyDocument);
     }
 }

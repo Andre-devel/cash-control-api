@@ -13,11 +13,23 @@ import java.time.LocalDate;
  * @param rawHistory   coluna "Histórico" como veio do banco
  * @param description  coluna "Descrição" como veio do banco
  * @param signedAmount valor com sinal — negativo é saída da conta
+ * @param counterpartyName     quem recebeu (saída) ou pagou (entrada), quando o banco informa;
+ *                             {@code null} no import de arquivo
+ * @param counterpartyDocument CPF/CNPJ da contraparte, mascarado como o banco mandou
  */
 public record ParsedStatementRow(
         int lineNumber,
         LocalDate date,
         String rawHistory,
         String description,
-        BigDecimal signedAmount
-) {}
+        BigDecimal signedAmount,
+        String counterpartyName,
+        String counterpartyDocument
+) {
+
+    /** Linha de arquivo: o extrato não traz contraparte. */
+    public ParsedStatementRow(int lineNumber, LocalDate date, String rawHistory, String description,
+                              BigDecimal signedAmount) {
+        this(lineNumber, date, rawHistory, description, signedAmount, null, null);
+    }
+}

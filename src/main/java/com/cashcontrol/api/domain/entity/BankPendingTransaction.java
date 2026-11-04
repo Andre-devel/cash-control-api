@@ -63,6 +63,13 @@ public class BankPendingTransaction {
     @Column(name = "amount", nullable = false, updatable = false, precision = 19, scale = 2)
     private BigDecimal amount;
 
+    /** Quem recebeu (saída) ou quem pagou (entrada), como a Pluggy informou. */
+    @Column(name = "counterparty_name", updatable = false, length = 255)
+    private String counterpartyName;
+
+    @Column(name = "counterparty_document", updatable = false, length = 20)
+    private String counterpartyDocument;
+
     @Column(name = "action_token_hash", length = 64)
     private String actionTokenHash;
 

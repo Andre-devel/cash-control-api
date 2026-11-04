@@ -44,6 +44,8 @@ public class PluggyStatementSource {
     /** O Inter data os lançamentos no horário de Brasília; a Pluggy devolve em UTC. */
     private static final ZoneId BANK_ZONE = ZoneId.of("America/Sao_Paulo");
     private static final String HISTORY_SEPARATOR = " - ";
+    private static final int COUNTERPARTY_NAME_MAX = 255;
+    private static final int COUNTERPARTY_DOCUMENT_MAX = 20;
 
     private final PluggyClient pluggyClient;
     private final AppProperties appProperties;
@@ -105,7 +107,9 @@ public class PluggyStatementSource {
         }
         BigDecimal absolute = tx.amount().abs();
         BigDecimal signed = "DEBIT".equals(tx.type()) ? absolute.negate() : absolute;
-        return new ParsedStatementRow(lineNumber, dateOf(tx), history, description, signed);
+        PluggyClient.Counterparty counterparty = PluggyTransaction.counterparty(tx);
+        return new ParsedStatementRow(lineNumber, dateOf(tx), history, description, signed,
+                fit(counterparty.name(), COUNTERPARTY_NAME_MAX), fitDocument(counterparty.document()));
     }
 
     private static LocalDate dateOf(PluggyTransaction tx) {
@@ -114,6 +118,16 @@ public class PluggyStatementSource {
 
     private static String refOf(PluggyTransaction tx) {
         return REF_PREFIX + tx.id();
+    }
+
+    /** Cabe em {@code counterparty_name}; um nome maior perde só o fim. */
+    private static String fit(String value, int max) {
+        return value == null || value.length() <= max ? value : value.substring(0, max);
+    }
+
+    /** Documento cortado não identifica ninguém: maior que a coluna, fica de fora. */
+    private static String fitDocument(String value) {
+        return value == null || value.length() > COUNTERPARTY_DOCUMENT_MAX ? null : value;
     }
 
     private static String collapse(String value) {

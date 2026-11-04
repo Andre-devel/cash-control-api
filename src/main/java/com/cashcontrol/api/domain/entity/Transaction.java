@@ -123,6 +123,17 @@ public class Transaction {
     private String externalRef;
 
     /**
+     * Quem está do outro lado do lançamento, como o banco informou (V47): quem recebeu numa
+     * saída, quem pagou numa entrada. NULL no que não veio do banco.
+     */
+    @Column(name = "counterparty_name", length = 255)
+    private String counterpartyName;
+
+    /** CPF/CNPJ da contraparte, mascarado como o banco mandou. */
+    @Column(name = "counterparty_document", length = 20)
+    private String counterpartyDocument;
+
+    /**
      * Identidade do estabelecimento, derivada da descrição em todo insert/update
      * por {@link #deriveMerchantKey()} — nunca setada por um call site. É sobre
      * ela que a sugestão de categoria por histórico agrupa lançamentos do mesmo

@@ -58,5 +58,22 @@ public record ImportCommitRow(
         UUID transferAccountId,
 
         @Schema(description = "Obrigatório em INVOICE_PAYMENT: a fatura quitada, como veio na prévia")
-        UUID invoiceId
-) {}
+        UUID invoiceId,
+
+        @Schema(description = "Contraparte como veio na prévia. Opcional; nula no import de arquivo.",
+                example = "Fulano de Tal")
+        @Size(max = 255) String counterpartyName,
+
+        @Schema(description = "Documento da contraparte como veio na prévia. Opcional.", example = "***.123.456-**")
+        @Size(max = 20) String counterpartyDocument
+) {
+
+    /** Linha sem contraparte (import de arquivo e clientes anteriores à V47). */
+    public ImportCommitRow(int lineNumber, String externalRef, LocalDate date, String description,
+                           String originalDescription, BigDecimal amount, TransactionType type,
+                           PaymentMethodSlug paymentMethod, UUID categoryId, Boolean outgoing,
+                           UUID transferAccountId, UUID invoiceId) {
+        this(lineNumber, externalRef, date, description, originalDescription, amount, type, paymentMethod,
+                categoryId, outgoing, transferAccountId, invoiceId, null, null);
+    }
+}

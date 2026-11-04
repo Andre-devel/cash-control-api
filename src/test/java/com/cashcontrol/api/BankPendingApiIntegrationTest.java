@@ -15,6 +15,9 @@ import com.cashcontrol.api.service.openfinance.BankConnectionService;
 import com.cashcontrol.api.service.openfinance.PluggyClient;
 import com.cashcontrol.api.service.openfinance.PluggyClient.PluggyAccount;
 import com.cashcontrol.api.service.openfinance.PluggyClient.PluggyItem;
+import com.cashcontrol.api.service.openfinance.PluggyClient.DocumentNumber;
+import com.cashcontrol.api.service.openfinance.PluggyClient.Party;
+import com.cashcontrol.api.service.openfinance.PluggyClient.PaymentData;
 import com.cashcontrol.api.service.openfinance.PluggyClient.PluggyTransaction;
 import com.cashcontrol.api.service.push.WebPushSender;
 import org.junit.jupiter.api.BeforeEach;
@@ -134,6 +137,71 @@ class BankPendingApiIntegrationTest {
         assertThat(queue.get(0).get("row").get("externalRef").asText()).isEqualTo("plg:t1");
         assertThat(queue.get(0).get("row").get("type").asText()).isEqualTo("EXPENSE");
         perform(get("/api/v1/bank-pending/count"), token).andExpect(jsonPath("$.count").value(2));
+    }
+
+    @Test
+    void bankPreview_bringsTheCounterparty_theImportSavesIt_andTheSearchFindsIt() throws Exception {
+        pixTransaction("p1", "Pix enviado - Transferencia", "-615.23", "Fulano de Tal", "***.123.456-**");
+
+        JsonNode row = json(perform(post("/api/v1/transactions/import/bank-preview").param("accountId", accountId.toString()), token)
+                .andExpect(status().isOk())).get("rows").get(0);
+        assertThat(row.get("counterpartyName").asText()).isEqualTo("Fulano de Tal");
+        assertThat(row.get("counterpartyDocument").asText()).isEqualTo("***.123.456-**");
+
+        perform(post("/api/v1/transactions/import").content("""
+                {"accountId":"%s","format":"OPEN_FINANCE","rows":[{"lineNumber":1,"externalRef":"plg:p1",
+                 "date":"2026-10-30","description":"Transferencia","amount":615.23,"type":"EXPENSE","paymentMethod":"PIX",
+                 "counterpartyName":"Fulano de Tal","counterpartyDocument":"***.123.456-**"}]}"""
+                .formatted(accountId)), token).andExpect(status().isCreated());
+        assertThat(jdbcTemplate.queryForObject("SELECT counterparty_name || '|' || counterparty_document FROM transactions "
+                + "WHERE user_id = ? AND external_ref = 'plg:p1'", String.class, userId))
+                .isEqualTo("Fulano de Tal|***.123.456-**");
+
+        JsonNode found = json(perform(get("/api/v1/transactions").param("searchText", "fulano"), token)
+                .andExpect(status().isOk())).get("content");
+        assertThat(found).hasSize(1);
+        assertThat(found.get(0).get("counterpartyName").asText()).isEqualTo("Fulano de Tal");
+        assertThat(found.get(0).get("counterpartyDocument").asText()).isEqualTo("***.123.456-**");
+        perform(get("/api/v1/transactions/" + found.get(0).get("id").asText()), token)
+                .andExpect(jsonPath("$.counterpartyName").value("Fulano de Tal"));
+        assertThat(json(perform(get("/api/v1/transactions").param("searchText", "beltrano"), token)).get("content")).isEmpty();
+    }
+
+    @Test
+    void pendingPush_namesTheCounterparty_aRuleOnItClassifies_andConfirmSavesIt() throws Exception {
+        UUID housing = jdbcTemplate.queryForObject(
+                "INSERT INTO categories (user_id, name) VALUES (?, 'Moradia') RETURNING id", UUID.class, userId);
+        jdbcTemplate.update("INSERT INTO category_rules (user_id, pattern, category_id) VALUES (?, 'fulano', ?)", userId, housing);
+        pixTransaction("p1", "Pix enviado - Transferencia", "-615.23", "Fulano de Tal", "***.123.456-**");
+        pixTransaction("p2", "Pix recebido - Transferencia", "80", "Ciclano Souza", null);
+
+        transactionsCreated();
+        eventually(() -> sentPayloads().size() == 2);
+        List<String> payloads = sentPayloads();
+        assertThat(payloads.get(0)).contains("Para Fulano de Tal → Moradia?");
+        assertThat(payloads.get(1)).contains("De Ciclano Souza").doesNotContain("Para ");
+
+        JsonNode queue = json(perform(get("/api/v1/bank-pending"), token));
+        assertThat(queue.get(0).get("row").get("counterpartyName").asText()).isEqualTo("Fulano de Tal");
+        assertThat(queue.get(0).get("row").get("suggestionSource").asText()).isEqualTo("RULE");
+        assertThat(queue.get(0).get("row").get("suggestedCategoryId").asText()).isEqualTo(housing.toString());
+
+        JsonNode first = JSON.readTree(payloads.get(0));
+        mockMvc.perform(post("/api/v1/bank-pending/" + first.get("pendingId").asText() + "/confirm-by-token")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"token\":\"" + first.get("token").asText() + "\"}"))
+                .andExpect(status().isOk());
+        assertThat(jdbcTemplate.queryForObject("SELECT counterparty_name || '|' || counterparty_document || '|' || category_id "
+                + "FROM transactions WHERE user_id = ? AND external_ref = 'plg:p1'", String.class, userId))
+                .isEqualTo("Fulano de Tal|***.123.456-**|" + housing);
+    }
+
+    @Test
+    void pendingPush_withoutCounterparty_keepsTheDescription() throws Exception {
+        bankTransaction("t1", "Pix enviado - Padaria", "-10", "DEBIT", EVENT_FROM.plusSeconds(60));
+        transactionsCreated();
+        eventually(() -> sentPayloads().size() == 1);
+
+        assertThat(JSON.readTree(sentPayloads().getFirst()).get("body").asText()).isEqualTo("Padaria");
     }
 
     @Test
@@ -324,6 +392,18 @@ class BankPendingApiIntegrationTest {
     private void bankTransaction(String id, String description, String amount, String type, Instant createdAt) {
         bankTransactions.add(new PluggyTransaction(id, description, new BigDecimal(amount), type, "POSTED",
                 Instant.parse("2026-10-30T12:00:00Z"), null, createdAt));
+    }
+
+    /** Pix de conta corrente como a Pluggy devolve: o titular sem nome, a contraparte com nome e CPF mascarado. */
+    private void pixTransaction(String id, String description, String amount, String name, String document) {
+        BigDecimal value = new BigDecimal(amount);
+        Party holder = new Party(null, new DocumentNumber("CPF", "***.111.222-**"), "1234567", "0001", "077", "00416968");
+        Party other = new Party(name, document == null ? null : new DocumentNumber("CPF", document), "999", "0001", "260", null);
+        PaymentData paymentData = value.signum() < 0
+                ? new PaymentData(holder, other, "PIX", null, "E" + id)
+                : new PaymentData(other, holder, "PIX", null, "E" + id);
+        bankTransactions.add(new PluggyTransaction(id, description, value, value.signum() < 0 ? "DEBIT" : "CREDIT", "POSTED",
+                Instant.parse("2026-10-30T12:00:00Z"), null, EVENT_FROM.plusSeconds(60), paymentData, null));
     }
 
     private void transactionsCreated() throws Exception {

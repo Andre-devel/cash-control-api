@@ -17,18 +17,36 @@ import java.util.Optional;
 @Component
 public class CategoryRuleMatcher {
 
-    /**
-     * Primeira regra cujo padrão aparece na descrição, ignorando maiúsculas.
-     *
-     * @param rules regras ativas do usuário, já ordenadas por prioridade
-     */
+    /** {@link #match(List, String, String)} sem contraparte. */
     public Optional<CategoryRule> match(List<CategoryRule> rules, String description) {
-        if (description == null || rules.isEmpty()) {
+        return match(rules, description, null);
+    }
+
+    /**
+     * Primeira regra cujo padrão aparece na descrição ou no nome da contraparte, ignorando
+     * maiúsculas. O extrato do Pix costuma trazer só "Pix enviado" na descrição; quem recebeu
+     * vem na contraparte, e é por ela que uma regra "Fulano" acha o lançamento.
+     *
+     * @param rules            regras ativas do usuário, já ordenadas por prioridade
+     * @param counterpartyName quem está do outro lado, quando o banco informa; pode ser {@code null}
+     */
+    public Optional<CategoryRule> match(List<CategoryRule> rules, String description, String counterpartyName) {
+        String text = matchText(description, counterpartyName);
+        if (text == null || rules.isEmpty()) {
             return Optional.empty();
         }
-        String lowerDescription = description.toLowerCase();
+        String lowerText = text.toLowerCase();
         return rules.stream()
-                .filter(rule -> lowerDescription.contains(rule.getPattern().toLowerCase()))
+                .filter(rule -> lowerText.contains(rule.getPattern().toLowerCase()))
                 .findFirst();
+    }
+
+    /** {@code description + " " + counterpartyName}, só com as partes que existem. */
+    static String matchText(String description, String counterpartyName) {
+        boolean hasCounterparty = counterpartyName != null && !counterpartyName.isBlank();
+        if (description == null) {
+            return hasCounterparty ? counterpartyName : null;
+        }
+        return hasCounterparty ? description + " " + counterpartyName : description;
     }
 }

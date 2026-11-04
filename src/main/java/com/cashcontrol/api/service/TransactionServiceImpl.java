@@ -592,7 +592,7 @@ public class TransactionServiceImpl implements TransactionService {
 
     private void applyCategoryRule(Transaction tx, UUID userId, String description) {
         List<CategoryRule> rules = categoryRuleRepository.findAllByUserIdAndIsActiveTrueOrderByPriorityAsc(userId);
-        categoryRuleMatcher.match(rules, description).ifPresent(rule -> {
+        categoryRuleMatcher.match(rules, description, tx.getCounterpartyName()).ifPresent(rule -> {
             tx.setCategory(rule.getCategory());
             if (rule.getSubcategory() != null) {
                 tx.setSubcategory(rule.getSubcategory());
@@ -628,7 +628,9 @@ public class TransactionServiceImpl implements TransactionService {
                 summaryPaymentMethod(tx),
                 tx.getInstallmentSeries() != null ? tx.getInstallmentSeries().getId() : null,
                 tx.getInstallmentNumber(),
-                tx.getTotalInstallments()
+                tx.getTotalInstallments(),
+                tx.getCounterpartyName(),
+                tx.getCounterpartyDocument()
         );
     }
 
@@ -669,7 +671,9 @@ public class TransactionServiceImpl implements TransactionService {
                 agg.totalAmount(),
                 agg.paidCount(),
                 true,
-                null
+                null,
+                tx.getCounterpartyName(),
+                tx.getCounterpartyDocument()
         );
     }
 
@@ -746,7 +750,9 @@ public class TransactionServiceImpl implements TransactionService {
                 pmResponse,
                 cardResponse,
                 tx.getPaidInvoice() != null ? tx.getPaidInvoice().getId() : null,
-                reimbursementOf(tx)
+                reimbursementOf(tx),
+                tx.getCounterpartyName(),
+                tx.getCounterpartyDocument()
         );
     }
 

@@ -278,17 +278,75 @@ public class PluggyClient {
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record PluggyTransaction(String id, String description, BigDecimal amount, String type, String status,
-                                    Instant date, CreditCardMetadata creditCardMetadata, Instant createdAt) {
+                                    Instant date, CreditCardMetadata creditCardMetadata, Instant createdAt,
+                                    PaymentData paymentData, Merchant merchant) {
 
         public PluggyTransaction(String id, String description, BigDecimal amount, String type, String status,
                                  Instant date) {
-            this(id, description, amount, type, status, date, null, null);
+            this(id, description, amount, type, status, date, null, null, null, null);
         }
 
         public PluggyTransaction(String id, String description, BigDecimal amount, String type, String status,
                                  Instant date, CreditCardMetadata creditCardMetadata) {
-            this(id, description, amount, type, status, date, creditCardMetadata, null);
+            this(id, description, amount, type, status, date, creditCardMetadata, null, null, null);
         }
+
+        public PluggyTransaction(String id, String description, BigDecimal amount, String type, String status,
+                                 Instant date, CreditCardMetadata creditCardMetadata, Instant createdAt) {
+            this(id, description, amount, type, status, date, creditCardMetadata, createdAt, null, null);
+        }
+
+        /**
+         * Quem está do outro lado: em débito ({@code amount < 0}) quem recebeu, em crédito quem
+         * pagou. Sem nome na contraparte, o nome do estabelecimento. O documento vai como a Pluggy
+         * mandou (já mascarado). {@link Counterparty#NONE} quando não há nada.
+         */
+        public static Counterparty counterparty(PluggyTransaction tx) {
+            Party party = null;
+            if (tx.paymentData() != null && tx.amount() != null) {
+                party = tx.amount().signum() < 0 ? tx.paymentData().receiver() : tx.paymentData().payer();
+            }
+            String name = party != null ? blankToNull(party.name()) : null;
+            if (name == null && tx.merchant() != null) {
+                name = blankToNull(tx.merchant().businessName());
+            }
+            String document = party != null && party.documentNumber() != null
+                    ? blankToNull(party.documentNumber().value())
+                    : null;
+            return name == null && document == null ? Counterparty.NONE : new Counterparty(name, document);
+        }
+
+        private static String blankToNull(String value) {
+            return value == null || value.isBlank() ? null : value.trim();
+        }
+    }
+
+    /** Contraparte já resolvida por {@link PluggyTransaction#counterparty}. Campos podem ser nulos. */
+    public record Counterparty(String name, String document) {
+
+        public static final Counterparty NONE = new Counterparty(null, null);
+    }
+
+    /**
+     * Dados do pagamento (Pix, TED, boleto). Do lado do titular o {@code name} costuma vir nulo.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record PaymentData(Party payer, Party receiver, String paymentMethod, String reason,
+                              String referenceNumber) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Party(String name, DocumentNumber documentNumber, String accountNumber, String branchNumber,
+                        String routingNumber, String routingNumberISPB) {
+    }
+
+    /** {@code type}: CPF ou CNPJ. {@code value}: mascarado pela Pluggy. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record DocumentNumber(String type, String value) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Merchant(String businessName, String cnpj, String cnae, String category) {
     }
 
     /**

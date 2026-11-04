@@ -111,5 +111,13 @@ public record ImportPreviewRow(
                 true quando a conta já tem um lançamento de mesma data e valor vindo de outra \
                 origem (arquivo, banco ou digitado à mão). Pode ser o mesmo fato: a prévia deixa a \
                 linha desmarcada.""")
-        boolean possibleDuplicate
+        boolean possibleDuplicate,
+        @Schema(description = """
+                Quem recebeu (saída) ou quem pagou (entrada), como o banco informou. Só nas linhas \
+                vindas do banco; null no import de arquivo. Devolver na confirmação.""",
+                example = "Fulano de Tal")
+        String counterpartyName,
+        @Schema(description = "CPF/CNPJ da contraparte, mascarado como o banco mandou. Devolver na confirmação.",
+                example = "***.123.456-**")
+        String counterpartyDocument
 ) {}
