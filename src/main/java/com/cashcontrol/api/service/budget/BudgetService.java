@@ -27,6 +27,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -128,13 +129,25 @@ public class BudgetService {
             range.add(until.minusMonths(i));
         }
 
+        // Uma consulta de tetos e uma de gasto para o intervalo inteiro, separadas por mês aqui.
+        YearMonth first = range.getFirst();
+        List<CategoryBudget> allBudgets = budgetRepository.findApplicableBetween(userId, first.atDay(1), until.atDay(1));
+        Map<YearMonth, List<Object[]>> rowsByMonth = new HashMap<>();
+        for (Object[] row : transactionRepository.sumBudgetSpendingByMonth(userId, first.atDay(1), until.atEndOfMonth(), scope)) {
+            YearMonth month = YearMonth.of(((Number) row[0]).intValue(), ((Number) row[1]).intValue());
+            rowsByMonth.computeIfAbsent(month, k -> new ArrayList<>()).add(Arrays.copyOfRange(row, 2, row.length));
+        }
+
         Map<YearMonth, Map<UUID, CategoryBudget>> budgetsByMonth = new HashMap<>();
         Map<YearMonth, Map<UUID, BigDecimal>> spentByMonth = new HashMap<>();
         Set<UUID> budgeted = new LinkedHashSet<>();
         for (YearMonth month : range) {
-            Map<UUID, CategoryBudget> budgets = applicableBudgets(userId, month);
+            LocalDate monthStart = month.atDay(1);
+            Map<UUID, CategoryBudget> budgets = applicableBudgets(allBudgets.stream()
+                    .filter(budget -> budget.getMonth() == null || budget.getMonth().equals(monthStart))
+                    .toList());
             budgetsByMonth.put(month, budgets);
-            spentByMonth.put(month, spending(userId, month, categories, scope).spent());
+            spentByMonth.put(month, spending(rowsByMonth.getOrDefault(month, List.of()), categories).spent());
             budgeted.addAll(budgets.keySet());
         }
 
@@ -190,10 +203,16 @@ public class BudgetService {
     private record Spending(Map<UUID, BigDecimal> spent, Map<UUID, BigDecimal> forecast, BigDecimal uncategorized) {}
 
     private Spending spending(UUID userId, YearMonth month, Map<UUID, Category> categories, AccountScope scope) {
+        return spending(transactionRepository.sumBudgetSpending(userId, month.atDay(1), month.atEndOfMonth(), scope),
+                categories);
+    }
+
+    /** Agrega as linhas de {@link TransactionRepository#sumBudgetSpending}. */
+    private static Spending spending(List<Object[]> rows, Map<UUID, Category> categories) {
         Map<UUID, BigDecimal> spent = new HashMap<>();
         Map<UUID, BigDecimal> forecast = new HashMap<>();
         BigDecimal uncategorized = BigDecimal.ZERO;
-        for (Object[] row : transactionRepository.sumBudgetSpending(userId, month.atDay(1), month.atEndOfMonth(), scope)) {
+        for (Object[] row : rows) {
             UUID categoryId = (UUID) row[0];
             UUID subcategoryId = (UUID) row[1];
             TransactionType type = (TransactionType) row[2];
@@ -226,8 +245,13 @@ public class BudgetService {
 
     /** Um teto por categoria: o ajuste do mês, se houver, senão o padrão. */
     private Map<UUID, CategoryBudget> applicableBudgets(UUID userId, YearMonth month) {
+        return applicableBudgets(budgetRepository.findApplicable(userId, month.atDay(1)));
+    }
+
+    /** Um teto por categoria entre os padrões e os ajustes de um único mês. */
+    private static Map<UUID, CategoryBudget> applicableBudgets(List<CategoryBudget> budgets) {
         Map<UUID, CategoryBudget> byCategory = new HashMap<>();
-        for (CategoryBudget budget : budgetRepository.findApplicable(userId, month.atDay(1))) {
+        for (CategoryBudget budget : budgets) {
             byCategory.merge(budget.getCategoryId(), budget, (a, b) -> a.getMonth() != null ? a : b);
         }
         return byCategory;

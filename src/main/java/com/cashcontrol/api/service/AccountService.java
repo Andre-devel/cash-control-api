@@ -13,6 +13,7 @@ import com.cashcontrol.api.dto.response.AccountResponse;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public interface AccountService {
@@ -46,6 +47,9 @@ public interface AccountService {
                                LocalDate date, String description);
 
     void deleteTransfer(UUID transferGroupId, UUID userId);
+
+    /** Saldo de cada conta não apagada do usuário (arquivadas incluídas), em duas consultas. */
+    Map<UUID, BigDecimal> balancesByAccount(UUID userId);
 
     /**
      * Leva o saldo da conta a {@code target} com um único ajuste, sempre o mesmo lançamento

@@ -10,6 +10,7 @@ import com.cashcontrol.api.domain.entity.AccountType;
 import com.cashcontrol.api.domain.entity.CardBrand;
 import com.cashcontrol.api.dto.request.CreateAccountRequest;
 import com.cashcontrol.api.dto.request.CreateCardRequest;
+import com.cashcontrol.api.dto.request.ManualAdjustmentRequest;
 import com.cashcontrol.api.security.JwtService;
 import com.cashcontrol.api.service.AccountService;
 import com.cashcontrol.api.service.CreditCardService;
@@ -38,6 +39,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.math.BigDecimal;
 import java.sql.Timestamp;
+import java.time.LocalDate;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -151,6 +153,30 @@ class BankReconciliationIntegrationTest {
     }
 
     @Test
+    void reconcile_comparesWithTheAppBalanceOnTheDayTheBankWasRead_notWithEntriesMadeAfter() throws Exception {
+        UUID accountId = linkedAccount(new BigDecimal("1321.64"));
+        LocalDate today = LocalDate.now(java.time.ZoneId.of("America/Sao_Paulo"));
+        jdbcTemplate.update("UPDATE transactions SET competence_date = ?, payment_date = ? WHERE account_id = ?",
+                today.minusDays(2), today.minusDays(2), accountId);
+        jdbcTemplate.update("UPDATE bank_connection_accounts SET bank_balance_at = ? WHERE external_account_id = ?",
+                Timestamp.from(Instant.now().minus(1, ChronoUnit.DAYS)), bankExternalId);
+        // Despesa lançada hoje, depois da leitura do banco: o banco ainda não a conhece.
+        accountService.manualAdjustment(accountId, new ManualAdjustmentRequest(new BigDecimal("-200.00"), "Mercado", today), userId);
+
+        JsonNode before = perform(get("/api/v1/accounts/" + accountId + "/reconciliation"), token)
+                .andExpect(status().isOk()).andReturnJson();
+        assertThat(decimal(before, "difference")).isEqualByComparingTo("-19.25");
+
+        JsonNode after = perform(post("/api/v1/accounts/" + accountId + "/reconcile"), token)
+                .andExpect(status().isOk()).andReturnJson();
+        assertThat(adjustmentAmount(syncAdjustmentId(accountId))).isEqualByComparingTo("-19.25");
+        assertThat(jdbcTemplate.queryForObject("SELECT payment_date FROM transactions WHERE id = ?", LocalDate.class,
+                syncAdjustmentId(accountId))).isEqualTo(today.minusDays(1));
+        assertThat(decimal(after, "appBalance")).isEqualByComparingTo("1102.39");
+        assertThat(decimal(after, "difference")).isEqualByComparingTo("0");
+    }
+
+    @Test
     void unlinkedAccount_hasNoBankBalance_andCannotBeReconciled() throws Exception {
         UUID accountId = accountService.createAccount(new CreateAccountRequest("Carteira", AccountType.CHECKING, "BRL",
                 null, 0, new BigDecimal("50.00")), userId).id();
@@ -217,6 +243,24 @@ class BankReconciliationIntegrationTest {
         perform(post("/api/v1/cards/" + cardId + "/reconcile").content("{\"amount\":10.00}"), token)
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.categoryId").value(existing.toString()));
+    }
+
+    @Test
+    void card_reconcile_skipsTheSystemFeesCategoryTheUserHid() throws Exception {
+        UUID cardId = linkedCard();
+        UUID system = jdbcTemplate.queryForList(
+                "SELECT id FROM categories WHERE user_id IS NULL AND parent_id IS NULL AND LOWER(name) = 'tarifas e iof'",
+                UUID.class).stream().findFirst().orElseGet(() -> jdbcTemplate.queryForObject(
+                "INSERT INTO categories (name) VALUES ('Tarifas e IOF') RETURNING id", UUID.class));
+        jdbcTemplate.update("INSERT INTO hidden_system_categories (user_id, category_id) VALUES (?, ?)", userId, system);
+
+        JsonNode charge = perform(post("/api/v1/cards/" + cardId + "/reconcile").content("{\"amount\":10.00}"), token)
+                .andExpect(status().isCreated()).andReturnJson();
+
+        UUID categoryId = UUID.fromString(charge.get("categoryId").asText());
+        assertThat(categoryId).isNotEqualTo(system);
+        assertThat(jdbcTemplate.queryForObject("SELECT user_id FROM categories WHERE id = ?", UUID.class, categoryId))
+                .isEqualTo(userId);
     }
 
     @Test

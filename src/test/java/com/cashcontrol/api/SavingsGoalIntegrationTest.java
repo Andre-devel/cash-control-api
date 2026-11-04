@@ -137,6 +137,20 @@ class SavingsGoalIntegrationTest {
     }
 
     @Test
+    void accountDeletedAfterLinking_stopsCountingTowardsTheGoal_andDeletingTheGoalRemovesIt() throws Exception {
+        UUID accountId = account("Poupança", AccountType.SAVINGS, "2000.00", userId);
+        String id = createGoal("{\"name\":\"Reserva\",\"targetAmount\":10000,\"accountId\":\"" + accountId + "\"}");
+        // A conta é apagada com deleted_at: o ON DELETE SET NULL da V53 não dispara.
+        jdbcTemplate.update("UPDATE accounts SET deleted_at = NOW() WHERE id = ?", accountId);
+
+        perform(get("/api/v1/goals"), token).andExpect(jsonPath("$[0].current").value(0));
+        perform(get("/api/v1/goals/" + id), token).andExpect(jsonPath("$.current").value(0));
+
+        perform(delete("/api/v1/goals/" + id), token).andExpect(status().isNoContent());
+        perform(get("/api/v1/goals/" + id), token).andExpect(status().isNotFound());
+    }
+
+    @Test
     void progressFromHolding_usesNetValue_monthlyNeededIsZeroOnceReached() throws Exception {
         UUID investmentAccount = account("Corretora", AccountType.INVESTMENT, "0", userId);
         UUID holdingId = holding(investmentAccount, "3000.00", userId);

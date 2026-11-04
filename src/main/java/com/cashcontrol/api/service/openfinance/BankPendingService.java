@@ -426,7 +426,7 @@ public class BankPendingService {
             return;
         }
         Map<String, List<BankPendingTransaction>> byInvoice = group.stream().collect(Collectors.groupingBy(
-                pending -> faturaImportService.referenceMonthForCharge(creditCardId, pending.getDate(), userId),
+                pending -> faturaImportService.referenceMonthForCharge(card, pending.getDate()),
                 LinkedHashMap::new, Collectors.toList()));
         byInvoice.forEach((referenceMonth, pendings) -> {
             List<KeyedFaturaRow> rows = new ArrayList<>();

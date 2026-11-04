@@ -109,6 +109,7 @@ public final class RecurrenceDetector {
                 && t.getCancelledAt() == null
                 && t.getTransferGroupId() == null
                 && t.getPaidInvoice() == null
+                && t.getInstallmentSeries() == null
                 && !t.isReimbursable()
                 && t.getAmount() != null
                 && t.getCompetenceDate() != null

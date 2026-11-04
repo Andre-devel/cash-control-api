@@ -28,11 +28,13 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Currency;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -40,6 +42,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AccountServiceImpl implements AccountService {
 
+    private static final ZoneId BANK_ZONE = ZoneId.of("America/Sao_Paulo");
     static final String BANK_RECONCILE_DESCRIPTION = "Ajuste para conferir com o banco";
 
     private final AccountRepository accountRepository;
@@ -174,6 +177,20 @@ public class AccountServiceImpl implements AccountService {
 
     @Override
     @Transactional(readOnly = true)
+    public Map<UUID, BigDecimal> balancesByAccount(UUID userId) {
+        Map<UUID, BigDecimal> sums = new HashMap<>();
+        for (Object[] row : transactionRepository.sumPaidAmountByAccountForUser(userId)) {
+            sums.put((UUID) row[0], (BigDecimal) row[1]);
+        }
+        Map<UUID, BigDecimal> balances = new HashMap<>();
+        for (Account account : accountRepository.findAllByUserIdAndDeletedAtIsNullOrderBySortOrderAscCreatedAtAsc(userId)) {
+            balances.put(account.getId(), sums.getOrDefault(account.getId(), BigDecimal.ZERO));
+        }
+        return balances;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public BigDecimal computeBalance(UUID accountId, UUID userId) {
         BigDecimal balance = transactionRepository.sumPaidAmountByAccountIdAndUserId(accountId, userId);
         return balance != null ? balance : BigDecimal.ZERO;
@@ -198,10 +215,7 @@ public class AccountServiceImpl implements AccountService {
     @Override
     public void reconcileBalance(Account account, BigDecimal target, LocalDate date, String description) {
         UUID userId = account.getUserId();
-        Transaction adjustment = account.getSyncAdjustmentId() == null ? null
-                : transactionRepository.findById(account.getSyncAdjustmentId())
-                .filter(tx -> tx.getType() == TransactionType.MANUAL_ADJUSTMENT && tx.getStatus() == TransactionStatus.PAID)
-                .orElse(null);
+        Transaction adjustment = currentSyncAdjustment(account);
         BigDecimal withoutAdjustment = computeBalance(account.getId(), userId)
                 .subtract(adjustment != null ? adjustment.getAmount() : BigDecimal.ZERO);
         BigDecimal delta = target.subtract(withoutAdjustment);
@@ -235,8 +249,36 @@ public class AccountServiceImpl implements AccountService {
         BankConnectionAccount bankAccount = bankBalanceOf(id)
                 .orElseThrow(() -> new BusinessRuleException(
                         "O banco ainda não informou o saldo desta conta. Atualize a conexão e tente de novo."));
-        reconcileBalance(account, bankAccount.getBankBalance(), LocalDate.now(), BANK_RECONCILE_DESCRIPTION);
+        LocalDate bankDay = bankDayOf(bankAccount);
+        Transaction adjustment = currentSyncAdjustment(account);
+        BigDecimal adjustmentAmount = adjustment != null ? adjustment.getAmount() : BigDecimal.ZERO;
+        BigDecimal adjustmentUpToBankDay = adjustment != null && !Objects.requireNonNullElse(adjustment.getPaymentDate(), adjustment.getCompetenceDate()).isAfter(bankDay)
+                ? adjustmentAmount : BigDecimal.ZERO;
+        // O banco informou o saldo num momento passado: compara com o saldo do app naquele dia, para
+        // um lançamento feito depois da leitura não virar ajuste falso. O ajuste fica datado no dia da leitura.
+        BigDecimal delta = bankAccount.getBankBalance()
+                .subtract(balanceUpTo(id, userId, bankDay).subtract(adjustmentUpToBankDay));
+        BigDecimal target = computeBalance(id, userId).subtract(adjustmentAmount).add(delta);
+        reconcileBalance(account, target, bankDay, BANK_RECONCILE_DESCRIPTION);
         return toReconciliation(id, userId, bankAccount);
+    }
+
+    private Transaction currentSyncAdjustment(Account account) {
+        return account.getSyncAdjustmentId() == null ? null
+                : transactionRepository.findById(account.getSyncAdjustmentId())
+                .filter(tx -> tx.getType() == TransactionType.MANUAL_ADJUSTMENT && tx.getStatus() == TransactionStatus.PAID)
+                .orElse(null);
+    }
+
+    private BigDecimal balanceUpTo(UUID accountId, UUID userId, LocalDate date) {
+        BigDecimal balance = transactionRepository.sumPaidAmountByAccountIdAndUserIdUpTo(accountId, userId, date);
+        return balance != null ? balance : BigDecimal.ZERO;
+    }
+
+    private static LocalDate bankDayOf(BankConnectionAccount bankAccount) {
+        return bankAccount.getBankBalanceAt() != null
+                ? bankAccount.getBankBalanceAt().atZone(BANK_ZONE).toLocalDate()
+                : LocalDate.now(BANK_ZONE);
     }
 
     /** A conta do banco vinculada a esta conta, se o banco já informou o saldo dela. */
@@ -250,8 +292,10 @@ public class AccountServiceImpl implements AccountService {
         if (bankAccount == null) {
             return new AccountReconciliationResponse(appBalance, null, null, null);
         }
+        // A diferença compara com o saldo do app no dia da leitura do banco, não com o de agora.
+        BigDecimal appBalanceAtBankDay = balanceUpTo(id, userId, bankDayOf(bankAccount));
         return new AccountReconciliationResponse(appBalance, bankAccount.getBankBalance(), bankAccount.getBankBalanceAt(),
-                bankAccount.getBankBalance().subtract(appBalance));
+                bankAccount.getBankBalance().subtract(appBalanceAtBankDay));
     }
 
     @Override

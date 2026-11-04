@@ -120,6 +120,25 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("accountId") UUID accountId,
             @Param("userId") UUID userId);
 
+    /**
+     * O saldo de {@link #sumPaidAmountByAccountIdAndUserId} até o fim de {@code date}, pela data de
+     * pagamento: o que a conta tinha no dia em que o banco informou o saldo.
+     */
+    @Query("SELECT COALESCE(SUM(CASE " +
+           "WHEN t.type = com.cashcontrol.api.domain.entity.TransactionType.INCOME " +
+           "  OR t.type = com.cashcontrol.api.domain.entity.TransactionType.REFUND THEN t.amount " +
+           "WHEN t.type = com.cashcontrol.api.domain.entity.TransactionType.EXPENSE THEN -t.amount " +
+           "ELSE t.amount END), 0) " +
+           "FROM Transaction t " +
+           "WHERE t.account.id = :accountId AND t.userId = :userId " +
+           "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID " +
+           "AND t.creditCard IS NULL " +
+           "AND COALESCE(t.paymentDate, t.competenceDate) <= :date")
+    BigDecimal sumPaidAmountByAccountIdAndUserIdUpTo(
+            @Param("accountId") UUID accountId,
+            @Param("userId") UUID userId,
+            @Param("date") LocalDate date);
+
     /** O mesmo saldo de {@link #sumPaidAmountByAccountIdAndUserId}, de todas as contas numa consulta: {@code [accountId, saldo]}. */
     @Query("SELECT t.account.id, COALESCE(SUM(CASE " +
            "WHEN t.type = com.cashcontrol.api.domain.entity.TransactionType.INCOME " +
@@ -486,6 +505,26 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
                                      @Param("from") LocalDate from,
                                      @Param("to") LocalDate to,
                                      @Param("scope") AccountScope scope);
+
+    /**
+     * {@link #sumBudgetSpending} de vários meses numa consulta: as mesmas colunas, precedidas do ano
+     * e do mês da compra.
+     */
+    @Query("SELECT EXTRACT(YEAR FROM t.competenceDate), EXTRACT(MONTH FROM t.competenceDate), " +
+           "c.id, s.id, t.type, t.status, CASE WHEN cc.id IS NULL THEN false ELSE true END, SUM(" + NET_OF_REIMBURSEMENT + ") FROM Transaction t " +
+           "LEFT JOIN t.category c LEFT JOIN t.subcategory s LEFT JOIN t.creditCard cc" + REIMBURSEMENT_JOIN +
+           "WHERE t.userId = :userId " +
+           "AND t.account.deletedAt IS NULL " +
+           "AND t.type IN (com.cashcontrol.api.domain.entity.TransactionType.EXPENSE, " +
+           "               com.cashcontrol.api.domain.entity.TransactionType.REFUND) " +
+           "AND t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED " +
+           "AND t.competenceDate >= :from AND t.competenceDate <= :to" + NOT_A_REIMBURSEMENT + SCOPE_PREDICATE +
+           "GROUP BY EXTRACT(YEAR FROM t.competenceDate), EXTRACT(MONTH FROM t.competenceDate), " +
+           "c.id, s.id, t.type, t.status, CASE WHEN cc.id IS NULL THEN false ELSE true END")
+    List<Object[]> sumBudgetSpendingByMonth(@Param("userId") UUID userId,
+                                            @Param("from") LocalDate from,
+                                            @Param("to") LocalDate to,
+                                            @Param("scope") AccountScope scope);
 
     @Query("SELECT t.category.id, SUM(" + NET_OF_REIMBURSEMENT + ") FROM Transaction t " + REIMBURSEMENT_JOIN +
            "WHERE t.userId = :userId " +

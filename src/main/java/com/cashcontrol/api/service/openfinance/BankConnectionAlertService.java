@@ -123,8 +123,10 @@ public class BankConnectionAlertService {
 
         Instant expiresAt = connection.getConsentExpiresAt();
         if (expiresAt != null) {
-            long days = ChronoUnit.DAYS.between(now, expiresAt);
-            if (days <= 0) {
+            // Dias de calendário em São Paulo: DAYS.between entre instantes trunca, e um vencimento
+            // amanhã cedo (menos de 24 h) contaria como já vencido.
+            long days = ChronoUnit.DAYS.between(now.atZone(ZONE).toLocalDate(), expiresAt.atZone(ZONE).toLocalDate());
+            if (!expiresAt.isAfter(now)) {
                 body.add("O consentimento venceu em " + DAY.format(expiresAt)
                          + ". Reconecte no Perfil para o app voltar a ler o banco.");
                 title = Objects.requireNonNullElse(title, name + ": consentimento venceu");

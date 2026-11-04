@@ -51,7 +51,9 @@ public class SavingsGoalService {
                 : goalRepository.findAllByUserIdAndArchivedAtIsNullOrderByCreatedAtAsc(userId);
         Map<UUID, BigDecimal> holdingValues = investmentService.netValues(userId,
                 goals.stream().map(SavingsGoal::getHoldingId).filter(Objects::nonNull).distinct().toList(), today);
-        return goals.stream().map(goal -> toResponse(goal, current(goal, holdingValues), today)).toList();
+        Map<UUID, BigDecimal> accountBalances = goals.stream().anyMatch(goal -> goal.getAccountId() != null)
+                ? accountService.balancesByAccount(userId) : Map.of();
+        return goals.stream().map(goal -> toResponse(goal, current(goal, accountBalances, holdingValues), today)).toList();
     }
 
     @Transactional(readOnly = true)
@@ -142,13 +144,20 @@ public class SavingsGoalService {
     private BigDecimal current(SavingsGoal goal, LocalDate today) {
         Map<UUID, BigDecimal> holdingValues = goal.getHoldingId() == null ? Map.of()
                 : investmentService.netValues(goal.getUserId(), List.of(goal.getHoldingId()), today);
-        return current(goal, holdingValues);
+        Map<UUID, BigDecimal> accountBalances = goal.getAccountId() == null ? Map.of()
+                : accountService.balancesByAccount(goal.getUserId());
+        return current(goal, accountBalances, holdingValues);
     }
 
-    /** Saldo da conta, valor líquido da aplicação (zero se resgatada ou apagada) ou zero sem vínculo. */
-    private BigDecimal current(SavingsGoal goal, Map<UUID, BigDecimal> holdingValues) {
+    /**
+     * Saldo da conta (zero se apagada), valor líquido da aplicação (zero se resgatada ou apagada)
+     * ou zero sem vínculo. A conta é apagada com {@code deleted_at}, então o {@code ON DELETE SET NULL}
+     * da V53 não solta o vínculo: quem filtra é {@code accountBalances}, só com contas não apagadas.
+     */
+    private BigDecimal current(SavingsGoal goal, Map<UUID, BigDecimal> accountBalances,
+                               Map<UUID, BigDecimal> holdingValues) {
         if (goal.getAccountId() != null) {
-            return accountService.computeBalance(goal.getAccountId(), goal.getUserId());
+            return accountBalances.getOrDefault(goal.getAccountId(), BigDecimal.ZERO);
         }
         if (goal.getHoldingId() != null) {
             return holdingValues.getOrDefault(goal.getHoldingId(), BigDecimal.ZERO);

@@ -1,5 +1,6 @@
 package com.cashcontrol.api.service;
 
+import com.cashcontrol.api.domain.entity.CreditCard;
 import com.cashcontrol.api.domain.entity.InvoiceImportFormat;
 import com.cashcontrol.api.dto.request.FaturaImportCommitRequest;
 import com.cashcontrol.api.dto.request.FaturaImportDuplicateCheckRequest;
@@ -48,6 +49,9 @@ public interface FaturaImportService {
      * cobrança lançada em {@code chargeDate}, pelo ciclo cadastrado do cartão.
      */
     String referenceMonthForCharge(UUID creditCardId, LocalDate chargeDate, UUID userId);
+
+    /** {@link #referenceMonthForCharge(UUID, LocalDate, UUID)} com o cartão já carregado e conferido por quem chama. */
+    String referenceMonthForCharge(CreditCard card, LocalDate chargeDate);
 
     /**
      * A classificação da prévia — apelido, categoria sugerida, já importada e possível

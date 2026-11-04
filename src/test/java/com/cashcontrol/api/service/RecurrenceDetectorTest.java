@@ -6,6 +6,7 @@ package com.cashcontrol.api.service;
  */
 
 import com.cashcontrol.api.domain.entity.Account;
+import com.cashcontrol.api.domain.entity.InstallmentSeries;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
@@ -64,6 +65,18 @@ class RecurrenceDetectorTest {
         assertThat(s.lastDate()).isEqualTo(LocalDate.of(2026, 10, 13));
         assertThat(s.accountId()).isEqualTo(ACCOUNT_ID);
         assertThat(s.creditCardId()).isNull();
+    }
+
+    @Test
+    void detect_ignoresInstallmentsOfAPurchase() {
+        InstallmentSeries series = new InstallmentSeries();
+        List<Transaction> txs = List.of(
+                expense("Geladeira 1/10", "350.00", LocalDate.of(2026, 8, 5)),
+                expense("Geladeira 2/10", "350.00", LocalDate.of(2026, 9, 5)),
+                expense("Geladeira 3/10", "350.00", LocalDate.of(2026, 10, 5)));
+        txs.forEach(t -> t.setInstallmentSeries(series));
+
+        assertThat(RecurrenceDetector.detect(txs, List.of(), TODAY)).isEmpty();
     }
 
     @Test

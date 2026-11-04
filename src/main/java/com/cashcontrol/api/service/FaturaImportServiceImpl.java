@@ -171,7 +171,11 @@ public class FaturaImportServiceImpl implements FaturaImportService {
     @Override
     @Transactional(readOnly = true)
     public String referenceMonthForCharge(UUID creditCardId, LocalDate chargeDate, UUID userId) {
-        CreditCard card = requireImportableCard(creditCardId, userId);
+        return referenceMonthForCharge(requireImportableCard(creditCardId, userId), chargeDate);
+    }
+
+    @Override
+    public String referenceMonthForCharge(CreditCard card, LocalDate chargeDate) {
         return referenceMonthOf(cycleCalculator.calculateForCharge(chargeDate, card.getClosingDay(), card.getDueDay()).dueDate());
     }
 

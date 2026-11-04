@@ -143,6 +143,18 @@ class BankConnectionAlertIntegrationTest {
     }
 
     @Test
+    void consentExpiringTomorrowMorning_lessThan24hAway_warnsOneDay_notExpired() {
+        // Amanhã às 08:00 em Brasília: ~21,6 h depois do agendador, mas um dia de calendário.
+        BankConnection connection = connection("UPDATED", null, RECENT, Instant.parse("2026-11-05T11:00:00Z"));
+
+        alertService.checkAll(NOW);
+
+        JsonNode push = onlyPushFor(connection);
+        assertThat(push.get("title").asText()).isEqualTo("Inter: consentimento vence em 1 dia");
+        assertThat(push.get("body").asText()).startsWith("O consentimento vence em 05/11.");
+    }
+
+    @Test
     void expiredConsent_warnsEveryDay() {
         BankConnection connection = connection("UPDATED", null, RECENT, NOW.minus(Duration.ofDays(2)));
 

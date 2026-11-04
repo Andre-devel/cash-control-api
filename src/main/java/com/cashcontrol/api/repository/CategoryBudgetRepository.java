@@ -19,6 +19,12 @@ public interface CategoryBudgetRepository extends JpaRepository<CategoryBudget, 
     @Query("SELECT b FROM CategoryBudget b WHERE b.userId = :userId AND (b.month IS NULL OR b.month = :month)")
     List<CategoryBudget> findApplicable(@Param("userId") UUID userId, @Param("month") LocalDate month);
 
+    /** Tetos padrão do usuário e os ajustes dos meses entre {@code from} e {@code to} (dias 1). */
+    @Query("SELECT b FROM CategoryBudget b WHERE b.userId = :userId "
+           + "AND (b.month IS NULL OR (b.month >= :from AND b.month <= :to))")
+    List<CategoryBudget> findApplicableBetween(@Param("userId") UUID userId, @Param("from") LocalDate from,
+                                               @Param("to") LocalDate to);
+
     /**
      * Marca o aviso da faixa como enviado. Devolve 1 só para quem gravou primeiro: 0 quer dizer
      * que esse aviso já saiu neste mês.

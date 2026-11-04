@@ -438,9 +438,9 @@ public class DashboardServiceImpl implements DashboardService {
                 .map(rule -> new SubscriptionsResponse.Item(rule.getDescription(), rule.getAmount(),
                         SubscriptionsResponse.Source.RECURRENCE))
                 .forEach(items::add);
-        Set<UUID> outOfScope = outOfScopeOwners(userId, scope);
+        Set<UUID> inScope = scope == null ? null : inScopeOwners(userId, scope);
         recurrenceService.listSuggestions(userId).stream()
-                .filter(suggestion -> !outOfScope.contains(suggestion.creditCardId() != null
+                .filter(suggestion -> inScope == null || inScope.contains(suggestion.creditCardId() != null
                         ? suggestion.creditCardId() : suggestion.accountId()))
                 .map(suggestion -> new SubscriptionsResponse.Item(suggestion.description(), suggestion.amount(),
                         SubscriptionsResponse.Source.SUGGESTION))
@@ -451,17 +451,17 @@ public class DashboardServiceImpl implements DashboardService {
         return new SubscriptionsResponse(total, items);
     }
 
-    /** Ids das contas e dos cartões fora do escopo pedido; vazio quando {@code scope} é nulo. */
-    private Set<UUID> outOfScopeOwners(UUID userId, AccountScope scope) {
+    /**
+     * Ids das contas e dos cartões não apagados no escopo pedido. Lista os de dentro, não os de fora:
+     * uma sugestão de conta ou cartão apagado não pertence a escopo nenhum e fica de fora.
+     */
+    private Set<UUID> inScopeOwners(UUID userId, AccountScope scope) {
         Set<UUID> ids = new HashSet<>();
-        if (scope == null) {
-            return ids;
-        }
         accountRepository.findAllByUserIdAndDeletedAtIsNull(userId).stream()
-                .filter(account -> account.getScope() != scope)
+                .filter(account -> account.getScope() == scope)
                 .forEach(account -> ids.add(account.getId()));
         creditCardRepository.findAllByUserIdAndDeletedAtIsNull(userId).stream()
-                .filter(card -> card.getScope() != scope)
+                .filter(card -> card.getScope() == scope)
                 .forEach(card -> ids.add(card.getId()));
         return ids;
     }
