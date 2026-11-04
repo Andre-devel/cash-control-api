@@ -70,6 +70,44 @@ class RbacSeedTest {
     }
 
     @Test
+    void systemRoleDescriptionsAreInPortuguese() {
+        assertThat(descriptionOf("roles", "ADMIN"))
+                .isEqualTo("Administrador do sistema, com todas as permissões nativas.");
+        assertThat(descriptionOf("roles", "USER"))
+                .isEqualTo("Usuário autenticado padrão, sem permissões nativas.");
+    }
+
+    @Test
+    void systemPermissionDescriptionsAreInPortuguese() {
+        assertThat(descriptionOf("permissions", "user:create")).isEqualTo("Criar contas de usuário.");
+        assertThat(descriptionOf("permissions", "role:update"))
+                .isEqualTo("Alterar descrição e permissões dos papéis.");
+        assertThat(descriptionOf("permissions", "bank-sync:view"))
+                .isEqualTo("Ver o histórico de sincronização bancária das próprias conexões.");
+    }
+
+    @Test
+    void noSystemRoleOrPermissionKeepsEnglishSeedDescription() {
+        Integer english = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*) FROM (
+                    SELECT description FROM roles WHERE is_system_role = TRUE
+                    UNION ALL
+                    SELECT description FROM permissions WHERE is_system_perm = TRUE
+                ) d
+                WHERE d.description IS NULL
+                   OR d.description ~ '^(Create|Read|Update|Soft-delete|Delete|Assign|Revoke|Access|Manage|View|System|Standard) '
+                """,
+                Integer.class);
+        assertThat(english).as("System roles and permissions should have pt-BR descriptions").isZero();
+    }
+
+    private String descriptionOf(String table, String name) {
+        return jdbcTemplate.queryForObject(
+                "SELECT description FROM " + table + " WHERE name = ?", String.class, name);
+    }
+
+    @Test
     void allSystemPermissionNamesArePresent() {
         for (String permName : new String[]{
                 "user:create", "user:read", "user:update", "user:delete",
