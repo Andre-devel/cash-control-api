@@ -11,6 +11,7 @@ import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.domain.exception.BusinessRuleException;
 import com.cashcontrol.api.domain.exception.ResourceNotFoundException;
+import com.cashcontrol.api.dto.response.BudgetHistoryResponse;
 import com.cashcontrol.api.dto.response.BudgetProgressResponse;
 import com.cashcontrol.api.dto.response.CategoryBudgetResponse;
 import com.cashcontrol.api.repository.CategoryBudgetRepository;
@@ -57,34 +58,10 @@ public class BudgetService {
     BudgetProgressResponse progress(UUID userId, YearMonth month, LocalDate today) {
         Map<UUID, CategoryBudget> budgets = applicableBudgets(userId, month);
         Map<UUID, Category> categories = visibleCategories(userId);
-
-        Map<UUID, BigDecimal> spent = new HashMap<>();
-        Map<UUID, BigDecimal> forecast = new HashMap<>();
-        BigDecimal uncategorized = BigDecimal.ZERO;
-        for (Object[] row : transactionRepository.sumBudgetSpending(userId, month.atDay(1), month.atEndOfMonth())) {
-            UUID categoryId = (UUID) row[0];
-            UUID subcategoryId = (UUID) row[1];
-            TransactionType type = (TransactionType) row[2];
-            TransactionStatus status = (TransactionStatus) row[3];
-            boolean onCard = (Boolean) row[4];
-            BigDecimal amount = (BigDecimal) row[5];
-
-            boolean realized = status == TransactionStatus.PAID || onCard;
-            BigDecimal signed = type == TransactionType.REFUND ? amount.negate() : amount;
-            if (!realized && type == TransactionType.REFUND) {
-                continue;
-            }
-            if (categoryId == null) {
-                if (realized) {
-                    uncategorized = uncategorized.add(signed);
-                }
-                continue;
-            }
-            Map<UUID, BigDecimal> bucket = realized ? spent : forecast;
-            for (UUID target : targets(categoryId, subcategoryId, categories)) {
-                bucket.merge(target, signed, BigDecimal::add);
-            }
-        }
+        Spending spending = spending(userId, month, categories);
+        Map<UUID, BigDecimal> spent = spending.spent();
+        Map<UUID, BigDecimal> forecast = spending.forecast();
+        BigDecimal uncategorized = spending.uncategorized();
 
         List<BudgetProgressResponse.Item> items = new ArrayList<>();
         BigDecimal totalBudget = BigDecimal.ZERO;
@@ -101,7 +78,7 @@ public class BudgetService {
             items.add(new BudgetProgressResponse.Item(
                     category.getId(), category.getName(), category.getColor(), category.getIcon(), parentId,
                     budget.getAmount(), itemSpent, itemForecast, budget.getAmount().subtract(itemSpent),
-                    itemSpent.multiply(BigDecimal.valueOf(100)).divide(budget.getAmount(), 2, RoundingMode.HALF_UP),
+                    percent(itemSpent, budget.getAmount()),
                     budget.getMonth() == null ? BudgetProgressResponse.Source.DEFAULT : BudgetProgressResponse.Source.MONTH));
             // A subcategoria com teto já está dentro do gasto da pai; somar as duas contaria em dobro.
             if (parentId == null || !budgets.containsKey(parentId)) {
@@ -115,6 +92,53 @@ public class BudgetService {
 
         return new BudgetProgressResponse(month, totalBudget, totalSpent, totalForecast,
                 uncategorized.max(BigDecimal.ZERO), elapsedDays(month, today), month.lengthOfMonth(), items);
+    }
+
+    /**
+     * Orçamento × realizado dos {@code months} meses que terminam em {@code until}, pelas mesmas
+     * regras de {@link #progress}: o teto de cada mês é o ajuste daquele mês ou o padrão, e o gasto
+     * é o realizado pela data da compra, sem reembolsos. Entra toda categoria que teve teto em
+     * algum dos meses; no mês sem teto a célula vem com {@code budget} e {@code percent} nulos.
+     */
+    @Transactional(readOnly = true)
+    public BudgetHistoryResponse history(UUID userId, YearMonth until, int months) {
+        if (months < 1 || months > 12) {
+            throw new IllegalArgumentException("months must be between 1 and 12: " + months);
+        }
+        Map<UUID, Category> categories = visibleCategories(userId);
+        List<YearMonth> range = new ArrayList<>();
+        for (int i = months - 1; i >= 0; i--) {
+            range.add(until.minusMonths(i));
+        }
+
+        Map<YearMonth, Map<UUID, CategoryBudget>> budgetsByMonth = new HashMap<>();
+        Map<YearMonth, Map<UUID, BigDecimal>> spentByMonth = new HashMap<>();
+        Set<UUID> budgeted = new LinkedHashSet<>();
+        for (YearMonth month : range) {
+            Map<UUID, CategoryBudget> budgets = applicableBudgets(userId, month);
+            budgetsByMonth.put(month, budgets);
+            spentByMonth.put(month, spending(userId, month, categories).spent());
+            budgeted.addAll(budgets.keySet());
+        }
+
+        List<BudgetHistoryResponse.Item> items = new ArrayList<>();
+        for (UUID categoryId : budgeted) {
+            Category category = categories.get(categoryId);
+            if (category == null || category.isArchived()) {
+                continue;
+            }
+            List<BudgetHistoryResponse.Cell> cells = new ArrayList<>();
+            for (YearMonth month : range) {
+                CategoryBudget budget = budgetsByMonth.get(month).get(categoryId);
+                BigDecimal spent = spentByMonth.get(month).getOrDefault(categoryId, BigDecimal.ZERO).max(BigDecimal.ZERO);
+                BigDecimal amount = budget != null ? budget.getAmount() : null;
+                cells.add(new BudgetHistoryResponse.Cell(month, amount, spent, amount != null ? percent(spent, amount) : null));
+            }
+            items.add(new BudgetHistoryResponse.Item(
+                    category.getId(), category.getName(), category.getIcon(), category.getColor(), cells));
+        }
+        items.sort(Comparator.comparing(BudgetHistoryResponse.Item::name));
+        return new BudgetHistoryResponse(range, items);
     }
 
     /** Cria ou troca o teto padrão ({@code month} nulo) ou o ajuste de um mês. */
@@ -143,6 +167,44 @@ public class BudgetService {
         CategoryBudget budget = budgetRepository.findOne(userId, categoryId, month != null ? month.atDay(1) : null)
                 .orElseThrow(() -> new ResourceNotFoundException("Budget not found for category: " + categoryId));
         budgetRepository.delete(budget);
+    }
+
+    /** Gasto realizado e previsto por categoria no mês, e o realizado sem categoria. */
+    private record Spending(Map<UUID, BigDecimal> spent, Map<UUID, BigDecimal> forecast, BigDecimal uncategorized) {}
+
+    private Spending spending(UUID userId, YearMonth month, Map<UUID, Category> categories) {
+        Map<UUID, BigDecimal> spent = new HashMap<>();
+        Map<UUID, BigDecimal> forecast = new HashMap<>();
+        BigDecimal uncategorized = BigDecimal.ZERO;
+        for (Object[] row : transactionRepository.sumBudgetSpending(userId, month.atDay(1), month.atEndOfMonth())) {
+            UUID categoryId = (UUID) row[0];
+            UUID subcategoryId = (UUID) row[1];
+            TransactionType type = (TransactionType) row[2];
+            TransactionStatus status = (TransactionStatus) row[3];
+            boolean onCard = (Boolean) row[4];
+            BigDecimal amount = (BigDecimal) row[5];
+
+            boolean realized = status == TransactionStatus.PAID || onCard;
+            BigDecimal signed = type == TransactionType.REFUND ? amount.negate() : amount;
+            if (!realized && type == TransactionType.REFUND) {
+                continue;
+            }
+            if (categoryId == null) {
+                if (realized) {
+                    uncategorized = uncategorized.add(signed);
+                }
+                continue;
+            }
+            Map<UUID, BigDecimal> bucket = realized ? spent : forecast;
+            for (UUID target : targets(categoryId, subcategoryId, categories)) {
+                bucket.merge(target, signed, BigDecimal::add);
+            }
+        }
+        return new Spending(spent, forecast, uncategorized);
+    }
+
+    private static BigDecimal percent(BigDecimal spent, BigDecimal budget) {
+        return spent.multiply(BigDecimal.valueOf(100)).divide(budget, 2, RoundingMode.HALF_UP);
     }
 
     /** Um teto por categoria: o ajuste do mês, se houver, senão o padrão. */

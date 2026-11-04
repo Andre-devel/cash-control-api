@@ -7,7 +7,10 @@ package com.cashcontrol.api.service.budget;
 
 import com.cashcontrol.api.domain.entity.Category;
 import com.cashcontrol.api.domain.entity.CategoryBudget;
+import com.cashcontrol.api.domain.entity.TransactionStatus;
+import com.cashcontrol.api.domain.entity.TransactionType;
 import com.cashcontrol.api.domain.exception.BusinessRuleException;
+import com.cashcontrol.api.dto.response.BudgetHistoryResponse;
 import com.cashcontrol.api.dto.response.BudgetProgressResponse;
 import com.cashcontrol.api.repository.CategoryBudgetRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
@@ -90,6 +93,91 @@ class BudgetServiceTest {
         assertThatThrownBy(() -> budgetService.save(userId, category.getId(), BigDecimal.TEN, null))
                 .isInstanceOf(BusinessRuleException.class);
         verify(budgetRepository, never()).save(any());
+    }
+
+    @Test
+    void history_followsTheCapOfEachMonth_andTheSpendingByPurchaseMonth() {
+        YearMonth august = YearMonth.of(2026, 8);
+        YearMonth september = YearMonth.of(2026, 9);
+        when(categoryRepository.findAllSystemCategories()).thenReturn(List.of());
+        when(categoryRepository.findAllByUserId(userId)).thenReturn(List.of(category));
+        // Teto padrão de 300 até agosto; em setembro um ajuste de 200; em outubro o padrão sobe para 400.
+        when(budgetRepository.findApplicable(userId, august.atDay(1))).thenReturn(List.of(budget(null, "300.00")));
+        when(budgetRepository.findApplicable(userId, september.atDay(1)))
+                .thenReturn(List.of(budget(null, "300.00"), budget(september, "200.00")));
+        when(budgetRepository.findApplicable(userId, OCTOBER.atDay(1))).thenReturn(List.of(budget(null, "400.00")));
+        when(transactionRepository.sumBudgetSpending(userId, august.atDay(1), august.atEndOfMonth()))
+                .thenReturn(rows(row(TransactionType.EXPENSE, TransactionStatus.PAID, false, "150.00")));
+        when(transactionRepository.sumBudgetSpending(userId, september.atDay(1), september.atEndOfMonth()))
+                .thenReturn(rows(
+                        row(TransactionType.EXPENSE, TransactionStatus.PAID, false, "180.00"),
+                        row(TransactionType.EXPENSE, TransactionStatus.PENDING, true, "70.00"),
+                        row(TransactionType.REFUND, TransactionStatus.PAID, false, "10.00"),
+                        // Conta a vencer é previsto, não gasto.
+                        row(TransactionType.EXPENSE, TransactionStatus.PENDING, false, "999.00")));
+        when(transactionRepository.sumBudgetSpending(userId, OCTOBER.atDay(1), OCTOBER.atEndOfMonth()))
+                .thenReturn(rows(row(TransactionType.EXPENSE, TransactionStatus.PAID, true, "100.00")));
+
+        BudgetHistoryResponse history = budgetService.history(userId, OCTOBER, 3);
+
+        assertThat(history.months()).containsExactly(august, september, OCTOBER);
+        assertThat(history.items()).hasSize(1);
+        BudgetHistoryResponse.Item item = history.items().getFirst();
+        assertThat(item.categoryId()).isEqualTo(category.getId());
+        assertThat(item.name()).isEqualTo("Lazer");
+        assertThat(item.cells()).extracting(BudgetHistoryResponse.Cell::month).containsExactly(august, september, OCTOBER);
+        assertCell(item.cells().get(0), "300.00", "150.00", "50.00");
+        assertCell(item.cells().get(1), "200.00", "240.00", "120.00");
+        assertCell(item.cells().get(2), "400.00", "100.00", "25.00");
+    }
+
+    @Test
+    void history_monthWithoutCap_hasNullBudgetAndPercent_butStillShowsTheSpending() {
+        YearMonth september = YearMonth.of(2026, 9);
+        when(categoryRepository.findAllSystemCategories()).thenReturn(List.of());
+        when(categoryRepository.findAllByUserId(userId)).thenReturn(List.of(category));
+        when(budgetRepository.findApplicable(userId, september.atDay(1))).thenReturn(List.of());
+        when(budgetRepository.findApplicable(userId, OCTOBER.atDay(1))).thenReturn(List.of(budget(OCTOBER, "100.00")));
+        when(transactionRepository.sumBudgetSpending(userId, september.atDay(1), september.atEndOfMonth()))
+                .thenReturn(rows(row(TransactionType.EXPENSE, TransactionStatus.PAID, false, "80.00")));
+        when(transactionRepository.sumBudgetSpending(userId, OCTOBER.atDay(1), OCTOBER.atEndOfMonth())).thenReturn(List.of());
+
+        BudgetHistoryResponse history = budgetService.history(userId, OCTOBER, 2);
+
+        BudgetHistoryResponse.Cell withoutCap = history.items().getFirst().cells().getFirst();
+        assertThat(withoutCap.budget()).isNull();
+        assertThat(withoutCap.percent()).isNull();
+        assertThat(withoutCap.spent()).isEqualByComparingTo("80.00");
+        assertCell(history.items().getFirst().cells().get(1), "100.00", "0", "0");
+    }
+
+    @Test
+    void history_rejectsMonthsOutsideOneToTwelve() {
+        assertThatThrownBy(() -> budgetService.history(userId, OCTOBER, 0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> budgetService.history(userId, OCTOBER, 13)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private CategoryBudget budget(YearMonth month, String amount) {
+        CategoryBudget budget = new CategoryBudget();
+        budget.setUserId(userId);
+        budget.setCategoryId(category.getId());
+        budget.setMonth(month != null ? month.atDay(1) : null);
+        budget.setAmount(new BigDecimal(amount));
+        return budget;
+    }
+
+    private Object[] row(TransactionType type, TransactionStatus status, boolean onCard, String amount) {
+        return new Object[]{category.getId(), null, type, status, onCard, new BigDecimal(amount)};
+    }
+
+    private static List<Object[]> rows(Object[]... rows) {
+        return List.of(rows);
+    }
+
+    private static void assertCell(BudgetHistoryResponse.Cell cell, String budget, String spent, String percent) {
+        assertThat(cell.budget()).isEqualByComparingTo(budget);
+        assertThat(cell.spent()).isEqualByComparingTo(spent);
+        assertThat(cell.percent()).isEqualByComparingTo(percent);
     }
 
     private void stubEmpty() {

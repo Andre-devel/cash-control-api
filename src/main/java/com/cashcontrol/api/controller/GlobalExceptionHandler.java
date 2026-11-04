@@ -24,6 +24,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -62,6 +63,27 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest()
                 .body(ErrorResponse.withFieldErrors(
                         "VALIDATION_ERROR", "Violação de restrição.", correlationId, fieldErrors));
+    }
+
+    // Restrições direto nos parâmetros do método (ex.: @Min/@Max em @RequestParam).
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<ErrorResponse> handleHandlerMethodValidation(HandlerMethodValidationException ex) {
+        Map<String, String> fieldErrors = ex.getParameterValidationResults().stream()
+                .collect(Collectors.toMap(
+                        result -> result.getMethodParameter().getParameterName() != null
+                                ? result.getMethodParameter().getParameterName()
+                                : "arg" + result.getMethodParameter().getParameterIndex(),
+                        result -> result.getResolvableErrors().stream()
+                                .map(error -> error.getDefaultMessage())
+                                .filter(message -> message != null)
+                                .findFirst()
+                                .orElse("Valor inválido"),
+                        (first, second) -> first
+                ));
+        UUID correlationId = CorrelationIdHolder.get();
+        return ResponseEntity.badRequest()
+                .body(ErrorResponse.withFieldErrors(
+                        "VALIDATION_ERROR", "Falha na validação da requisição.", correlationId, fieldErrors));
     }
 
     @ExceptionHandler(InvalidCredentialsException.class)

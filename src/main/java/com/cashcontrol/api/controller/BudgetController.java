@@ -6,6 +6,7 @@ package com.cashcontrol.api.controller;
  */
 
 import com.cashcontrol.api.dto.request.CategoryBudgetRequest;
+import com.cashcontrol.api.dto.response.BudgetHistoryResponse;
 import com.cashcontrol.api.dto.response.BudgetProgressResponse;
 import com.cashcontrol.api.dto.response.CategoryBudgetResponse;
 import com.cashcontrol.api.dto.response.ErrorResponse;
@@ -19,6 +20,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -54,6 +57,20 @@ public class BudgetController {
             @Parameter(description = "Month in YYYY-MM format; current month when omitted")
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM") YearMonth month) {
         return budgetService.progress(principal.getUser().getId(), month != null ? month : YearMonth.now());
+    }
+
+    @Operation(summary = "Budget history", description = "Cap against spending per category for each of the last N months up to `until`, by purchase date.")
+    @ApiResponse(responseCode = "400", description = "months outside 1..12 or malformed until",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @GetMapping("/history")
+    @PreAuthorize("isAuthenticated()")
+    public BudgetHistoryResponse history(
+            @AuthenticationPrincipal AuthenticatedUser principal,
+            @Parameter(description = "Number of months, 1 to 12 (default 6)")
+            @RequestParam(defaultValue = "6") @Min(1) @Max(12) int months,
+            @Parameter(description = "Last month in YYYY-MM format; current month when omitted")
+            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM") YearMonth until) {
+        return budgetService.history(principal.getUser().getId(), until != null ? until : YearMonth.now(), months);
     }
 
     @Operation(summary = "Set a cap", description = "Creates or replaces the default cap of the category, or only the cap of one month.")

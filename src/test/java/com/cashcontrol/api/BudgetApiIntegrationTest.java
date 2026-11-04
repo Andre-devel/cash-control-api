@@ -37,6 +37,7 @@ import org.springframework.web.context.WebApplicationContext;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.List;
 import java.util.UUID;
 
@@ -168,6 +169,65 @@ class BudgetApiIntegrationTest {
         mockMvc.perform(get("/api/v1/budgets")).andExpect(status().isUnauthorized());
     }
 
+    @Test
+    void history_returnsOneCellPerMonth_withTheCapOfThatMonth_andLeavesReimbursementsOut() throws Exception {
+        expense("100.00", "Feira de março", LocalDate.of(2026, 3, 10), TransactionStatus.PAID, food, null, false);
+        expense("200.00", "Feira de abril", LocalDate.of(2026, 4, 10), TransactionStatus.PAID, food, null, false);
+        UUID lunch = transaction(TransactionType.EXPENSE, "150.00", "Almoço com cliente", LocalDate.of(2026, 4, 12),
+                TransactionStatus.PAID, food, null, false);
+        UUID lunchBack = transaction(TransactionType.INCOME, "150.00", "Reembolso almoço", LocalDate.of(2026, 4, 20),
+                TransactionStatus.PAID, null, null, false);
+        perform(put("/api/v1/transactions/" + lunch + "/reimbursement")
+                .content("{\"reimbursable\":true,\"reimbursedById\":\"" + lunchBack + "\"}"), token)
+                .andExpect(status().isOk());
+        expense("50.00", "Mercado no cartão", LocalDate.of(2026, 5, 3), null, food, grocery, true);
+
+        saveBudget(food, "{\"amount\":500}");
+        saveBudget(food, "{\"amount\":250,\"month\":\"2026-04\"}");
+
+        perform(get("/api/v1/budgets/history").param("months", "3").param("until", "2026-05"), token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.months.length()").value(3))
+                .andExpect(jsonPath("$.months[0]").value("2026-03"))
+                .andExpect(jsonPath("$.months[2]").value("2026-05"))
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].categoryId").value(food.toString()))
+                .andExpect(jsonPath("$.items[0].cells[0].month").value("2026-03"))
+                .andExpect(jsonPath("$.items[0].cells[0].budget").value(500.00))
+                .andExpect(jsonPath("$.items[0].cells[0].spent").value(100.00))
+                .andExpect(jsonPath("$.items[0].cells[0].percent").value(20.00))
+                .andExpect(jsonPath("$.items[0].cells[1].budget").value(250.00))
+                .andExpect(jsonPath("$.items[0].cells[1].spent").value(200.00))
+                .andExpect(jsonPath("$.items[0].cells[1].percent").value(80.00))
+                .andExpect(jsonPath("$.items[0].cells[2].budget").value(500.00))
+                .andExpect(jsonPath("$.items[0].cells[2].spent").value(50.00));
+
+        // O histórico bate com o progresso do mês.
+        perform(get("/api/v1/budgets").param("month", "2026-04"), token)
+                .andExpect(jsonPath("$.items[0].budget").value(250.00))
+                .andExpect(jsonPath("$.items[0].spent").value(200.00));
+    }
+
+    @Test
+    void history_defaultsToSixMonthsUntilTheCurrentMonth_andRejectsMonthsOutsideOneToTwelve() throws Exception {
+        perform(get("/api/v1/budgets/history"), token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.months.length()").value(6))
+                .andExpect(jsonPath("$.months[5]").value(YearMonth.now().toString()));
+        perform(get("/api/v1/budgets/history").param("months", "12"), token).andExpect(status().isOk())
+                .andExpect(jsonPath("$.months.length()").value(12));
+        perform(get("/api/v1/budgets/history").param("months", "0"), token)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.fieldErrors.months").exists());
+        perform(get("/api/v1/budgets/history").param("months", "13"), token)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.fieldErrors.months").exists());
+        perform(get("/api/v1/budgets/history").param("until", "2026-13"), token).andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/v1/budgets/history")).andExpect(status().isUnauthorized());
+    }
+
     private void saveBudget(UUID categoryId, String body) throws Exception {
         perform(put("/api/v1/budgets/" + categoryId).content(body), token).andExpect(status().isOk());
     }
@@ -177,13 +237,13 @@ class BudgetApiIntegrationTest {
         transaction(TransactionType.EXPENSE, amount, description, date, status, categoryId, subcategoryId, onCard);
     }
 
-    private void transaction(TransactionType type, String amount, String description, LocalDate date,
+    private UUID transaction(TransactionType type, String amount, String description, LocalDate date,
                              TransactionStatus status, UUID categoryId, UUID subcategoryId, boolean onCard) {
         LocalDate paymentDate = status == TransactionStatus.PAID ? date : null;
-        transactionService.createTransaction(new CreateTransactionRequest(
+        return transactionService.createTransaction(new CreateTransactionRequest(
                 accountId, type, new BigDecimal(amount), description, date, paymentDate, null,
                 categoryId, subcategoryId, null, null, status,
-                onCard ? PaymentMethodSlug.CREDIT_CARD : null, onCard ? cardId : null), userId);
+                onCard ? PaymentMethodSlug.CREDIT_CARD : null, onCard ? cardId : null), userId).id();
     }
 
     private ResultActions perform(MockHttpServletRequestBuilder request, String bearer) throws Exception {
