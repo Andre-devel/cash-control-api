@@ -2,6 +2,7 @@ package com.cashcontrol.api.controller;
 
 import com.cashcontrol.api.domain.entity.DeleteRecurrenceStrategy;
 import com.cashcontrol.api.dto.request.CreateRecurrenceRequest;
+import com.cashcontrol.api.dto.request.DismissRecurrenceSuggestionRequest;
 import com.cashcontrol.api.dto.request.EditRecurrenceRequest;
 import com.cashcontrol.api.dto.request.PauseRecurrenceRequest;
 import com.cashcontrol.api.dto.response.DeleteRecurrenceResult;
@@ -9,6 +10,7 @@ import com.cashcontrol.api.dto.response.EditRecurrenceResult;
 import com.cashcontrol.api.dto.response.ErrorResponse;
 import com.cashcontrol.api.dto.response.RecurrenceCreationResponse;
 import com.cashcontrol.api.dto.response.RecurrenceRuleResponse;
+import com.cashcontrol.api.dto.response.RecurrenceSuggestionResponse;
 import com.cashcontrol.api.security.AuthenticatedUser;
 import com.cashcontrol.api.service.RecurrenceService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -81,6 +83,41 @@ public class RecurrenceController {
     public List<RecurrenceRuleResponse> listRecurrences(
             @AuthenticationPrincipal AuthenticatedUser principal) {
         return recurrenceService.listRecurrences(principal.getUser().getId());
+    }
+
+    @Operation(summary = "List recurrence suggestions", description = """
+            Paid expenses (account or card) of the last 6 months grouped by normalized description that appear in at \
+            least 3 distinct months with amount within 5% of the median and have no active recurrence with the same \
+            normalized description. Transfers, invoice payments, reimbursable expenses and dismissed patterns are left \
+            out. To accept one, create the recurrence with POST /recurrences using the suggested data.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Suggestions returned, most recent first"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @GetMapping("/suggestions")
+    @PreAuthorize("isAuthenticated()")
+    public List<RecurrenceSuggestionResponse> listSuggestions(
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return recurrenceService.listSuggestions(principal.getUser().getId());
+    }
+
+    @Operation(summary = "Dismiss recurrence suggestion",
+            description = "Stores the dismissal of the pattern so it no longer appears in the suggestions. Idempotent.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Suggestion dismissed"),
+            @ApiResponse(responseCode = "400", description = "Validation error",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping("/suggestions/dismiss")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("isAuthenticated()")
+    public void dismissSuggestion(
+            @Valid @RequestBody DismissRecurrenceSuggestionRequest request,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        recurrenceService.dismissSuggestion(request.pattern().strip(), principal.getUser().getId());
     }
 
     @Operation(summary = "Get recurrence rule",

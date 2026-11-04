@@ -19,9 +19,11 @@ import com.cashcontrol.api.dto.response.DeleteRecurrenceResult;
 import com.cashcontrol.api.dto.response.EditRecurrenceResult;
 import com.cashcontrol.api.dto.response.RecurrenceCreationResponse;
 import com.cashcontrol.api.dto.response.RecurrenceRuleResponse;
+import com.cashcontrol.api.dto.response.RecurrenceSuggestionResponse;
 import com.cashcontrol.api.dto.response.TransactionDetailResponse;
 import com.cashcontrol.api.repository.AccountRepository;
 import com.cashcontrol.api.repository.RecurrenceRepository;
+import com.cashcontrol.api.repository.RecurrenceSuggestionDismissalRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -34,6 +36,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -52,6 +55,7 @@ public class RecurrenceServiceImpl implements RecurrenceService {
     private final RecurrenceGeneratorService generatorService;
     private final TransactionService transactionService;
     private final CreditCardService creditCardService;
+    private final RecurrenceSuggestionDismissalRepository dismissalRepository;
 
     @Override
     @Transactional
@@ -345,6 +349,28 @@ public class RecurrenceServiceImpl implements RecurrenceService {
         return rules.stream()
                 .map(rule -> toRuleResponse(rule, nextDue.get(rule.getId())))
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<RecurrenceSuggestionResponse> listSuggestions(UUID userId) {
+        LocalDate today = LocalDate.now();
+        List<Transaction> expenses = transactionRepository.findPaidExpensesSince(
+                userId, today.minusMonths(RecurrenceDetector.WINDOW_MONTHS));
+        List<String> activeDescriptions = recurrenceRepository.findAllByUserIdAndDeletedAtIsNull(userId).stream()
+                .filter(rule -> rule.getStatus() == RecurrenceStatus.ACTIVE)
+                .map(RecurrenceRule::getDescription)
+                .toList();
+        Set<String> dismissed = dismissalRepository.findPatternsByUserId(userId);
+        return RecurrenceDetector.detect(expenses, activeDescriptions, today).stream()
+                .filter(suggestion -> !dismissed.contains(suggestion.pattern()))
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public void dismissSuggestion(String pattern, UUID userId) {
+        dismissalRepository.insertIgnoringDuplicate(userId, pattern);
     }
 
     @Override

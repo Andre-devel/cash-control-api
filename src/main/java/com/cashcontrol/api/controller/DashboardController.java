@@ -11,6 +11,7 @@ import com.cashcontrol.api.dto.response.MonthlyComparisonResponse;
 import com.cashcontrol.api.dto.response.NetWorthEvolutionResponse;
 import com.cashcontrol.api.dto.response.OverviewMetricsResponse;
 import com.cashcontrol.api.dto.response.RecentTransactionResponse;
+import com.cashcontrol.api.dto.response.SubscriptionsResponse;
 import com.cashcontrol.api.dto.response.UpcomingBillResponse;
 import com.cashcontrol.api.dto.response.UpcomingInvoiceResponse;
 import com.cashcontrol.api.security.AuthenticatedUser;
@@ -195,5 +196,19 @@ public class DashboardController {
             @Parameter(description = "Number of transactions to return (default 10)") @RequestParam(defaultValue = "10") int limit,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         return dashboardService.getRecentTransactions(principal.getUser().getId(), limit);
+    }
+
+    @Operation(summary = "Subscriptions card", description = """
+            Monthly total of subscriptions: active monthly EXPENSE recurrences plus the recurrence suggestions not \
+            dismissed (see GET /recurrences/suggestions), with one item per subscription.""")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Subscriptions returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @GetMapping("/subscriptions")
+    @PreAuthorize("isAuthenticated()")
+    public SubscriptionsResponse getSubscriptions(@AuthenticationPrincipal AuthenticatedUser principal) {
+        return dashboardService.getSubscriptions(principal.getUser().getId());
     }
 }

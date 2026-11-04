@@ -10,6 +10,7 @@ import com.cashcontrol.api.dto.response.MonthlyComparisonResponse;
 import com.cashcontrol.api.dto.response.NetWorthEvolutionResponse;
 import com.cashcontrol.api.dto.response.OverviewMetricsResponse;
 import com.cashcontrol.api.dto.response.RecentTransactionResponse;
+import com.cashcontrol.api.dto.response.SubscriptionsResponse;
 import com.cashcontrol.api.dto.response.UpcomingBillResponse;
 import com.cashcontrol.api.dto.response.UpcomingInvoiceResponse;
 
@@ -40,4 +41,7 @@ public interface DashboardService {
     List<RecentTransactionResponse> getRecentTransactions(UUID userId, int limit);
 
     BalanceProjectionResponse getBalanceProjection(UUID userId, int days);
+
+    /** Recorrências ativas de despesa mensais mais as sugestões de recorrência não recusadas, com o total mensal. */
+    SubscriptionsResponse getSubscriptions(UUID userId);
 }

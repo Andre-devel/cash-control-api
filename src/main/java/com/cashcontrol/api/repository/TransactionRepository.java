@@ -25,6 +25,13 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     Optional<Transaction> findByIdAndUserId(UUID id, UUID userId);
 
+    /** Despesas pagas do usuário com competência a partir de {@code from} (conta e cartão), para detectar recorrências. */
+    @Query("SELECT t FROM Transaction t WHERE t.userId = :userId "
+           + "AND t.type = com.cashcontrol.api.domain.entity.TransactionType.EXPENSE "
+           + "AND t.status = com.cashcontrol.api.domain.entity.TransactionStatus.PAID "
+           + "AND t.competenceDate >= :from")
+    List<Transaction> findPaidExpensesSince(@Param("userId") UUID userId, @Param("from") LocalDate from);
+
     /** Contas das compras do cartão, da mais recente para a mais antiga. */
     @Query("SELECT t.account.id FROM Transaction t "
            + "WHERE t.userId = :userId AND t.creditCard.id = :creditCardId ORDER BY t.createdAt DESC")

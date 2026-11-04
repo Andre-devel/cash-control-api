@@ -5,6 +5,8 @@ import com.cashcontrol.api.domain.entity.AccountType;
 import com.cashcontrol.api.domain.entity.ChartGranularity;
 import com.cashcontrol.api.domain.entity.Invoice;
 import com.cashcontrol.api.domain.entity.InvoiceStatus;
+import com.cashcontrol.api.domain.entity.RecurrenceFrequency;
+import com.cashcontrol.api.domain.entity.RecurrenceStatus;
 import com.cashcontrol.api.domain.entity.Transaction;
 import com.cashcontrol.api.domain.entity.TransactionStatus;
 import com.cashcontrol.api.domain.entity.TransactionType;
@@ -16,10 +18,12 @@ import com.cashcontrol.api.dto.response.MonthlyComparisonResponse;
 import com.cashcontrol.api.dto.response.NetWorthEvolutionResponse;
 import com.cashcontrol.api.dto.response.OverviewMetricsResponse;
 import com.cashcontrol.api.dto.response.RecentTransactionResponse;
+import com.cashcontrol.api.dto.response.SubscriptionsResponse;
 import com.cashcontrol.api.dto.response.UpcomingBillResponse;
 import com.cashcontrol.api.dto.response.UpcomingInvoiceResponse;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.InvoiceRepository;
+import com.cashcontrol.api.repository.RecurrenceRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.investment.InvestmentService;
 import lombok.RequiredArgsConstructor;
@@ -55,6 +59,8 @@ public class DashboardServiceImpl implements DashboardService {
     private final AppProperties appProperties;
     private final BalanceProjectionCalculator balanceProjectionCalculator;
     private final InvestmentService investmentService;
+    private final RecurrenceRepository recurrenceRepository;
+    private final RecurrenceService recurrenceService;
 
     @Override
     public OverviewMetricsResponse getOverviewMetrics(UUID userId) {
@@ -410,5 +416,25 @@ public class DashboardServiceImpl implements DashboardService {
         if (obj instanceof BigDecimal bd) return bd;
         if (obj instanceof Number n) return new BigDecimal(n.toString());
         return BigDecimal.ZERO;
+    }
+
+    @Override
+    public SubscriptionsResponse getSubscriptions(UUID userId) {
+        List<SubscriptionsResponse.Item> items = new ArrayList<>();
+        recurrenceRepository.findAllByUserIdAndDeletedAtIsNull(userId).stream()
+                .filter(rule -> rule.getStatus() == RecurrenceStatus.ACTIVE
+                        && rule.getType() == TransactionType.EXPENSE
+                        && rule.getFrequency() == RecurrenceFrequency.MONTHLY)
+                .map(rule -> new SubscriptionsResponse.Item(rule.getDescription(), rule.getAmount(),
+                        SubscriptionsResponse.Source.RECURRENCE))
+                .forEach(items::add);
+        recurrenceService.listSuggestions(userId).stream()
+                .map(suggestion -> new SubscriptionsResponse.Item(suggestion.description(), suggestion.amount(),
+                        SubscriptionsResponse.Source.SUGGESTION))
+                .forEach(items::add);
+        BigDecimal total = items.stream()
+                .map(SubscriptionsResponse.Item::amount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return new SubscriptionsResponse(total, items);
     }
 }

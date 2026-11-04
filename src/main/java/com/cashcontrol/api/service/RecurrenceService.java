@@ -8,6 +8,7 @@ import com.cashcontrol.api.dto.response.DeleteRecurrenceResult;
 import com.cashcontrol.api.dto.response.EditRecurrenceResult;
 import com.cashcontrol.api.dto.response.RecurrenceCreationResponse;
 import com.cashcontrol.api.dto.response.RecurrenceRuleResponse;
+import com.cashcontrol.api.dto.response.RecurrenceSuggestionResponse;
 
 import java.util.List;
 import java.util.UUID;
@@ -27,6 +28,15 @@ public interface RecurrenceService {
     List<RecurrenceRuleResponse> listRecurrences(UUID userId);
 
     RecurrenceRuleResponse getRecurrence(UUID ruleId, UUID userId);
+
+    /**
+     * Despesas que se repetem nos últimos meses sem recorrência ativa correspondente, menos as recusadas.
+     * Ver {@link RecurrenceDetector}.
+     */
+    List<RecurrenceSuggestionResponse> listSuggestions(UUID userId);
+
+    /** Recusa a sugestão do padrão; ela deixa de aparecer em {@link #listSuggestions}. */
+    void dismissSuggestion(String pattern, UUID userId);
 
     int generatePendingInstances(int lookaheadDays);
 
