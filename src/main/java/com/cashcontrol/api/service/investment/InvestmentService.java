@@ -211,6 +211,26 @@ public class InvestmentService {
     public record DashboardFigures(BigDecimal gross, BigDecimal net, BigDecimal yieldMonth) {
     }
 
+    /**
+     * Valor líquido de hoje (com os impostos de um resgate hoje) das aplicações pedidas do usuário.
+     * Ficam de fora as de outro usuário, as apagadas e as já resgatadas por inteiro.
+     */
+    @Transactional(readOnly = true)
+    public Map<UUID, BigDecimal> netValues(UUID userId, Collection<UUID> holdingIds, LocalDate today) {
+        if (holdingIds.isEmpty()) {
+            return Map.of();
+        }
+        List<FixedIncomeHolding> active = holdingRepository.findAllById(holdingIds).stream()
+                .filter(holding -> holding.getUserId().equals(userId))
+                .filter(holding -> holding.getDeletedAt() == null)
+                .filter(holding -> holding.getStatus() == FixedIncomeStatus.ACTIVE)
+                .toList();
+        MarketRates rates = loadRates(active, today);
+        Map<UUID, BigDecimal> values = new HashMap<>();
+        active.forEach(holding -> values.put(holding.getId(), calculator.value(holding, today, rates).net()));
+        return values;
+    }
+
     /** A aplicação segue o escopo da conta de investimento; {@code null} aceita todas. */
     private static boolean inScope(FixedIncomeHolding holding, AccountScope scope) {
         return scope == null || holding.getAccount().getScope() == scope;
