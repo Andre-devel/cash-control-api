@@ -129,7 +129,7 @@ public class TransactionController {
             @Parameter(description = "Payment date to (inclusive)") @RequestParam(required = false) LocalDate paymentDateTo,
             @Parameter(description = "Minimum amount") @RequestParam(required = false) BigDecimal amountMin,
             @Parameter(description = "Maximum amount") @RequestParam(required = false) BigDecimal amountMax,
-            @Parameter(description = "Full-text search on description, notes and counterparty name") @RequestParam(required = false) String searchText,
+            @Parameter(description = "Search: every word must appear (accent-insensitive) in description, notes, counterparty, category, subcategory, account or card; a pt-BR amount such as 45,99 matches the exact amount") @RequestParam(required = false) String searchText,
             @Parameter(description = "Include cancelled transactions") @RequestParam(defaultValue = "false") boolean includeCancelled,
             @Parameter(description = "Filter by payment method slug") @RequestParam(required = false) PaymentMethodSlug paymentMethod,
             @Parameter(description = "Collapse each installment series into a single row representing the whole purchase")
@@ -173,7 +173,7 @@ public class TransactionController {
             @Parameter(description = "Payment date to (inclusive)") @RequestParam(required = false) LocalDate paymentDateTo,
             @Parameter(description = "Minimum amount") @RequestParam(required = false) BigDecimal amountMin,
             @Parameter(description = "Maximum amount") @RequestParam(required = false) BigDecimal amountMax,
-            @Parameter(description = "Full-text search on description, notes and counterparty name") @RequestParam(required = false) String searchText,
+            @Parameter(description = "Search: every word must appear (accent-insensitive) in description, notes, counterparty, category, subcategory, account or card; a pt-BR amount such as 45,99 matches the exact amount") @RequestParam(required = false) String searchText,
             @Parameter(description = "Filter by payment method slug") @RequestParam(required = false) PaymentMethodSlug paymentMethod,
             @Parameter(description = "Include credit card purchases (they never touch the account balance)")
             @RequestParam(defaultValue = "true") boolean includeCreditCard,

@@ -323,9 +323,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             AND (CAST(:paymentDateTo AS LocalDate) IS NULL OR t.paymentDate <= :paymentDateTo)
             AND (:amountMin IS NULL OR t.amount >= :amountMin)
             AND (:amountMax IS NULL OR t.amount <= :amountMax)
-            AND (COALESCE(:searchText, '') = '' OR LOWER(t.description) LIKE LOWER(CONCAT('%', CAST(:searchText AS String), '%'))
-                 OR LOWER(COALESCE(t.notes, '')) LIKE LOWER(CONCAT('%', CAST(:searchText AS String), '%'))
-                 OR LOWER(COALESCE(t.counterpartyName, '')) LIKE LOWER(CONCAT('%', CAST(:searchText AS String), '%')))
+            AND (COALESCE(:searchText, '') = ''
+                 OR function('transaction_matches_search', t.id, CAST(:searchText AS String)) = TRUE)
             AND (:includeCancelled = TRUE OR t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED)
             AND (:paymentMethod IS NULL OR t.paymentMethod.slug = :paymentMethod)
             AND (:includeCreditCard = TRUE OR t.creditCard IS NULL)

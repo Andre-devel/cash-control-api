@@ -106,6 +106,33 @@ class TransactionRepositoryIntegrationTest {
     }
 
     @Test
+    void findWithFilters_searchText_ignoresAccentsAndWordOrder_andMatchesSquashedWordsAndAmounts() {
+        saveTransaction(userId, defaultAccount, TransactionType.EXPENSE, TransactionStatus.PAID,
+                new BigDecimal("67.27"), "Supermercado Danin Penapolis", null, LocalDate.now(), LocalDate.now());
+        saveTransaction(userId, defaultAccount, TransactionType.EXPENSE, TransactionStatus.PAID,
+                new BigDecimal("45.99"), "MERCADOLIVRE*MERCADOL", null, LocalDate.now(), LocalDate.now());
+        saveTransaction(userId, defaultAccount, TransactionType.EXPENSE, TransactionStatus.PAID,
+                new BigDecimal("1200.00"), "Café da manhã", null, LocalDate.now(), LocalDate.now());
+
+        assertThat(descriptionsFor("cafe MANHA")).containsExactly("Café da manhã");
+        assertThat(descriptionsFor("danin super")).containsExactly("Supermercado Danin Penapolis");
+        assertThat(descriptionsFor("mercado livre")).containsExactly("MERCADOLIVRE*MERCADOL");
+        assertThat(descriptionsFor("45,99")).containsExactly("MERCADOLIVRE*MERCADOL");
+        assertThat(descriptionsFor("R$ 1.200")).containsExactly("Café da manhã");
+        // O nome da conta também conta: todas estão em "Default Account".
+        assertThat(descriptionsFor("default")).hasSize(3);
+        assertThat(descriptionsFor("danin farmacia")).isEmpty();
+    }
+
+    private List<String> descriptionsFor(String searchText) {
+        return transactionRepository.findWithFilters(
+                        userId, null, null, null, null,
+                        null, null, null, null,
+                        null, null, searchText, false, null, false, true, null, PageRequest.of(0, 100))
+                .getContent().stream().map(Transaction::getDescription).toList();
+    }
+
+    @Test
     void findWithFilters_allFiltersNull_scopedToUser() {
         UUID otherUser = jdbcTemplate.queryForObject(
                 "INSERT INTO users (email, account_status_id, auth_origin_id, credentials_updated_at) " +
