@@ -399,9 +399,13 @@ public class PluggyClient {
         }
     }
 
-    /** Limite do cartão segundo o banco; usado = {@code creditLimit - availableCreditLimit}. */
+    /**
+     * Limite do cartão segundo o banco; usado = {@code creditLimit - availableCreditLimit}. Só os
+     * campos que o app usa: as datas da fatura vêm em formatos diferentes por banco (o Inter PF manda
+     * {@code "2026-11-07"}, sem hora), e mapear uma delas como {@code Instant} derrubava a leitura
+     * de todas as contas do item.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record CreditData(BigDecimal creditLimit, BigDecimal availableCreditLimit,
-                             Instant balanceCloseDate, Instant balanceDueDate) {
+    public record CreditData(BigDecimal creditLimit, BigDecimal availableCreditLimit) {
     }
 }

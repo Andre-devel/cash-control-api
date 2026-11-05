@@ -93,4 +93,22 @@ class PluggyCounterpartyTest {
         return new PluggyTransaction("tx-1", "Pix", value, value.signum() < 0 ? "DEBIT" : "CREDIT", "POSTED",
                 Instant.parse("2026-11-03T15:00:00Z"), null, null, paymentData, merchant);
     }
+
+    @Test
+    void account_withCreditDataInTheInterPfShape_parses() throws Exception {
+        // Formato real do cartão Gold do Inter PF (2026-11-05): datas sem hora, closeDate nulo e
+        // campos que o app não usa. Antes, o Instant em balanceDueDate derrubava a leitura.
+        String json = """
+                {"id":"acc-1","type":"CREDIT","subtype":"CREDIT_CARD","name":"Mastercard","number":"7866",
+                 "balance":6755.86,"creditData":{"level":"GOLD","brand":"MASTERCARD","balanceCloseDate":null,
+                 "balanceDueDate":"2026-11-07","availableCreditLimit":2814.14,"minimumPayment":628.36,
+                 "creditLimit":9570,"isLimitFlexible":false,"status":"ACTIVE",
+                 "disaggregatedCreditLimits":[{"usedAmount":6755.86,"limitAmount":9570}]}}
+                """;
+        PluggyClient.PluggyAccount account = JsonMapper.builder().build().readValue(json, PluggyClient.PluggyAccount.class);
+
+        assertThat(account.balance()).isEqualByComparingTo("6755.86");
+        assertThat(account.creditData().creditLimit()).isEqualByComparingTo("9570");
+        assertThat(account.creditData().availableCreditLimit()).isEqualByComparingTo("2814.14");
+    }
 }

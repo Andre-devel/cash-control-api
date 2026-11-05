@@ -297,8 +297,7 @@ class BankReconciliationIntegrationTest {
                 new PluggyAccount(bankExternalId, "BANK", "CHECKING_ACCOUNT", "Conta Corrente", null, "1234567-8",
                         balance, null),
                 new PluggyAccount(cardExternalId, "CREDIT", "CREDIT_CARD", "Mastercard", "Inter Black", "1234",
-                        new BigDecimal("1200.00"), new CreditData(new BigDecimal("10000.00"), new BigDecimal("8800.00"),
-                        Instant.parse("2026-11-10T03:00:00Z"), Instant.parse("2026-11-17T03:00:00Z")))));
+                        new BigDecimal("1200.00"), new CreditData(new BigDecimal("10000.00"), new BigDecimal("8800.00")))));
     }
 
     private void register() throws Exception {
