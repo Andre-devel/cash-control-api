@@ -62,6 +62,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -380,9 +381,14 @@ public class FaturaImportServiceImpl implements FaturaImportService {
                     continue;
                 }
                 boolean matches = parceled
-                        ? row.installmentNumber().equals(item.getInstallmentNumber())
-                          && row.totalInstallments().equals(item.getTotalInstallments())
-                          && item.getAmount().abs().subtract(amount).abs().compareTo(INSTALLMENT_TOLERANCE) <= 0
+                        ? (row.installmentNumber().equals(item.getInstallmentNumber())
+                           && row.totalInstallments().equals(item.getTotalInstallments())
+                           && item.getAmount().abs().subtract(amount).abs().compareTo(INSTALLMENT_TOLERANCE) <= 0)
+                          // A parcela do nome ("AUTO04D10") que entrou antes como compra à vista:
+                          // mesmo estabelecimento e mesmo valor, sem posição de parcela.
+                          || (item.getInstallmentNumber() == null
+                              && item.getAmount().abs().compareTo(amount) == 0
+                              && Objects.equals(MerchantKey.of(item.getDescription()), MerchantKey.of(row.description())))
                         : item.getAmount().abs().compareTo(amount) == 0
                           && item.getCompetenceDate().getDayOfMonth() == row.date().getDayOfMonth();
                 if (matches) {

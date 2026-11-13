@@ -6,6 +6,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -29,6 +30,8 @@ import java.util.regex.Pattern;
  *
  * <pre>
  * 1. sufixo de parcela   regexp_replace(d, '\(\s*parcela\s+\d+\s+de\s+\d+\s*\)', '', 'gi')
+ *    e a parcela no nome ("AUTO04D10", ver {@link #merchantInstallment}), que o backfill
+ *    não tira: veio depois dele, e só o estabelecimento que cobra assim muda de chave
  * 2. acentos             unaccent(...)                  -- exige CREATE EXTENSION unaccent
  * 3. caixa               lower(...)
  * 4. prefixo de gateway  regexp_replace(..., '^[a-z0-9]{1,9}[\s ]*\*[\s ]*', '')
@@ -59,6 +62,14 @@ public final class MerchantKey {
     /** O mesmo sufixo que o parser da fatura lê para extrair a posição da parcela. */
     private static final Pattern INSTALLMENT_SUFFIX =
             Pattern.compile("\\(\\s*Parcela\\s+\\d+\\s+de\\s+\\d+\\s*\\)", Pattern.CASE_INSENSITIVE);
+
+    /**
+     * Parcela que o próprio estabelecimento escreve no nome, colada a uma palavra: a cobrança
+     * mensal do seguro "TOKIO MARINE AUTO04D10" é a 4 de 10. Para o banco cada mês é uma compra
+     * à vista; só o nome diz que é parcela.
+     */
+    private static final Pattern MERCHANT_INSTALLMENT =
+            Pattern.compile("(?<=[A-Za-z*])(\\d{2})[dD](\\d{2})(?![0-9A-Za-z])");
 
     private static final Pattern DIACRITICS = Pattern.compile("\\p{M}+");
 
@@ -145,7 +156,28 @@ public final class MerchantKey {
      * um nível acima. Duas cópias do padrão seriam duas chances de divergir.
      */
     public static String stripInstallmentSuffix(String description) {
-        return INSTALLMENT_SUFFIX.matcher(description).replaceAll("").trim();
+        String stripped = INSTALLMENT_SUFFIX.matcher(description).replaceAll("");
+        if (merchantInstallment(stripped) != null) {
+            stripped = MERCHANT_INSTALLMENT.matcher(stripped).replaceFirst("");
+        }
+        return stripped.trim();
+    }
+
+    /** Posição da parcela: a {@code number}ª de {@code total}. */
+    public record Installment(int number, int total) {}
+
+    /**
+     * A parcela escrita no nome do estabelecimento ({@code AUTO04D10}), ou nula. Só vale de 1 a
+     * {@code total}, com {@code total} de pelo menos 2: o resto é parte do nome.
+     */
+    public static Installment merchantInstallment(String description) {
+        Matcher matcher = MERCHANT_INSTALLMENT.matcher(description);
+        if (!matcher.find()) {
+            return null;
+        }
+        int number = Integer.parseInt(matcher.group(1));
+        int total = Integer.parseInt(matcher.group(2));
+        return number >= 1 && total >= 2 && number <= total ? new Installment(number, total) : null;
     }
 
     /**

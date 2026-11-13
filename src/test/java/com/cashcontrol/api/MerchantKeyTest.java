@@ -46,6 +46,26 @@ class MerchantKeyTest {
     }
 
     @Test
+    void key_isTheSameAcrossInstallmentsWrittenInTheMerchantName() {
+        assertThat(MerchantKey.of("tokio marine auto01d10 sao paulo     bra"))
+                .isEqualTo(MerchantKey.of("TOKIO MARINE AUTO04D10 SAO PAULO BRA"))
+                .isEqualTo("tokio marine auto sao paulo");
+    }
+
+    @Test
+    void merchantInstallment_readsOnlyAPlausiblePosition() {
+        assertThat(MerchantKey.merchantInstallment("tokio marine auto04d10 sao paulo bra"))
+                .isEqualTo(new MerchantKey.Installment(4, 10));
+        assertThat(MerchantKey.merchantInstallment("TOKIO MARINE*AUTO10D10")).isEqualTo(new MerchantKey.Installment(10, 10));
+        // Parcela além do total, total 1, solto de palavra ou colado a mais dígitos: é nome.
+        assertThat(MerchantKey.merchantInstallment("LOJA X11D10")).isNull();
+        assertThat(MerchantKey.merchantInstallment("LOJA X01D01")).isNull();
+        assertThat(MerchantKey.merchantInstallment("IMPRESSAO 04D10")).isNull();
+        assertThat(MerchantKey.merchantInstallment("LOJA X04D100")).isNull();
+        assertThat(MerchantKey.stripInstallmentSuffix("LOJA X11D10")).isEqualTo("LOJA X11D10");
+    }
+
+    @Test
     void key_ignoresCaseAccentsAndLayoutWhitespace() {
         // Caixa e espaçamento variam entre extrações do PDF; acento varia entre o extrato
         // e a fatura do mesmo comerciante.

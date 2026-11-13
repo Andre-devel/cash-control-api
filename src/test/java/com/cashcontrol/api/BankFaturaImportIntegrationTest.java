@@ -151,18 +151,60 @@ class BankFaturaImportIntegrationTest {
     }
 
     @Test
+    void installmentInTheMerchantName_becomesASeries_andNextMonthIsTheGeneratedOne() {
+        // Seguro cobrado pela seguradora mês a mês: para o banco é compra à vista, só o nome
+        // diz a parcela ("AUTO03D10" é a 3 de 10).
+        givenBank(card("tokio-3", "TOKIO MARINE AUTO03D10 SAO PAULO     BRA", "99.76", "DEBIT", "2026-07-20", "7866",
+                JULY, null, null, null));
+        FaturaImportPreviewResponse july = faturaImportService.previewFromBank(cardId, JULY, userId);
+
+        FaturaImportPreviewRow third = row(july, "TOKIO");
+        assertThat(third.installmentNumber()).isEqualTo(3);
+        assertThat(third.totalInstallments()).isEqualTo(10);
+        assertThat(third.date()).isEqualTo(LocalDate.of(2026, 5, 1));
+        assertThat(commit(july).futureInstallments()).isEqualTo(7);
+
+        // Agosto: outro dia, outro id e "AUTO04D10" no nome — é a parcela já gerada.
+        givenBank(card("tokio-4", "TOKIO MARINE AUTO04D10 SAO PAULO     BRA", "99.76", "DEBIT", "2026-08-11", "7866",
+                AUGUST, null, null, null));
+        FaturaImportPreviewResponse august = faturaImportService.previewFromBank(cardId, AUGUST, userId);
+        assertThat(row(august, "TOKIO").duplicate()).isTrue();
+        commit(august);
+
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM invoice_items WHERE user_id = ?",
+                Integer.class, userId)).isEqualTo(8);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(DISTINCT installment_series_id) FROM transactions "
+                + "WHERE user_id = ? AND description = 'TOKIO MARINE AUTO SAO PAULO BRA'", Integer.class, userId))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void merchantInstallment_alreadyImportedAsASingleCharge_isAPossibleDuplicate() {
+        // Antes desta regra a parcela entrou como compra à vista, sem posição.
+        givenBank(card("tokio-old", "TOKIO MARINE AUTO03D10 SAO PAULO     BRA", "99.76", "DEBIT", "2026-07-20", "7866",
+                JULY, null, null, null));
+        commit(faturaImportService.previewFromBank(cardId, JULY, userId));
+        jdbcTemplate.update("UPDATE invoice_items SET installment_number = NULL, total_installments = NULL, "
+                + "external_ref = 'antiga' WHERE user_id = ? AND installment_number = 3", userId);
+
+        FaturaImportPreviewRow again = row(faturaImportService.previewFromBank(cardId, JULY, userId), "TOKIO");
+        assertThat(again.duplicate()).isFalse();
+        assertThat(again.possibleDuplicate()).isTrue();
+    }
+
+    @Test
     void sameChargeFromAnotherOrigin_isAPossibleDuplicate() {
         givenBank(julyBill());
         commit(faturaImportService.previewFromBank(cardId, JULY, userId));
 
         // As mesmas compras com outra descrição: como viriam do PDF, chaves diferentes.
         givenBank(
-                card("pdf-1", "Tokio Marine", "99.76", "DEBIT", "2026-07-20", "7866", JULY, null, null, null),
+                card("pdf-1", "Posto Ipiranga", "99.76", "DEBIT", "2026-07-20", "7866", JULY, null, null, null),
                 card("pdf-2", "MERCADOLIVRE*MERCADOL", "45.95", "DEBIT", "2026-07-10", "4776", JULY, 3, 5, "2026-05-10"),
                 card("pdf-3", "Outra loja", "99.76", "DEBIT", "2026-07-21", "7866", JULY, null, null, null));
         FaturaImportPreviewResponse preview = faturaImportService.previewFromBank(cardId, JULY, userId);
 
-        assertThat(row(preview, "Tokio").possibleDuplicate()).isTrue();
+        assertThat(row(preview, "Posto").possibleDuplicate()).isTrue();
         assertThat(row(preview, "MERCADOLIVRE").possibleDuplicate()).isTrue();
         // Mesmo valor em outro dia não é o mesmo fato.
         assertThat(row(preview, "Outra").possibleDuplicate()).isFalse();
@@ -216,7 +258,7 @@ class BankFaturaImportIntegrationTest {
 
     private static PluggyTransaction[] julyBill() {
         return new PluggyTransaction[]{
-                card("single", "TOKIO MARINE AUTO03D10 SAO PAULO     BRA", "99.76", "DEBIT", "2026-07-20", "7866",
+                card("single", "POSTO IPIRANGA SAO PAULO     BRA", "99.76", "DEBIT", "2026-07-20", "7866",
                         JULY, null, null, null),
                 // A parcela vem com a data dela na fatura; a da compra está no metadado.
                 card("parcel", "MERCADOLIVRE MERCADOL  EXTREMA       BRA", "45.99", "DEBIT", "2026-07-10", "4776",

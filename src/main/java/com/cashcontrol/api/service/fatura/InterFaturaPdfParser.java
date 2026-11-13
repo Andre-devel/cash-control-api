@@ -230,7 +230,7 @@ public class InterFaturaPdfParser implements FaturaParser {
         }
 
         return new ParsedFaturaRow(lineNumber, date, description, amount,
-                installmentNumber, totalInstallments);
+                installmentNumber, totalInstallments).withMerchantInstallment();
     }
 
     /** {@code "04", "abr", "2026"} — mês por abreviação pt-BR, não por {@code Locale}. */

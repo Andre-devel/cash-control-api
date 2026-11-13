@@ -193,7 +193,7 @@ public class PluggyFaturaSource {
         return new ParsedFaturaRow(lineNumber, date, description,
                 "DEBIT".equals(tx.type()) ? absolute.negate() : absolute,
                 parceled ? card.installmentNumber() : null,
-                parceled ? card.totalInstallments() : null);
+                parceled ? card.totalInstallments() : null).withMerchantInstallment();
     }
 
     private BankConnectionAccount requireLink(UUID creditCardId, UUID userId) {

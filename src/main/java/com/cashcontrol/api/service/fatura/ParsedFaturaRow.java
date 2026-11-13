@@ -1,5 +1,7 @@
 package com.cashcontrol.api.service.fatura;
 
+import com.cashcontrol.api.service.MerchantKey;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Locale;
@@ -25,6 +27,25 @@ public record ParsedFaturaRow(
         Integer installmentNumber,
         Integer totalInstallments
 ) {
+
+    /**
+     * A linha com a parcela que o estabelecimento escreve no nome ({@code TOKIO MARINE
+     * AUTO04D10}, a 4 de 10), quando ela não declara outra. Cada mês é uma cobrança à vista,
+     * com a data dela; a data da compra, que a parcela precisa repetir mês a mês para casar com
+     * a gerada no mês anterior, vira o dia 1 do mês da primeira parcela.
+     */
+    public ParsedFaturaRow withMerchantInstallment() {
+        if (installmentNumber != null || signedAmount.signum() > 0) {
+            return this;
+        }
+        MerchantKey.Installment installment = MerchantKey.merchantInstallment(description);
+        if (installment == null) {
+            return this;
+        }
+        LocalDate purchaseMonth = date.minusMonths(installment.number() - 1L).withDayOfMonth(1);
+        return new ParsedFaturaRow(lineNumber, purchaseMonth, description, signedAmount,
+                installment.number(), installment.total());
+    }
 
     /**
      * Crédito que é o pagamento da fatura anterior ("PAGTO DEBITO AUTOMATICO", "PAGAMENTO
