@@ -119,7 +119,7 @@ public class TransactionController {
     @GetMapping
     @PreAuthorize("isAuthenticated()")
     public Page<TransactionSummaryResponse> listTransactions(
-            @Parameter(description = "Filter by account UUID") @RequestParam(required = false) UUID accountId,
+            @Parameter(description = "Filter by account UUID; repeat the parameter to include several accounts") @RequestParam(required = false) List<UUID> accountId,
             @Parameter(description = "Filter by transaction type") @RequestParam(required = false) TransactionType type,
             @Parameter(description = "Filter by status") @RequestParam(required = false) TransactionStatus status,
             @Parameter(description = "Filter by category UUID") @RequestParam(required = false) UUID categoryId,
@@ -163,7 +163,7 @@ public class TransactionController {
     @GetMapping("/summary")
     @PreAuthorize("isAuthenticated()")
     public TransactionTotalsResponse summarizeTransactions(
-            @Parameter(description = "Filter by account UUID") @RequestParam(required = false) UUID accountId,
+            @Parameter(description = "Filter by account UUID; repeat the parameter to include several accounts") @RequestParam(required = false) List<UUID> accountId,
             @Parameter(description = "Filter by transaction type") @RequestParam(required = false) TransactionType type,
             @Parameter(description = "Filter by status") @RequestParam(required = false) TransactionStatus status,
             @Parameter(description = "Filter by category UUID") @RequestParam(required = false) UUID categoryId,

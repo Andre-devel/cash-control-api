@@ -312,7 +312,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
     String FILTER_PREDICATES = """
             WHERE t.userId = :userId
             AND t.account.deletedAt IS NULL
-            AND (:accountId IS NULL OR t.account.id = :accountId)
+            AND (COALESCE(:accountIds) IS NULL OR t.account.id IN :accountIds)
             AND (:type IS NULL OR t.type = :type)
             AND (:status IS NULL OR t.status = :status)
             AND (:categoryId IS NULL OR t.category.id = :categoryId OR t.subcategory.id = :categoryId
@@ -334,7 +334,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            countQuery = "SELECT COUNT(t) FROM Transaction t " + FILTER_PREDICATES + INSTALLMENT_GROUPING)
     Page<Transaction> findWithFilters(
             @Param("userId") UUID userId,
-            @Param("accountId") UUID accountId,
+            @Param("accountIds") Collection<UUID> accountIds,
             @Param("type") TransactionType type,
             @Param("status") TransactionStatus status,
             @Param("categoryId") UUID categoryId,
@@ -358,7 +358,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            " AND t.status <> com.cashcontrol.api.domain.entity.TransactionStatus.CANCELLED GROUP BY t.type")
     List<Object[]> sumByTypeWithFilters(
             @Param("userId") UUID userId,
-            @Param("accountId") UUID accountId,
+            @Param("accountIds") Collection<UUID> accountIds,
             @Param("type") TransactionType type,
             @Param("status") TransactionStatus status,
             @Param("categoryId") UUID categoryId,

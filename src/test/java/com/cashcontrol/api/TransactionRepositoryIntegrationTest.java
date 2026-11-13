@@ -177,12 +177,34 @@ class TransactionRepositoryIntegrationTest {
                 new BigDecimal("200.00"), "Savings income", null, LocalDate.now(), LocalDate.now());
 
         Page<Transaction> result = transactionRepository.findWithFilters(
-                userId, defaultAccount.getId(), null, null, null,
+                userId, List.of(defaultAccount.getId()), null, null, null,
                 null, null, null, null,
                 null, null, null, false, null, false, true, null, PageRequest.of(0, 100));
 
         assertThat(result.getTotalElements()).isEqualTo(1);
         assertThat(result.getContent().get(0).getDescription()).isEqualTo("Checking income");
+    }
+
+    @Test
+    void findWithFilters_severalAccounts_keepsOnlyThoseAccounts() {
+        Account savings = createAccount(userId, AccountType.SAVINGS, "Savings");
+        Account wallet = createAccount(userId, AccountType.CASH, "Wallet");
+        for (Account account : List.of(defaultAccount, savings, wallet)) {
+            saveTransaction(userId, account, TransactionType.INCOME, TransactionStatus.PAID,
+                    new BigDecimal("10.00"), account.getName() + " income", null, LocalDate.now(), LocalDate.now());
+        }
+
+        Page<Transaction> result = transactionRepository.findWithFilters(
+                userId, List.of(defaultAccount.getId(), wallet.getId()), null, null, null,
+                null, null, null, null,
+                null, null, null, false, null, false, true, null, PageRequest.of(0, 100));
+        List<Object[]> totals = transactionRepository.sumByTypeWithFilters(
+                userId, List.of(defaultAccount.getId(), wallet.getId()), null, null, null,
+                null, null, null, null, null, null, null, false, null, true, null);
+
+        assertThat(result.getContent()).extracting(Transaction::getDescription)
+                .containsExactlyInAnyOrder("Default Account income", "Wallet income");
+        assertThat(totals).singleElement().satisfies(row -> assertThat((Long) row[1]).isEqualTo(2L));
     }
 
     @Test
@@ -361,7 +383,7 @@ class TransactionRepositoryIntegrationTest {
                 new BigDecimal("80.00"), "Supermercado Extra", null, LocalDate.now(), LocalDate.now());
 
         Page<Transaction> result = transactionRepository.findWithFilters(
-                userId, defaultAccount.getId(), TransactionType.EXPENSE, null, null,
+                userId, List.of(defaultAccount.getId()), TransactionType.EXPENSE, null, null,
                 null, null, null, null,
                 null, null, "supermercado", false, null, false, true, null, PageRequest.of(0, 100));
 

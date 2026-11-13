@@ -391,7 +391,7 @@ public class TransactionServiceImpl implements TransactionService {
     public Page<TransactionSummaryResponse> listTransactions(TransactionFilterRequest filter, UUID userId, Pageable pageable) {
         Page<Transaction> page = transactionRepository.findWithFilters(
                 userId,
-                filter.accountId(),
+                filter.accountIds(),
                 filter.type(),
                 filter.status(),
                 filter.categoryId(),
@@ -438,7 +438,7 @@ public class TransactionServiceImpl implements TransactionService {
     public TransactionTotalsResponse summarizeTransactions(TransactionFilterRequest filter, UUID userId) {
         List<Object[]> rows = transactionRepository.sumByTypeWithFilters(
                 userId,
-                filter.accountId(),
+                filter.accountIds(),
                 filter.type(),
                 filter.status(),
                 filter.categoryId(),

@@ -7,10 +7,12 @@ import com.cashcontrol.api.domain.entity.TransactionType;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 public record TransactionFilterRequest(
-        UUID accountId,
+        /** Contas do filtro; nulo ou vazio traz todas. */
+        List<UUID> accountIds,
         TransactionType type,
         TransactionStatus status,
         UUID categoryId,
@@ -30,15 +32,19 @@ public record TransactionFilterRequest(
         /** Escopo PF/PJ do lançamento (o do cartão ou o da conta); nulo traz todos. */
         AccountScope scope
 ) {
-    public TransactionFilterRequest(UUID accountId, TransactionType type, TransactionStatus status, UUID categoryId,
+    public TransactionFilterRequest(List<UUID> accountIds, TransactionType type, TransactionStatus status, UUID categoryId,
                                     LocalDate competenceDateFrom, LocalDate competenceDateTo,
                                     LocalDate paymentDateFrom, LocalDate paymentDateTo,
                                     BigDecimal amountMin, BigDecimal amountMax, String searchText,
                                     boolean includeCancelled, PaymentMethodSlug paymentMethod,
                                     boolean groupInstallments, boolean includeCreditCard) {
-        this(accountId, type, status, categoryId, competenceDateFrom, competenceDateTo, paymentDateFrom, paymentDateTo,
+        this(accountIds, type, status, categoryId, competenceDateFrom, competenceDateTo, paymentDateFrom, paymentDateTo,
                 amountMin, amountMax, searchText, includeCancelled, paymentMethod, groupInstallments, includeCreditCard,
                 null);
+    }
+
+    public TransactionFilterRequest {
+        accountIds = accountIds == null || accountIds.isEmpty() ? null : List.copyOf(accountIds);
     }
 
     public static TransactionFilterRequest empty() {
