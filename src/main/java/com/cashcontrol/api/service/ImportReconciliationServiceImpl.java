@@ -158,7 +158,7 @@ public class ImportReconciliationServiceImpl implements ImportReconciliationServ
         return new Analysis(invoicePayments, investments, findInvestmentAccount(userId), findSeriesMerges(userId));
     }
 
-    /** Mesmo critério do import: valor dentro da tolerância e vencimento perto da data. */
+    /** Mesmo critério do import: vencimento perto da data e valor que cabe no que falta pagar. */
     private Map<Transaction, Invoice> matchInvoices(List<Transaction> candidates, UUID userId) {
         Map<Transaction, Invoice> matched = new LinkedHashMap<>();
         if (candidates.isEmpty()) {
@@ -171,7 +171,7 @@ public class ImportReconciliationServiceImpl implements ImportReconciliationServ
                 last.plusDays(InvoicePaymentMatcher.DUE_DAYS_AFTER_PAYMENT)));
         for (Transaction tx : candidates) {
             Invoice invoice = matcher.claim(tx.getCompetenceDate(), tx.getAmount());
-            if (invoice != null && InvoicePaymentMatcher.amountMatches(invoice, tx.getAmount())) {
+            if (invoice != null) {
                 matched.put(tx, invoice);
             }
         }
@@ -245,8 +245,7 @@ public class ImportReconciliationServiceImpl implements ImportReconciliationServ
      */
     private void toInvoicePayment(Transaction expense, Invoice invoice) {
         if (!invoice.isPaidWithoutTransaction()
-            && (invoice.getStatus() == InvoiceStatus.PAID
-                || expense.getAmount().compareTo(invoice.getTotalAmount().subtract(invoice.getPaidAmount())) > 0)) {
+            && (invoice.getStatus() == InvoiceStatus.PAID || !InvoicePaymentMatcher.fits(invoice, expense.getAmount()))) {
             // Outro pagamento chegou à fatura depois da prévia; converter criaria saldo negativo nela.
             return;
         }

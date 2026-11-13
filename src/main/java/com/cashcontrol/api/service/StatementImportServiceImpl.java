@@ -311,25 +311,26 @@ public class StatementImportServiceImpl implements StatementImportService {
         Invoice invoice = null;
         boolean invoiceAmountMismatch = false;
         boolean invoicePaymentUnmatched = false;
+        List<Invoice> options = outgoing ? invoices.optionsFor(row.date()) : List.of();
         if (mapping.investment() && investmentAccount != null) {
             type = TransactionType.TRANSFER;
             transferAccount = investmentAccount;
         } else if (type == TransactionType.EXPENSE && looksLikeInvoicePayment(row.description())) {
+            // Paga a fatura inteira ou parte dela (a paga em partes casa pagamento a pagamento).
             invoice = invoices.claim(row.date(), amount);
-            invoicePaymentUnmatched = invoice == null;
             if (invoice != null) {
-                // Valor fora da tolerância é sinal de dado errado na fatura ou de outro
-                // pagamento; casar mesmo assim deixaria a fatura PARCIAL e criaria um
-                // rotativo que talvez não exista. Fica a sugestão, a decisão é do usuário.
-                invoiceAmountMismatch = !InvoicePaymentMatcher.amountMatches(invoice, amount);
-                if (!invoiceAmountMismatch) {
-                    type = TransactionType.INVOICE_PAYMENT;
-                }
+                type = TransactionType.INVOICE_PAYMENT;
+            } else if (!options.isEmpty()) {
+                // Passa do que falta em todas: dado errado na fatura ou pagamento de outra coisa.
+                // Fica a sugestão da mais próxima, a decisão é do usuário.
+                invoice = options.getFirst();
+                invoiceAmountMismatch = true;
+            } else {
+                invoicePaymentUnmatched = true;
             }
         }
-        List<ImportInvoiceOption> invoiceOptions = outgoing
-                ? invoices.optionsFor(row.date()).stream().map(StatementImportServiceImpl::toInvoiceOption).toList()
-                : List.of();
+        List<ImportInvoiceOption> invoiceOptions =
+                options.stream().map(StatementImportServiceImpl::toInvoiceOption).toList();
 
         return new ImportPreviewRow(
                 row.lineNumber(),
@@ -504,10 +505,11 @@ public class StatementImportServiceImpl implements StatementImportService {
             if (invoice.getStatus() == InvoiceStatus.PAID) {
                 throw new BusinessRuleException("A fatura " + invoiceLabel(invoice) + " já está paga.");
             }
-            BigDecimal remaining = invoice.getTotalAmount().subtract(invoice.getPaidAmount());
-            if (row.amount().compareTo(remaining) > 0) {
+            // Até a tolerância acima do restante passa: é o IOF que o banco cobrou e a fatura
+            // ainda não tem, e o pagamento o lança nela.
+            if (!InvoicePaymentMatcher.fits(invoice, row.amount())) {
                 throw new BusinessRuleException("O valor é maior que o restante da fatura " + invoiceLabel(invoice)
-                                                + " (" + remaining.toPlainString() + ").");
+                                                + " (" + InvoicePaymentMatcher.remainingOf(invoice).toPlainString() + ").");
             }
         }
 

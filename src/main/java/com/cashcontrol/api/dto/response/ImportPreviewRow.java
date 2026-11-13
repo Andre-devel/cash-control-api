@@ -95,8 +95,9 @@ public record ImportPreviewRow(
         String invoiceLabel,
 
         @Schema(description = """
-                true quando a descrição indica pagamento de fatura, mas o valor não bate com o \
-                total da fatura sugerida. A linha fica como despesa até o usuário decidir.""")
+                true quando a descrição indica pagamento de fatura, mas o valor passa do que falta \
+                pagar em todas as faturas próximas (mesmo com a tolerância de IOF). A linha fica como \
+                despesa até o usuário decidir.""")
         boolean invoiceAmountMismatch,
 
         @Schema(description = "Faturas que esta linha de saída pode pagar, as de vencimento mais próximo primeiro")

@@ -140,9 +140,46 @@ public class BankPendingService {
             return 0;
         }
         pendingRepository.saveAll(created);
-        log.info("Bank pending: queued {} transaction(s) for account {}", created.size(), accountId);
-        notifyQueued(userId, created);
+        List<BankPendingTransaction> queuedNow = recordInvoicePayments(userId, created);
+        log.info("Bank pending: queued {} transaction(s) for account {}", queuedNow.size(), accountId);
+        if (!queuedNow.isEmpty()) {
+            notifyQueued(userId, queuedNow);
+        }
         return created.size();
+    }
+
+    /**
+     * Pagamento de fatura que casou com uma fatura entra sem confirmação: não tem categoria a
+     * escolher, e esperar o toque deixaria a fatura em aberto (e vencida) no app com o dinheiro
+     * já fora da conta. Avisa que gravou; desfazer é excluir o lançamento. O que não casou, ou
+     * pode ser lançamento repetido, fica na fila como qualquer outro.
+     *
+     * @return as pendências que continuam na fila
+     */
+    private List<BankPendingTransaction> recordInvoicePayments(UUID userId, List<BankPendingTransaction> created) {
+        Map<UUID, BankPendingTransaction> byId = created.stream()
+                .collect(Collectors.toMap(BankPendingTransaction::getId, pending -> pending));
+        Set<UUID> recorded = new HashSet<>();
+        for (BankPendingItem item : classify(userId, created)) {
+            ImportPreviewRow row = item.row();
+            if (item.creditCardId() != null || row.type() != TransactionType.INVOICE_PAYMENT || row.invoiceId() == null
+                || row.duplicate() || row.possibleDuplicate()) {
+                continue;
+            }
+            BankPendingTransaction pending = byId.get(item.id());
+            List<ImportRowError> errors = commit(pending, suggestedRow(row));
+            if (!errors.isEmpty()) {
+                log.warn("Bank pending: invoice payment {} left in the queue: {}", pending.getId(), errors.getFirst().message());
+                continue;
+            }
+            pendingRepository.delete(pending);
+            recorded.add(pending.getId());
+            pushService.send(userId, subscription -> invoicePaidPayload(row, subscription));
+        }
+        if (!recorded.isEmpty()) {
+            log.info("Bank pending: recorded {} invoice payment(s) without review", recorded.size());
+        }
+        return created.stream().filter(pending -> !recorded.contains(pending.getId())).toList();
     }
 
     /**
@@ -532,6 +569,16 @@ public class BankPendingService {
                 : parceled ? "Compra " + item.totalInstallments() + "x no cartão"
                 : "Compra no cartão";
         return hideAmounts ? title : title + " · " + money(row) + (parceled ? "/mês" : "");
+    }
+
+    /** "Pagamento de fatura · −R$ 2.356,21" / "Inter - PF · 2026-10 · lançado sem revisão" */
+    private static String invoicePaidPayload(ImportPreviewRow row, PushSubscription subscription) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("type", "recorded");
+        payload.put("ref", row.externalRef());
+        payload.put("title", "Pagamento de fatura" + (subscription.isHideAmounts() ? "" : " · " + signedMoney(row)));
+        payload.put("body", row.invoiceLabel() + " · lançado sem revisão");
+        return JSON.writeValueAsString(payload);
     }
 
     /** "5 lançamentos para revisar" / "Pix Marketplace −R$ 615,23 e mais 4" */

@@ -73,6 +73,7 @@ public class CreditCardServiceImpl implements CreditCardService {
 
     static final String BANK_RECONCILE_CATEGORY = "Tarifas e IOF";
     static final String BANK_RECONCILE_DESCRIPTION = "Ajuste para conferir com o banco";
+    static final String PAYMENT_EXCESS_DESCRIPTION = "Encargos e IOF cobrados no pagamento";
 
     @Override
     public CreditCardResponse createCard(CreateCardRequest request, UUID userId) {
@@ -243,20 +244,26 @@ public class CreditCardServiceImpl implements CreditCardService {
         Category category = categoryResolver.resolve(request.categoryId(), userId);
         Category subcategory = categoryResolver.resolveSubcategory(request.subcategoryId(), category, userId);
 
+        return InvoiceMapper.toItemResponse(addItem(invoice, request.description(), request.amount(),
+                request.competenceDate(), category, subcategory, request.notes()));
+    }
+
+    /** Item avulso (sem transação) na fatura, já somado ao total dela. */
+    private InvoiceItem addItem(Invoice invoice, String description, BigDecimal amount, LocalDate competenceDate,
+                                Category category, Category subcategory, String notes) {
         InvoiceItem item = new InvoiceItem();
-        item.setUserId(userId);
+        item.setUserId(invoice.getUserId());
         item.setInvoice(invoice);
-        item.setDescription(request.description());
-        item.setAmount(request.amount());
-        item.setCompetenceDate(request.competenceDate());
+        item.setDescription(description);
+        item.setAmount(amount);
+        item.setCompetenceDate(competenceDate);
         item.setCategory(category);
         item.setSubcategory(subcategory);
-        item.setNotes(request.notes());
+        item.setNotes(notes);
         item = invoiceItemRepository.save(item);
 
-        adjustInvoiceTotal(invoice, request.amount());
-
-        return InvoiceMapper.toItemResponse(item);
+        adjustInvoiceTotal(invoice, amount);
+        return item;
     }
 
     @Override
@@ -355,6 +362,15 @@ public class CreditCardServiceImpl implements CreditCardService {
         // estão PAGAS. O pagamento só passa a existir na conta; somá-lo ao pago dobraria a quitação.
         if (invoice.isPaidWithoutTransaction()) {
             return tx;
+        }
+
+        // O banco cobrou mais do que a fatura do app soma (o IOF que ainda não entrou nela): a
+        // diferença vira encargo na própria fatura, para ela fechar com o que saiu da conta.
+        // Quem chama já conferiu que a diferença é pequena (InvoicePaymentMatcher.fits).
+        BigDecimal excess = paymentAmount.subtract(invoice.getTotalAmount().subtract(invoice.getPaidAmount()));
+        if (excess.signum() > 0) {
+            addItem(invoice, PAYMENT_EXCESS_DESCRIPTION, excess, invoice.getClosingDate(),
+                    feesCategory(invoice.getUserId()), null, null);
         }
 
         // Na parcial, o que faltou pagar vira item rotativo da fatura seguinte.

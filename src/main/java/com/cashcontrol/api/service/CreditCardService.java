@@ -46,7 +46,9 @@ public interface CreditCardService {
 
     /**
      * Grava o pagamento já validado (fatura e conta do usuário, valor que cabe no restante)
-     * e aplica à fatura. Sobre fatura quitada por "marcar como paga" só liga o pagamento a
+     * e aplica à fatura. O que passar do restante (o import aceita a tolerância de
+     * {@code InvoicePaymentMatcher.fits}) entra antes na fatura como encargo, na categoria
+     * "Tarifas e IOF". Sobre fatura quitada por "marcar como paga" só liga o pagamento a
      * ela, sem mexer no pago. Devolve a transação gravada.
      */
     Transaction recordInvoicePayment(Invoice invoice, Account sourceAccount, BigDecimal amount, LocalDate paymentDate);

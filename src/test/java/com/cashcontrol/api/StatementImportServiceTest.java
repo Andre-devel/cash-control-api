@@ -667,21 +667,82 @@ class StatementImportServiceTest {
                 .extracting(ImportPreviewRow::type, ImportPreviewRow::invoiceId, ImportPreviewRow::invoiceAmountMismatch)
                 .containsExactly(
                         org.assertj.core.groups.Tuple.tuple(TransactionType.INVOICE_PAYMENT, july.getId(), false),
-                        // 2.241,47 contra 2.520,82: fica a sugestão, mas a linha segue despesa
-                        // até o usuário decidir — casar criaria um rotativo de R$ 279.
-                        org.assertj.core.groups.Tuple.tuple(TransactionType.EXPENSE, june.getId(), true),
+                        // Cabe no que falta da quitada por "marcar como paga": só se liga a ela.
+                        org.assertj.core.groups.Tuple.tuple(TransactionType.INVOICE_PAYMENT, june.getId(), false),
                         // Sem fatura no sistema, o pagamento é o único registro desse gasto.
                         org.assertj.core.groups.Tuple.tuple(TransactionType.EXPENSE, null, false),
                         org.assertj.core.groups.Tuple.tuple(TransactionType.EXPENSE, null, false));
         assertThat(preview.rows().getFirst().invoiceLabel()).isEqualTo("Inter - PF · 2026-07");
-        // A divergência de valor e o pagamento de janeiro, que não tem fatura no sistema.
-        assertThat(preview.warningCount()).isEqualTo(2);
+        // O pagamento de janeiro, que não tem fatura no sistema.
+        assertThat(preview.warningCount()).isEqualTo(1);
         assertThat(preview.rows()).extracting(ImportPreviewRow::invoicePaymentUnmatched)
                 .containsExactly(false, false, true, false);
         // Opções para escolher à mão: as que vencem perto, sem a já quitada por pagamento lançado.
         assertThat(preview.rows().get(3).invoiceOptions())
                 .extracting(ImportInvoiceOption::id)
                 .containsExactly(june.getId());
+    }
+
+    @Test
+    void preview_invoicePaidInParts_matchesEachPaymentToTheSameInvoice() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenNoCategoryRules();
+        Invoice october = invoice("2026-10", "2026-11-07", "4169.79", InvoiceStatus.OVERDUE, false);
+        when(invoiceRepository.findAllWithCardByUserIdAndDueDateBetween(eq(userId), any(), any()))
+                .thenReturn(List.of(october));
+
+        ImportPreviewResponse preview = service.preview(csv(
+                "09/11/2026;Pagamento efetuado;Pagamento Fatura;-2.356,21;100,00",
+                // Passa do que falta (1.813,58) em 19,25 de IOF, dentro da tolerância.
+                "10/11/2026;Pagamento efetuado;Pagamento Fatura;-1.832,83;200,00",
+                // Já não cabe: a fatura está paga.
+                "11/11/2026;Pagamento efetuado;Pagamento Fatura;-500,00;300,00"),
+                StatementFormat.INTER_CSV, accountId, userId);
+
+        assertThat(preview.rows())
+                .extracting(ImportPreviewRow::type, ImportPreviewRow::invoiceId, ImportPreviewRow::invoiceAmountMismatch)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(TransactionType.INVOICE_PAYMENT, october.getId(), false),
+                        org.assertj.core.groups.Tuple.tuple(TransactionType.INVOICE_PAYMENT, october.getId(), false),
+                        org.assertj.core.groups.Tuple.tuple(TransactionType.EXPENSE, october.getId(), true));
+    }
+
+    @Test
+    void preview_paymentAboveEveryInvoice_staysAnExpenseWithTheSuggestion() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenNoCategoryRules();
+        Invoice july = invoice("2026-07", "2026-08-10", "1617.42", InvoiceStatus.CLOSED, false);
+        when(invoiceRepository.findAllWithCardByUserIdAndDueDateBetween(eq(userId), any(), any()))
+                .thenReturn(List.of(july));
+
+        ImportPreviewResponse preview = service.preview(csv(
+                "07/08/2026;Pagamento efetuado;Pagamento Fatura;-3.000,00;100,00"),
+                StatementFormat.INTER_CSV, accountId, userId);
+
+        ImportPreviewRow row = preview.rows().getFirst();
+        assertThat(row.type()).isEqualTo(TransactionType.EXPENSE);
+        assertThat(row.invoiceId()).isEqualTo(july.getId());
+        assertThat(row.invoiceAmountMismatch()).isTrue();
+        assertThat(row.invoicePaymentUnmatched()).isFalse();
+    }
+
+    @Test
+    void commit_invoicePayment_slightlyAboveTheRemaining_isAccepted() {
+        givenAccountFound();
+        givenNoExistingImports();
+        givenPaymentMethods();
+        Invoice july = invoice("2026-07", "2026-08-10", "1617.42", InvoiceStatus.CLOSED, false);
+        when(invoiceRepository.findByIdAndUserId(july.getId(), userId)).thenReturn(Optional.of(july));
+        when(creditCardService.recordInvoicePayment(any(), any(), any(), any())).thenReturn(new Transaction());
+
+        ImportResultResponse result = service.commit(request(invoicePaymentRow("ref-1", "1630.00", july.getId())),
+                userId);
+
+        assertThat(result.imported()).isEqualTo(1);
+        verify(creditCardService).recordInvoicePayment(july, account, new BigDecimal("1630.00"),
+                LocalDate.parse("2026-08-07"));
     }
 
     @Test

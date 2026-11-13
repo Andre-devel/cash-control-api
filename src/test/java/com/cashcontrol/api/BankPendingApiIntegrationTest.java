@@ -9,7 +9,11 @@ import com.cashcontrol.api.domain.exception.BankProviderException;
 import com.cashcontrol.api.config.PostgresTestContainerConfig;
 import com.cashcontrol.api.domain.entity.AccountType;
 import com.cashcontrol.api.domain.entity.PushSubscription;
+import com.cashcontrol.api.domain.entity.CardBrand;
 import com.cashcontrol.api.dto.request.CreateAccountRequest;
+import com.cashcontrol.api.dto.request.CreateCardRequest;
+import com.cashcontrol.api.dto.request.RecordChargeRequest;
+import com.cashcontrol.api.service.CreditCardService;
 import com.cashcontrol.api.security.JwtService;
 import com.cashcontrol.api.service.AccountService;
 import com.cashcontrol.api.service.openfinance.BankConnectionService;
@@ -42,8 +46,10 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
@@ -78,6 +84,7 @@ class BankPendingApiIntegrationTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private JwtService jwtService;
     @Autowired private AccountService accountService;
+    @Autowired private CreditCardService creditCardService;
     @Autowired private BankConnectionService bankConnectionService;
     @MockitoBean private PluggyClient pluggyClient;
     @MockitoBean private WebPushSender webPushSender;
@@ -139,6 +146,41 @@ class BankPendingApiIntegrationTest {
         assertThat(queue.get(0).get("row").get("externalRef").asText()).isEqualTo("plg:t1");
         assertThat(queue.get(0).get("row").get("type").asText()).isEqualTo("EXPENSE");
         perform(get("/api/v1/bank-pending/count"), token).andExpect(jsonPath("$.count").value(2));
+    }
+
+    @Test
+    void invoicePaidInTwoParts_isRecordedWithoutReview_andTheBankFeeClosesTheInvoice() throws Exception {
+        UUID cardId = creditCardService.createCard(new CreateCardRequest("Inter - PF", CardBrand.MASTERCARD, "Inter",
+                null, new BigDecimal("10000.00"), 20, 5, null), userId).id();
+        // Fatura de outubro: fecha em 20/10 e vence em 05/11, perto dos pagamentos de 30/10.
+        creditCardService.recordCharge(cardId, new RecordChargeRequest("Loja", new BigDecimal("4169.79"),
+                LocalDate.of(2026, 10, 10), null, null, null), userId);
+        // O banco cobrou 19,25 de IOF que a fatura do app não tem: os dois pagamentos somam 4.189,04.
+        bankTransaction("f1", "Pagamento Fatura", "-2356.21", "DEBIT", EVENT_FROM.plusSeconds(60));
+        bankTransaction("f2", "Pagamento Fatura", "-1832.83", "DEBIT", EVENT_FROM.plusSeconds(120));
+        bankTransaction("p1", "Pix enviado - Padaria", "-10", "DEBIT", EVENT_FROM.plusSeconds(180));
+
+        transactionsCreated();
+        eventually(() -> sentPayloads().size() == 3);
+
+        assertThat(sentPayloads()).filteredOn(payload -> payload.contains("\"type\":\"recorded\""))
+                .hasSize(2)
+                .allSatisfy(payload -> assertThat(payload).contains("Inter - PF · 2026-10"));
+        assertThat(pendingCount()).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM transactions WHERE user_id = ? "
+                + "AND type = 'INVOICE_PAYMENT' AND external_ref IN ('plg:f1', 'plg:f2')", Integer.class, userId))
+                .isEqualTo(2);
+        Map<String, Object> invoice = jdbcTemplate.queryForMap("SELECT status, total_amount, paid_amount FROM invoices "
+                + "WHERE credit_card_id = ? AND reference_month = '2026-10'", cardId);
+        assertThat(invoice.get("status")).isEqualTo("PAID");
+        assertThat((BigDecimal) invoice.get("total_amount")).isEqualByComparingTo("4189.04");
+        assertThat((BigDecimal) invoice.get("paid_amount")).isEqualByComparingTo("4189.04");
+        assertThat(jdbcTemplate.queryForObject("SELECT amount FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id "
+                + "WHERE i.credit_card_id = ? AND ii.description LIKE 'Encargos%' AND ii.cancelled_at IS NULL",
+                BigDecimal.class, cardId)).isEqualByComparingTo("19.25");
+        // Nada de saldo rotativo sobrando na fatura seguinte depois do primeiro pagamento parcial.
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM invoice_items WHERE revolving_from_invoice_id IS NOT NULL "
+                + "AND cancelled_at IS NULL AND user_id = ?", Integer.class, userId)).isZero();
     }
 
     @Test
