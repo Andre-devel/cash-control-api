@@ -14,6 +14,8 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.math.BigDecimal;
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -116,10 +118,7 @@ public class PluggyClient {
         List<PluggyTransaction> all = new ArrayList<>();
         String after = null;
         for (int page = 0; page < MAX_TRANSACTION_PAGES; page++) {
-            URI uri = UriComponentsBuilder.fromUriString(url("/v2/transactions"))
-                    .queryParam("accountId", accountId)
-                    .queryParamIfPresent("after", Optional.ofNullable(after))
-                    .encode().build().toUri();
+            URI uri = transactionsPageUri(accountId, after);
             TransactionPage result = call(key -> restClient.get().uri(uri)
                     .header("X-API-KEY", key).retrieve().body(TransactionPage.class));
             if (result == null || result.results() == null) {
@@ -135,6 +134,38 @@ public class PluggyClient {
             throw new BankProviderException("O banco devolveu lançamentos demais de uma vez.", null);
         }
         return all;
+    }
+
+    /**
+     * A Pluggy devolve em {@code next} o sufixo pronto da próxima página (ex.:
+     * {@code ?accountId=...&after=...}), que vai colado em {@code /v2/transactions}; mandá-lo
+     * inteiro em {@code after} dá 400 INVALID_CURSOR. Se vier só o valor do cursor, usa
+     * {@code after=} como antes.
+     */
+    private URI transactionsPageUri(String accountId, String next) {
+        String base = url("/v2/transactions");
+        if (next == null || next.isBlank()) {
+            return UriComponentsBuilder.fromUriString(base)
+                    .queryParam("accountId", accountId).encode().build().toUri();
+        }
+        if (next.startsWith("?") || next.startsWith("/") || next.startsWith("&")) {
+            String suffix = next.startsWith("&") ? "?" + next.substring(1) : next;
+            String target = base + suffix;
+            if (!target.contains("accountId=")) {
+                target += (target.contains("?") ? "&" : "?") + "accountId="
+                        + URLEncoder.encode(accountId, StandardCharsets.UTF_8);
+            }
+            try {
+                // o sufixo já vem codificado pela Pluggy; codificar de novo estragaria o cursor
+                return URI.create(target);
+            } catch (IllegalArgumentException notEncoded) {
+                return UriComponentsBuilder.fromUriString(target).encode().build().toUri();
+            }
+        }
+        return UriComponentsBuilder.fromUriString(base)
+                .queryParam("accountId", accountId)
+                .queryParam("after", next)
+                .encode().build().toUri();
     }
 
     /** Faturas fechadas do cartão (Open Finance traz cerca de 12), sem os lançamentos. */

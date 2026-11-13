@@ -180,6 +180,27 @@ class PluggyClientTest {
     }
 
     @Test
+    void listTransactions_appendsTheNextSuffixToThePath() {
+        expectAuth("key-1");
+        server.expect(requestTo(BASE + "/v2/transactions?accountId=acc-1"))
+                .andRespond(withSuccess("""
+                        {"results":[{"id":"t1","description":"Pix enviado  - X","amount":-10.5,"type":"DEBIT",
+                          "status":"POSTED","date":"2026-10-30T15:18:24.000Z"}],
+                         "next":"?accountId=acc-1&after=eyJpZCI6InQxIn0="}
+                        """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE + "/v2/transactions?accountId=acc-1&after=eyJpZCI6InQxIn0="))
+                .andRespond(withSuccess("""
+                        {"results":[{"id":"t2","description":"Pix recebido - Y","amount":20,"type":"CREDIT",
+                          "status":"POSTED","date":"2026-10-29T10:00:00.000Z"}],"next":null}
+                        """, MediaType.APPLICATION_JSON));
+
+        var transactions = client.listTransactions("acc-1");
+
+        assertThat(transactions).extracting(PluggyClient.PluggyTransaction::id).containsExactly("t1", "t2");
+        server.verify();
+    }
+
+    @Test
     void listTransactions_followsTheCursorUntilTheLastPage() {
         expectAuth("key-1");
         server.expect(requestTo(BASE + "/v2/transactions?accountId=acc-1"))
