@@ -150,6 +150,30 @@ class MerchantAliasServiceTest {
     }
 
     @Test
+    void suggest_ignoresAWordSharedOnlyOutsideTheMerchantName() {
+        givenAliases(
+                alias("boliche strike osasco", "Boliche", Instant.now()),
+                alias("bytedance brasil tecnologia", "Tenis no pai", Instant.now()),
+                alias("a goncalves vilanova producoes", "Pagamento pró-labore", Instant.now()),
+                alias("cp parc shopping inter", "TV", Instant.now()));
+        var aliases = service.load(userId);
+
+        // Cidade, ramo, sobrenome e banco em comum não fazem o mesmo estabelecimento.
+        assertThat(service.suggest("Ifd*ifood Club Osasco Bra", aliases)).isNull();
+        assertThat(service.suggest("Bmg Tecnologia Em Informacao Ltda", aliases)).isNull();
+        assertThat(service.suggest("Andre Goncalves Vilanova", aliases)).isNull();
+        assertThat(service.suggest("Pagamento Fatura - ANDRE GONCALVES VILANOVA", aliases)).isNull();
+        assertThat(service.suggest("Cdb Porq Obj Banco Inter S A", aliases)).isNull();
+    }
+
+    @Test
+    void suggest_doesNotLinkMerchantsByAGenericFirstWord() {
+        givenAliases(alias("banco inter s a", "Inter", Instant.now()));
+
+        assertThat(service.suggest("BANCO DO BRASIL S A", service.load(userId))).isNull();
+    }
+
+    @Test
     void suggest_returnsNullWhenTheDescriptionHasNoIdentifiableMerchant() {
         givenAliases(alias("claude sub", "Claude - mensalidade", Instant.now()));
 

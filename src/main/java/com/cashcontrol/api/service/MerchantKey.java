@@ -98,6 +98,15 @@ public final class MerchantKey {
      */
     private static final Set<String> STOPWORD_TOKENS = Set.of("ltda", "eireli");
 
+    /**
+     * Palavras que abrem a descrição de lançamentos de muitos estabelecimentos diferentes
+     * ("BANCO INTER", "BANCO DO BRASIL"; "PAGAMENTO FATURA", "PAGAMENTO BOLETO"). Como
+     * primeira palavra elas dizem o tipo de operação, não quem é a outra ponta.
+     */
+    private static final Set<String> GENERIC_HEAD_TOKENS = Set.of(
+            "banco", "pagamento", "pagto", "compra", "transferencia", "fatura", "cartao",
+            "debito", "credito", "recebido", "enviado", "saque", "deposito", "boleto", "tarifa");
+
     private MerchantKey() {}
 
     /**
@@ -146,11 +155,9 @@ public final class MerchantKey {
      * <p>Existe porque {@link #of} só normaliza formatação: o emissor manda a mesma
      * assinatura com grafias diferentes de um mês para o outro ({@code ANTHROPIC},
      * {@code CLAUDE.AI SUBSCRIPTION}, {@code ANTHROPIC* CLAUDE SUB}) e nenhuma delas
-     * reduz à chave da outra. Quem consulta a memória por estabelecimento — categoria
-     * ({@code CategorySuggester}) e apelido ({@code MerchantAliasService}) — cai neste
-     * casamento por palavra quando a chave exata não bate, e precisa dos dois usando a
-     * mesma heurística: duas cópias seriam duas chances de divergir sobre o que conta
-     * como token significativo.
+     * reduz à chave da outra. A sugestão de categoria ({@code CategorySuggester}) cai
+     * neste casamento por palavra quando a chave exata não bate; o apelido usa a versão
+     * mais estrita, {@link #headToken}, com o mesmo critério de token significativo.
      *
      * <p>A ordem (mais longo primeiro) é o critério de desempate quando mais de um token
      * da linha tem entrada na memória: o token mais longo é o mais específico.
@@ -164,5 +171,30 @@ public final class MerchantKey {
                 .distinct()
                 .sorted(Comparator.comparingInt(String::length).reversed())
                 .toList();
+    }
+
+    /**
+     * A palavra que identifica o estabelecimento para o casamento aproximado do apelido: o
+     * primeiro token significativo da chave, na ordem do texto.
+     *
+     * <p>O apelido reescreve o nome do lançamento, então casar por qualquer palavra em comum
+     * erra feio: cidade ({@code IFOOD ... OSASCO} virava o apelido de outro lugar de Osasco),
+     * ramo ({@code BMG TECNOLOGIA} pegava o de {@code BYTEDANCE BRASIL TECNOLOGIA}), banco
+     * ({@code CDB ... BANCO INTER} pegava o de {@code CP PARC SHOPPING INTER}) ou sobrenome.
+     * A primeira palavra é a que o emissor mantém quando muda o resto da grafia
+     * ({@code CLAUDE SUB} / {@code CLAUDE.AI SUBSCRIPTION}).
+     *
+     * @return {@code null} quando a primeira palavra significativa é genérica (ver
+     *         {@link #GENERIC_HEAD_TOKENS}) ou não há nenhuma — aí só a chave exata vale
+     */
+    public static String headToken(String merchantKey) {
+        if (merchantKey == null) {
+            return null;
+        }
+        return Arrays.stream(merchantKey.split(" "))
+                .filter(token -> token.length() >= MIN_TOKEN_LENGTH && !STOPWORD_TOKENS.contains(token))
+                .findFirst()
+                .filter(token -> !GENERIC_HEAD_TOKENS.contains(token))
+                .orElse(null);
     }
 }

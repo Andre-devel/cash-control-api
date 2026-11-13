@@ -36,7 +36,8 @@ public class MerchantAliasService {
 
     /**
      * Os apelidos do usuário indexados das duas formas que {@link #suggest} consulta: por
-     * {@code merchantKey} exato e por token significativo.
+     * {@code merchantKey} exato e pela primeira palavra do estabelecimento
+     * ({@link MerchantKey#headToken}).
      */
     public record Aliases(Map<String, String> byMerchantKey, Map<String, String> byToken) {
 
@@ -56,17 +57,19 @@ public class MerchantAliasService {
 
         for (MerchantAlias alias : aliases) {
             byMerchantKey.put(alias.getMerchantKey(), alias.getDisplayName());
-            for (String token : MerchantKey.significantTokens(alias.getMerchantKey())) {
-                // Dois estabelecimentos podem compartilhar um token ("CLAUDE.AI" e
-                // "ANTHROPIC* CLAUDE SUB"); vence o apelido confirmado mais recentemente,
-                // que é a decisão mais atual do usuário sobre aquela palavra.
-                Instant current = byTokenAge.get(token);
-                if (current != null && current.isAfter(alias.getUpdatedAt())) {
-                    continue;
-                }
-                byTokenAge.put(token, alias.getUpdatedAt());
-                byToken.put(token, alias.getDisplayName());
+            String token = MerchantKey.headToken(alias.getMerchantKey());
+            if (token == null) {
+                continue;
             }
+            // Duas grafias do mesmo emissor podem abrir com a mesma palavra ("CLAUDE AI
+            // SUBSCRIPTION" e "CLAUDE SUB"); vence o apelido confirmado mais recentemente,
+            // que é a decisão mais atual do usuário sobre aquele estabelecimento.
+            Instant current = byTokenAge.get(token);
+            if (current != null && current.isAfter(alias.getUpdatedAt())) {
+                continue;
+            }
+            byTokenAge.put(token, alias.getUpdatedAt());
+            byToken.put(token, alias.getDisplayName());
         }
         return new Aliases(byMerchantKey, byToken);
     }
@@ -75,8 +78,10 @@ public class MerchantAliasService {
      * O apelido para uma linha da prévia, ou {@code null} quando o usuário nunca renomeou
      * aquele estabelecimento.
      *
-     * <p>Chave exata primeiro; depois o token mais específico, pelo mesmo motivo que a
-     * sugestão de categoria tem esse fallback — ver {@link MerchantKey#significantTokens}.
+     * <p>Chave exata primeiro; depois a primeira palavra do estabelecimento
+     * ({@link MerchantKey#headToken}). Mais estrito que o fallback da categoria, que aceita
+     * qualquer palavra em comum: categoria errada é um palpite, apelido errado troca o nome
+     * do lançamento — e, confirmado sem perceber, vira apelido gravado e se espalha.
      *
      * @param originalDescription a descrição como o arquivo a trouxe, nunca uma já editada
      */
@@ -91,13 +96,8 @@ public class MerchantAliasService {
             return exact;
         }
 
-        for (String token : MerchantKey.significantTokens(merchantKey)) {
-            String fromToken = aliases.byToken().get(token);
-            if (fromToken != null) {
-                return fromToken;
-            }
-        }
-        return null;
+        String token = MerchantKey.headToken(merchantKey);
+        return token == null ? null : aliases.byToken().get(token);
     }
 
     /**
