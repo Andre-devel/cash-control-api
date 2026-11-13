@@ -431,7 +431,15 @@ public class BankConnectionService {
         syncInvestments(connection, run, problems);
         boolean bankUpdated = previous == null || (item.lastUpdatedAt() != null && item.lastUpdatedAt().isAfter(previous));
         if (previous != null && bankUpdated) {
+            int problemsBefore = problems.size();
             run.setTransactionsQueued(queueSince(connection, previous, problems));
+            if (problems.size() > problemsBefore) {
+                // A fila não leu tudo: mantém o marco antigo para a próxima rodada reler a mesma
+                // janela. Avançá-lo perdia de vez o que chegou enquanto a leitura falhava (a fila
+                // ignora linha repetida, então reler não duplica).
+                connection.setLastSyncedAt(previous);
+                connectionRepository.save(connection);
+            }
         }
         if (run.getOutcome() == BankSyncOutcome.ERROR) {
             return response;

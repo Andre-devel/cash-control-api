@@ -5,6 +5,7 @@ package com.cashcontrol.api;
  * 30 de Outubro. de 2026
  */
 
+import com.cashcontrol.api.domain.exception.BankProviderException;
 import com.cashcontrol.api.config.PostgresTestContainerConfig;
 import com.cashcontrol.api.domain.entity.AccountType;
 import com.cashcontrol.api.domain.entity.PushSubscription;
@@ -52,6 +53,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
@@ -220,6 +222,24 @@ class BankPendingApiIntegrationTest {
         assertThat(pendingCount()).isEqualTo(1);
         assertThat(sentPayloads()).singleElement().asString().contains("Ciclano");
 
+        bankConnectionService.poll(connectionId);
+        assertThat(pendingCount()).isEqualTo(1);
+    }
+
+    @Test
+    void poll_whenReadingTheQueueFails_keepsTheWindowForTheNextRun() throws Exception {
+        Instant lastSync = Instant.parse("2026-10-30T10:00:00Z");
+        bankTransaction("after", "Pix recebido - Ciclano", "40", "CREDIT", lastSync.plusSeconds(3600));
+        bankConnectionService.poll(connectionId);
+
+        when(pluggyClient.getItem(itemId)).thenReturn(Optional.of(new PluggyItem(itemId, "UPDATED", null,
+                userId.toString(), lastSync.plusSeconds(7200), new PluggyItem.Connector("Inter"), null)));
+        when(pluggyClient.listTransactions(externalAccountId))
+                .thenThrow(new BankProviderException("INVALID_CURSOR", null));
+        bankConnectionService.poll(connectionId);
+        assertThat(pendingCount()).isZero();
+
+        doAnswer(invocation -> List.copyOf(bankTransactions)).when(pluggyClient).listTransactions(externalAccountId);
         bankConnectionService.poll(connectionId);
         assertThat(pendingCount()).isEqualTo(1);
     }
