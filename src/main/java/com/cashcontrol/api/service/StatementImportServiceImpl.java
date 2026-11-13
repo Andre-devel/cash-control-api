@@ -244,6 +244,9 @@ public class StatementImportServiceImpl implements StatementImportService {
         List<ImportRowError> errors = new ArrayList<>();
         int skippedDuplicates = 0;
         int importedByOwnFlow = 0;
+        // Só o que é de antes da conta existir aqui já está no saldo informado na criação; o
+        // que veio depois é movimento novo e precisa mexer no saldo.
+        LocalDate accountCreatedOn = createdOn(account);
         BigDecimal netChange = BigDecimal.ZERO;
         LocalDate earliest = null;
 
@@ -265,8 +268,10 @@ public class StatementImportServiceImpl implements StatementImportService {
                 if (row.type() == TransactionType.TRANSFER || row.type() == TransactionType.INVOICE_PAYMENT) {
                     importedByOwnFlow++;
                 }
-                netChange = netChange.add(balanceEffect(row));
-                earliest = earliest == null || row.date().isBefore(earliest) ? row.date() : earliest;
+                if (row.date().isBefore(accountCreatedOn)) {
+                    netChange = netChange.add(balanceEffect(row));
+                    earliest = earliest == null || row.date().isBefore(earliest) ? row.date() : earliest;
+                }
             } catch (BusinessRuleException | ResourceNotFoundException e) {
                 errors.add(new ImportRowError(row.lineNumber(), e.getMessage()));
             }
@@ -275,8 +280,9 @@ public class StatementImportServiceImpl implements StatementImportService {
         transactionRepository.saveAll(toSave);
 
         if (Boolean.TRUE.equals(request.keepCurrentBalance()) && netChange.signum() != 0) {
-            // O histórico importado já está no saldo da conta: compensa-o antes do primeiro
+            // O histórico de antes da conta já está no saldo dela: compensa-o antes do primeiro
             // lançamento, para o saldo atual (e o de cada dia depois disso) ficar como estava.
+            // Compensar também as linhas posteriores apagava movimento real do saldo.
             accountService.manualAdjustment(account.getId(), new ManualAdjustmentRequest(
                     netChange.negate(), "Saldo de abertura (importação de extrato)", earliest.minusDays(1)), userId);
         }

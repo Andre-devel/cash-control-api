@@ -166,6 +166,26 @@ class StatementImportIntegrationTest {
     }
 
     @Test
+    void commit_keepingCurrentBalance_compensatesOnlyWhatPredatesTheAccount() {
+        LocalDate today = LocalDate.now();
+        ImportCommitRow before = new ImportCommitRow(1, "ref-antes", today.minusDays(10), "Mercado", "Mercado",
+                new BigDecimal("50.00"), TransactionType.EXPENSE, PaymentMethodSlug.PIX, null, null, null, null);
+        ImportCommitRow after = new ImportCommitRow(2, "ref-depois", today, "Salario", "Salario",
+                new BigDecimal("899.75"), TransactionType.INCOME, PaymentMethodSlug.PIX, null, null, null, null);
+
+        statementImportService.commit(
+                new ImportCommitRequest(accountId, StatementFormat.INTER_CSV, List.of(before, after), true), userId);
+
+        // O Mercado já estava no saldo informado ao criar a conta; o salário de hoje é novo.
+        assertThat(transactionRepository.sumPaidAmountByAccountIdAndUserId(accountId, userId))
+                .isEqualByComparingTo("899.75");
+        assertThat(transactionRepository.findAllByAccount_IdAndUserId(accountId, userId, PageRequest.of(0, 50)))
+                .filteredOn(tx -> tx.getType() == TransactionType.MANUAL_ADJUSTMENT)
+                .singleElement()
+                .satisfies(tx -> assertThat(tx.getAmount()).isEqualByComparingTo("50.00"));
+    }
+
+    @Test
     void importedInvoicePayment_keepsItsExternalRef_soReimportIsANoOp() {
         UUID cardId = creditCardService.createCard(new CreateCardRequest("Inter", CardBrand.MASTERCARD, "Inter",
                 null, new BigDecimal("10000.00"), 10, 17, null), userId).id();
