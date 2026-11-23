@@ -252,7 +252,34 @@ class TransactionControllerIT {
                 .andExpect(jsonPath("$.expenseAmount").value(300.50))
                 .andExpect(jsonPath("$.expenseCount").value(1))
                 .andExpect(jsonPath("$.invoicePaymentCount").value(0))
-                .andExpect(jsonPath("$.netAmount").value(719.50));
+                .andExpect(jsonPath("$.netAmount").value(719.50))
+                .andExpect(jsonPath("$.invoicePaymentInNet").value(false));
+
+        // Sem as compras do cartão (o padrão da tela), o resultado é o caixa: a fatura paga entra.
+        // O pagamento é gravado negativo, como o recordInvoicePayment grava.
+        jdbcTemplate.update("INSERT INTO transactions (user_id, account_id, type, status, amount, description, "
+                + "competence_date, payment_date, payment_method_id) VALUES (?, ?, 'INVOICE_PAYMENT', 'PAID', -400.00, 'Fatura', ?, ?, "
+                + "(SELECT id FROM payment_methods WHERE slug = 'PIX'))",
+                userId, accountId, day, day);
+        mockMvc.perform(get("/api/v1/transactions/summary")
+                        .header("Authorization", bearer())
+                        .param("competenceDateFrom", "2026-05-01")
+                        .param("competenceDateTo", "2026-05-31")
+                        .param("includeCreditCard", "false"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.invoicePaymentAmount").value(-400.00))
+                .andExpect(jsonPath("$.netAmount").value(319.50))
+                .andExpect(jsonPath("$.invoicePaymentInNet").value(true));
+
+        // Só os pagamentos de fatura: nenhuma compra do cartão no total, a fatura entra mesmo com a chave ligada.
+        mockMvc.perform(get("/api/v1/transactions/summary")
+                        .header("Authorization", bearer())
+                        .param("competenceDateFrom", "2026-05-01")
+                        .param("competenceDateTo", "2026-05-31")
+                        .param("type", "INVOICE_PAYMENT"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.netAmount").value(-400.00))
+                .andExpect(jsonPath("$.invoicePaymentInNet").value(true));
 
         mockMvc.perform(get("/api/v1/transactions/summary")
                         .header("Authorization", bearer())

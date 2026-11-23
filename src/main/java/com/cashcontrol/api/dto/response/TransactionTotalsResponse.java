@@ -4,8 +4,9 @@ import java.math.BigDecimal;
 
 /**
  * Totais de todas as transações que casam com um filtro da listagem, não só da página.
- * Canceladas nunca entram. Transferências e ajustes ficam de fora; pagamento de fatura tem
- * total próprio porque as compras do cartão já contam nas despesas.
+ * Canceladas nunca entram. Transferências e ajustes ficam de fora. O pagamento de fatura tem
+ * total próprio e entra no resultado só quando as compras do cartão estão fora do filtro: com
+ * elas nas despesas, contaria duas vezes.
  */
 public record TransactionTotalsResponse(
         BigDecimal incomeAmount,
@@ -14,5 +15,6 @@ public record TransactionTotalsResponse(
         long expenseCount,
         BigDecimal invoicePaymentAmount,
         long invoicePaymentCount,
-        BigDecimal netAmount
+        BigDecimal netAmount,
+        boolean invoicePaymentInNet
 ) {}

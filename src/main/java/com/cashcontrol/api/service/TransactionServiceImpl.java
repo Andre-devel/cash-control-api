@@ -481,8 +481,18 @@ public class TransactionServiceImpl implements TransactionService {
                 default -> { }
             }
         }
+        // Sem as compras do cartão, o resultado é o que saiu da conta: a fatura paga entra nele.
+        // Com elas nas despesas, a fatura contaria em dobro e fica de fora. O pagamento é gravado
+        // negativo; o total devolvido segue com o sinal de sempre.
+        boolean cardPurchasesCounted = filter.includeCreditCard()
+                && (filter.type() == null || filter.type() == TransactionType.EXPENSE);
+        boolean invoicePaymentInNet = !cardPurchasesCounted;
+        BigDecimal net = income.subtract(expense);
+        if (invoicePaymentInNet) {
+            net = net.subtract(invoicePayment.abs());
+        }
         return new TransactionTotalsResponse(income, incomeCount, expense, expenseCount,
-                invoicePayment, invoicePaymentCount, income.subtract(expense));
+                invoicePayment, invoicePaymentCount, net, invoicePaymentInNet);
     }
 
     @Override

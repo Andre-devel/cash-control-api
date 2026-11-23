@@ -153,8 +153,9 @@ public class TransactionController {
 
     @Operation(summary = "Summarize transactions", description = """
             Totals of every transaction matching the same filters as the list (all pages, not just one). \
-            Cancelled transactions never count; income includes refunds; invoice payments have their own total \
-            because the card purchases they settle already count as expenses.""")
+            Cancelled transactions never count; income includes refunds. Invoice payments have their own total; \
+            the net subtracts them only when card purchases are excluded (includeCreditCard=false), since \
+            otherwise the purchases they settle already count as expenses.""")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Totals returned"),
             @ApiResponse(responseCode = "401", description = "Missing or invalid JWT",
