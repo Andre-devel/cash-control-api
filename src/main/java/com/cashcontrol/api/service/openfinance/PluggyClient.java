@@ -419,14 +419,20 @@ public class PluggyClient {
 
     /**
      * {@code type}: BANK ou CREDIT. {@code balance}: saldo atual; no cartão, o saldo devedor.
-     * {@code creditData} só vem preenchido no cartão (na conta BANK chega vazio).
+     * {@code creditData} só vem preenchido no cartão (na conta BANK chega vazio). {@code taxNumber}:
+     * CPF ou CNPJ do titular, formatado; só na conta BANK.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record PluggyAccount(String id, String type, String subtype, String name, String marketingName, String number,
-                                BigDecimal balance, CreditData creditData) {
+                                BigDecimal balance, CreditData creditData, String taxNumber) {
 
         public PluggyAccount(String id, String type, String subtype, String name, String marketingName, String number) {
-            this(id, type, subtype, name, marketingName, number, null, null);
+            this(id, type, subtype, name, marketingName, number, null, null, null);
+        }
+
+        public PluggyAccount(String id, String type, String subtype, String name, String marketingName, String number,
+                             BigDecimal balance, CreditData creditData) {
+            this(id, type, subtype, name, marketingName, number, balance, creditData, null);
         }
     }
 

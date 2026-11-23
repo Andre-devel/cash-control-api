@@ -3,6 +3,7 @@ package com.cashcontrol.api.service;
 import com.cashcontrol.api.config.AppProperties;
 import com.cashcontrol.api.domain.entity.Account;
 import com.cashcontrol.api.domain.entity.AccountType;
+import com.cashcontrol.api.domain.entity.BankConnectionAccount;
 import com.cashcontrol.api.domain.entity.Category;
 import com.cashcontrol.api.domain.entity.CategoryRule;
 import com.cashcontrol.api.domain.entity.Invoice;
@@ -24,6 +25,7 @@ import com.cashcontrol.api.dto.response.ImportPreviewRow;
 import com.cashcontrol.api.dto.response.ImportResultResponse;
 import com.cashcontrol.api.dto.response.ImportRowError;
 import com.cashcontrol.api.repository.AccountRepository;
+import com.cashcontrol.api.repository.BankConnectionAccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CategoryRuleRepository;
 import com.cashcontrol.api.repository.InvoiceRepository;
@@ -31,6 +33,7 @@ import com.cashcontrol.api.repository.PaymentMethodRepository;
 import com.cashcontrol.api.repository.TransactionRepository;
 import com.cashcontrol.api.service.statement.ParsedStatement;
 import com.cashcontrol.api.service.openfinance.BankStatement;
+import com.cashcontrol.api.service.openfinance.Documents;
 import com.cashcontrol.api.service.openfinance.PluggyStatementSource;
 import com.cashcontrol.api.service.statement.ParsedStatementRow;
 import com.cashcontrol.api.service.statement.StatementHistoryMapper;
@@ -51,6 +54,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -85,6 +89,7 @@ public class StatementImportServiceImpl implements StatementImportService {
     private final List<StatementParser> parsers;
     private final AppProperties appProperties;
     private final PluggyStatementSource pluggyStatementSource;
+    private final BankConnectionAccountRepository connectionAccountRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -131,6 +136,7 @@ public class StatementImportServiceImpl implements StatementImportService {
                 userId, statement.rows().stream().map(ParsedStatementRow::description).toList());
         MerchantAliasService.Aliases aliases = merchantAliasService.load(userId);
         Account investmentAccount = findInvestmentAccount(account, userId);
+        Map<String, Account> ownAccounts = findOwnAccountsByTaxNumber(account, userId);
         InvoicePaymentMatcher invoices = new InvoicePaymentMatcher(loadInvoiceCandidates(statement.rows(), userId));
 
         List<ImportPreviewRow> rows = new ArrayList<>(statement.rows().size());
@@ -139,8 +145,9 @@ public class StatementImportServiceImpl implements StatementImportService {
             String ref = refs.get(i);
             boolean duplicate = alreadyImported.contains(ref);
             boolean possibleDuplicate = !duplicate && possibleDuplicates.claim(row, ref);
+            Account ownAccount = ownAccounts.get(Documents.digits(row.counterpartyDocument()));
             rows.add(toPreviewRow(row, ref, duplicate, possibleDuplicate, rules, history, aliases,
-                    investmentAccount, invoices));
+                    investmentAccount, ownAccount, invoices));
         }
 
         int duplicateCount = (int) rows.stream().filter(ImportPreviewRow::duplicate).count();
@@ -295,13 +302,14 @@ public class StatementImportServiceImpl implements StatementImportService {
     private ImportPreviewRow toPreviewRow(ParsedStatementRow row, String externalRef, boolean duplicate,
                                           boolean possibleDuplicate, List<CategoryRule> rules, CategorySuggester.History history,
                                           MerchantAliasService.Aliases aliases, Account investmentAccount,
-                                          InvoicePaymentMatcher invoices) {
+                                          Account ownAccount, InvoicePaymentMatcher invoices) {
         StatementHistoryMapper.Mapping mapping = historyMapper.map(row.rawHistory(), row.signedAmount());
         CategorySuggester.Suggestion suggestion = categorySuggester.suggest(row.description(), row.counterpartyName(), rules, history);
         String alias = merchantAliasService.suggest(row.description(), aliases);
         BigDecimal amount = row.signedAmount().abs();
 
-        // Aplicação, resgate e pagamento de fatura movem dinheiro sem ser gasto nem renda.
+        // Aplicação, resgate, Pix entre contas do próprio usuário (pró-labore, distribuição de
+        // lucros) e pagamento de fatura movem dinheiro sem ser gasto nem renda.
         // Como despesa/receita inflariam o dashboard (e a fatura contaria em dobro, já que as
         // compras dela são despesas). Sem conta de investimento ou fatura que case, fica o
         // que o histórico diz — e o usuário troca na prévia.
@@ -315,6 +323,9 @@ public class StatementImportServiceImpl implements StatementImportService {
         if (mapping.investment() && investmentAccount != null) {
             type = TransactionType.TRANSFER;
             transferAccount = investmentAccount;
+        } else if (ownAccount != null && (type == TransactionType.EXPENSE || type == TransactionType.INCOME)) {
+            type = TransactionType.TRANSFER;
+            transferAccount = ownAccount;
         } else if (type == TransactionType.EXPENSE && looksLikeInvoicePayment(row.description())) {
             // Paga a fatura inteira ou parte dela (a paga em partes casa pagamento a pagamento).
             invoice = invoices.claim(row.date(), amount);
@@ -389,6 +400,28 @@ public class StatementImportServiceImpl implements StatementImportService {
                 .filter(candidate -> !candidate.getId().equals(importedAccount.getId()))
                 .findFirst()
                 .orElse(null);
+    }
+
+    /**
+     * As outras contas do usuário ligadas ao banco, pelo CPF/CNPJ do titular: o Pix cuja
+     * contraparte tem esse documento saiu de uma conta dele para outra. Um documento com mais de
+     * uma conta não diz qual delas, e fica de fora.
+     */
+    private Map<String, Account> findOwnAccountsByTaxNumber(Account importedAccount, UUID userId) {
+        Map<String, List<UUID>> byTaxNumber = connectionAccountRepository.findLinkedWithTaxNumber(userId).stream()
+                .collect(Collectors.groupingBy(BankConnectionAccount::getTaxNumber,
+                        Collectors.mapping(BankConnectionAccount::getAccountId, Collectors.toList())));
+        Map<UUID, Account> accounts = accountRepository
+                .findAllByUserIdAndDeletedAtIsNullAndArchivedAtIsNullOrderBySortOrderAscCreatedAtAsc(userId).stream()
+                .filter(candidate -> !candidate.getId().equals(importedAccount.getId()))
+                .collect(Collectors.toMap(Account::getId, Function.identity()));
+        Map<String, Account> own = new HashMap<>();
+        byTaxNumber.forEach((taxNumber, ids) -> {
+            if (ids.size() == 1 && accounts.containsKey(ids.getFirst())) {
+                own.put(taxNumber, accounts.get(ids.getFirst()));
+            }
+        });
+        return own;
     }
 
     private List<Invoice> loadInvoiceCandidates(List<ParsedStatementRow> rows, UUID userId) {
@@ -480,6 +513,15 @@ public class StatementImportServiceImpl implements StatementImportService {
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found: " + row.transferAccountId()));
 
         boolean outgoing = row.outgoing();
+        // O outro lado já foi importado e criou as duas pernas: esta só ganha a chave do banco.
+        List<Transaction> open = transactionRepository.findOpenTransferLegs(userId, account.getId(), counterpart.getId(),
+                outgoing ? row.amount().negate() : row.amount(), row.date());
+        if (!open.isEmpty()) {
+            Transaction leg = open.getFirst();
+            leg.setExternalRef(row.externalRef());
+            transactionRepository.save(leg);
+            return;
+        }
         List<Transaction> legs = accountService.transfer(
                 outgoing ? account : counterpart,
                 outgoing ? counterpart : account,

@@ -26,6 +26,7 @@ import com.cashcontrol.api.dto.response.ImportResultResponse;
 import com.cashcontrol.api.dto.response.ImportRowError;
 import com.cashcontrol.api.dto.response.SuggestionSource;
 import com.cashcontrol.api.repository.AccountRepository;
+import com.cashcontrol.api.repository.BankConnectionAccountRepository;
 import com.cashcontrol.api.repository.CategoryRepository;
 import com.cashcontrol.api.repository.CategoryRuleRepository;
 import com.cashcontrol.api.repository.InvoiceRepository;
@@ -84,6 +85,7 @@ class StatementImportServiceTest {
     @Mock private AccountService accountService;
     @Mock private CreditCardService creditCardService;
     @Mock private PluggyStatementSource pluggyStatementSource;
+    @Mock private BankConnectionAccountRepository connectionAccountRepository;
 
     private StatementImportServiceImpl service;
 
@@ -120,7 +122,7 @@ class StatementImportServiceTest {
                 new StatementRowHasher(),
                 List.of(new InterCsvStatementParser()),
                 new AppProperties(),
-                pluggyStatementSource);
+                pluggyStatementSource, connectionAccountRepository);
     }
 
     // ── preview ───────────────────────────────────────────────────────────────
@@ -433,7 +435,7 @@ class StatementImportServiceTest {
                 categoryRepository, categoryRuleRepository,
                 paymentMethodRepository, new CategorySuggester(transactionRepository, new CategoryRuleMatcher()),
                 new MerchantAliasService(merchantAliasRepository),
-                new StatementHistoryMapper(), new StatementRowHasher(), List.of(), new AppProperties(), pluggyStatementSource);
+                new StatementHistoryMapper(), new StatementRowHasher(), List.of(), new AppProperties(), pluggyStatementSource, connectionAccountRepository);
 
         assertThatThrownBy(() -> withoutParsers.preview(fixture(), StatementFormat.INTER_CSV, accountId, userId))
                 .isInstanceOf(BusinessRuleException.class)
@@ -987,6 +989,6 @@ class StatementImportServiceTest {
                 new StatementRowHasher(),
                 List.of(new InterCsvStatementParser()),
                 properties,
-                pluggyStatementSource);
+                pluggyStatementSource, connectionAccountRepository);
     }
 }

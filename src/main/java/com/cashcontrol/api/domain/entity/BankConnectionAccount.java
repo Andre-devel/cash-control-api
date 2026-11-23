@@ -71,4 +71,8 @@ public class BankConnectionAccount {
 
     @Column(name = "credit_available", precision = 15, scale = 2)
     private BigDecimal creditAvailable;
+
+    /** CPF ou CNPJ do titular, só os dígitos; reconhece o Pix entre contas do próprio usuário. */
+    @Column(name = "tax_number", length = 14)
+    private String taxNumber;
 }

@@ -538,6 +538,7 @@ public class BankConnectionService {
             String name = account.marketingName() != null ? account.marketingName() : account.name();
             local.setName(truncate(name != null ? name : account.id(), 255));
             local.setNumber(truncate(account.number(), 64));
+            local.setTaxNumber(Documents.digits(account.taxNumber()));
             local.setBankBalance(account.balance());
             local.setBankBalanceAt(account.balance() != null ? readAt : null);
             local.setCreditLimit(account.creditData() != null ? account.creditData().creditLimit() : null);

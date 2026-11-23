@@ -157,6 +157,59 @@ class BankStatementImportIntegrationTest {
                 .hasMessageContaining("não está vinculada");
     }
 
+    @Test
+    void pixBetweenTheUsersOwnAccounts_comesAsATransfer_andTheOtherSideOnlyGetsTheBankKey() {
+        UUID businessId = accountService.createAccount(
+                new CreateAccountRequest("Inter CNPJ", AccountType.CHECKING, "BRL", null, 0, null), userId).id();
+        String businessExternalId = UUID.randomUUID().toString();
+        UUID connectionId = jdbcTemplate.queryForObject(
+                "INSERT INTO bank_connections (user_id, provider, item_id, status) VALUES (?, 'PLUGGY', ?, 'UPDATED') RETURNING id",
+                UUID.class, userId, UUID.randomUUID().toString());
+        jdbcTemplate.update("INSERT INTO bank_connection_accounts (connection_id, external_account_id, kind, name, number, "
+                + "account_id, tax_number) VALUES (?, ?, 'BANK', 'BANCO INTER', '765432-1', ?, '69023191000103')",
+                connectionId, businessExternalId, businessId);
+        jdbcTemplate.update("UPDATE bank_connection_accounts SET tax_number = '46426232807' WHERE account_id = ?", accountId);
+        PluggyClient.Party person = party("46426232807", "464.262.328-07");
+        PluggyClient.Party company = party(null, "69.023.191/0001-03");
+        PluggyClient.Party stranger = party("Fulano", "123.456.789-00");
+        when(pluggyClient.listTransactions(externalAccountId)).thenReturn(List.of(
+                pix("in", "Pix recebido - A Goncalves Vilanova", "3000.00", "CREDIT", company, person),
+                pix("other", "Pix recebido - Fulano", "50.00", "CREDIT", stranger, person)));
+        when(pluggyClient.listTransactions(businessExternalId)).thenReturn(List.of(
+                pix("out", "Pix enviado - Andre", "-3000.00", "DEBIT", company, person)));
+
+        ImportPreviewResponse personal = statementImportService.previewFromBank(accountId, userId, TODAY);
+
+        assertThat(personal.rows()).extracting(ImportPreviewRow::type)
+                .containsExactly(TransactionType.TRANSFER, TransactionType.INCOME);
+        assertThat(personal.rows().getFirst().transferAccountId()).isEqualTo(businessId);
+        assertThat(personal.rows().getFirst().transferAccountName()).isEqualTo("Inter CNPJ");
+        commitBank(personal.rows());
+
+        ImportPreviewResponse business = statementImportService.previewFromBank(businessId, userId, TODAY);
+        assertThat(business.rows().getFirst().type()).isEqualTo(TransactionType.TRANSFER);
+        assertThat(business.rows().getFirst().transferAccountId()).isEqualTo(accountId);
+        statementImportService.commit(new ImportCommitRequest(businessId, StatementFormat.OPEN_FINANCE,
+                toCommit(business.rows()), null), userId);
+
+        assertThat(jdbcTemplate.queryForList("SELECT external_ref FROM transactions WHERE user_id = ? AND type = 'TRANSFER' "
+                + "ORDER BY amount", String.class, userId)).containsExactly("plg:out", "plg:in");
+        assertThat(accountService.computeBalance(businessId, userId)).isEqualByComparingTo("-3000.00");
+        assertThat(accountService.computeBalance(accountId, userId)).isEqualByComparingTo("3050.00");
+    }
+
+    private static PluggyClient.Party party(String name, String document) {
+        return new PluggyClient.Party(name, new PluggyClient.DocumentNumber(document.length() > 14 ? "CNPJ" : "CPF", document),
+                null, null, null, null);
+    }
+
+    private static PluggyTransaction pix(String id, String description, String amount, String type,
+                                         PluggyClient.Party payer, PluggyClient.Party receiver) {
+        return new PluggyTransaction(id, description, new BigDecimal(amount), type, "POSTED",
+                Instant.parse("2026-08-05T15:00:00Z"), null, null,
+                new PluggyClient.PaymentData(payer, receiver, "PIX", null, "E" + id), null);
+    }
+
     private void givenBank(PluggyTransaction... transactions) {
         when(pluggyClient.listTransactions(externalAccountId)).thenReturn(List.of(transactions));
     }

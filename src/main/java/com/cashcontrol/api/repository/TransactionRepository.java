@@ -221,6 +221,19 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
            "ORDER BY t.competenceDate")
     List<Transaction> findImportedAccountMovements(@Param("userId") UUID userId);
 
+    /**
+     * A perna desta conta numa transferência com {@code counterpartId} que ainda não veio do banco:
+     * o outro lado foi importado antes e criou as duas. Mesmo valor (com sinal) e mesma data.
+     */
+    @Query("SELECT t FROM Transaction t WHERE t.userId = :userId AND t.account.id = :accountId "
+           + "AND t.type = com.cashcontrol.api.domain.entity.TransactionType.TRANSFER "
+           + "AND t.externalRef IS NULL AND t.cancelledAt IS NULL AND t.amount = :amount AND t.competenceDate = :date "
+           + "AND EXISTS (SELECT 1 FROM Transaction o WHERE o.transferGroupId = t.transferGroupId "
+           + "AND o.account.id = :counterpartId AND o.id <> t.id) ORDER BY t.createdAt")
+    List<Transaction> findOpenTransferLegs(@Param("userId") UUID userId, @Param("accountId") UUID accountId,
+                                           @Param("counterpartId") UUID counterpartId,
+                                           @Param("amount") BigDecimal amount, @Param("date") LocalDate date);
+
     List<Transaction> findAllByRecurrenceRule_Id(UUID recurrenceRuleId);
 
     List<Transaction> findAllByRecurrenceRule_IdAndStatusIn(UUID recurrenceRuleId, List<TransactionStatus> statuses);
