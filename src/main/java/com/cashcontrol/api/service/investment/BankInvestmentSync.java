@@ -178,11 +178,16 @@ public class BankInvestmentSync {
         Optional<FixedIncomeHolding> existing = holdingRepository.findByUserIdAndExternalIdAndDeletedAtIsNull(userId, investment.id());
         boolean withdrawn = "TOTAL_WITHDRAWAL".equals(investment.status());
         if (existing.isEmpty()) {
-            if (creatable(investment, today)) {
-                create(investment, accountId, userId, today);
-                return Applied.CREATED;
+            if (!creatable(investment, today)) {
+                return Applied.NONE;
             }
-            return Applied.NONE;
+            Optional<FixedIncomeHolding> manual = manualTwin(investment, accountId);
+            if (manual.isPresent()) {
+                adopt(manual.get(), investment, today);
+                return Applied.NONE;
+            }
+            create(investment, accountId, userId, today);
+            return Applied.CREATED;
         }
         FixedIncomeHolding holding = existing.get();
         if (holding.getStatus() != FixedIncomeStatus.ACTIVE) {
@@ -194,6 +199,29 @@ public class BankInvestmentSync {
         }
         refresh(holding, investment, today);
         return Applied.NONE;
+    }
+
+    /**
+     * A aplicação cadastrada à mão (em geral pela transferência que a pagou) que é a mesma do banco:
+     * ativa, sem resgate, com o mesmo principal e a até {@value #MATCH_DAYS} dias. Sem isso, cada
+     * aplicação registrada depois da primeira leitura apareceria duas vezes.
+     */
+    private Optional<FixedIncomeHolding> manualTwin(PluggyInvestment investment, UUID accountId) {
+        BigDecimal principal = money(investment.amountOriginal());
+        LocalDate appliedAt = localDate(investment.purchaseDate());
+        return holdingRepository.findAllByAccountIdAndDeletedAtIsNull(accountId).stream()
+                .filter(holding -> holding.getExternalId() == null && holding.getStatus() == FixedIncomeStatus.ACTIVE)
+                .filter(holding -> holding.getPrincipal().compareTo(principal) == 0)
+                .filter(holding -> daysApart(holding.getAppliedAt(), appliedAt) <= MATCH_DAYS)
+                .filter(holding -> !redemptionRepository.existsByHoldingId(holding.getId()))
+                .min(Comparator.comparingLong(holding -> daysApart(holding.getAppliedAt(), appliedAt)));
+    }
+
+    /** A manual passa a ser a do banco: mantém nome, taxa e transferência, e recebe o id e o valor dele. */
+    private void adopt(FixedIncomeHolding holding, PluggyInvestment investment, LocalDate today) {
+        holding.setExternalId(investment.id());
+        refresh(holding, investment, today);
+        log.info("Bank investments: manual holding {} linked to bank investment {}", holding.getId(), investment.id());
     }
 
     private List<PendingInvestmentTransferResponse> pending(UUID userId, UUID accountId, LocalDate today, Direction direction) {

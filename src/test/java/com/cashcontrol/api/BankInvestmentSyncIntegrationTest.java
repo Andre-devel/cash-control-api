@@ -215,6 +215,34 @@ class BankInvestmentSyncIntegrationTest {
     }
 
     @Test
+    void holdingRegisteredByHandAfterTheFirstSync_isLinkedToTheBankOne_notDuplicated() {
+        when(pluggyClient.listInvestments(ITEM)).thenReturn(List.of(
+                cdb("inv-1", "1000.00", "1010.00", TODAY.minusDays(29), "ACTIVE", "100")));
+        sync.sync(userId, ITEM);
+
+        // A aplicação nova é registrada pela transferência antes que o banco a mostre.
+        accountService.createTransfer(new TransferRequest(checkingId, investmentId, new BigDecimal("2000.00"),
+                "Aplicação CDB", TODAY.minusDays(3)), userId);
+        UUID transfer = investmentService.listPendingTransfers(userId, TODAY).getFirst().transferGroupId();
+        FixedIncomeHoldingResponse manual = investmentService.createHolding(new FixedIncomeHoldingRequest(investmentId,
+                FixedIncomeKind.CDB, FixedIncomeIndexer.CDI_PERCENT, new BigDecimal("100"), "CDB à mão", null, null, null,
+                TODAY.minusDays(3), null, new BigDecimal("2000.00"), null, null, null, transfer, null), userId, TODAY);
+        when(pluggyClient.listInvestments(ITEM)).thenReturn(List.of(
+                cdb("inv-1", "1000.00", "1010.00", TODAY.minusDays(29), "ACTIVE", "100"),
+                cdb("inv-2", "2000.00", "2003.00", TODAY.minusDays(3), "ACTIVE", "100")));
+        sync.sync(userId, ITEM);
+
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM fixed_income_holdings WHERE user_id = ? "
+                + "AND deleted_at IS NULL", Integer.class, userId)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("SELECT external_id FROM fixed_income_holdings WHERE id = ?",
+                String.class, manual.id())).isEqualTo("inv-2");
+        assertThat(jdbcTemplate.queryForObject("SELECT manual_value FROM fixed_income_holdings WHERE id = ?",
+                BigDecimal.class, manual.id())).isEqualByComparingTo("2003.00");
+        assertThat(funding("inv-2")).isEqualTo(transfer);
+        assertThat(accountService.computeBalance(investmentId, userId)).isEqualByComparingTo("3000.00");
+    }
+
+    @Test
     void withTwoInvestmentAccounts_nothingIsTouched() {
         createAccount("Corretora", AccountType.INVESTMENT);
         when(pluggyClient.listInvestments(ITEM)).thenReturn(List.of(
